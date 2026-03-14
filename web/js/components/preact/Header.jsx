@@ -335,14 +335,14 @@ export function Header({ version = VERSION }) {
           </div>
 
           {/* Desktop Navigation */}
-          <nav className="hidden md:block" style={{ position: 'relative', zIndex: 20 }}>
+          <nav className="hidden lg:block" style={{ position: 'relative', zIndex: 20 }}>
             <ul className="flex list-none m-0 p-0">
               {navItems.map(renderNavItem)}
             </ul>
           </nav>
 
           {/* User Menu (Desktop) */}
-          <div className="user-menu hidden md:flex items-center">
+          <div className="user-menu hidden xl:flex items-center">
             {renderLanguageSelector()}
             {demoMode && !localStorage.getItem('auth') && (
               <span className="mr-2 px-2 py-0.5 text-xs rounded" style={{backgroundColor: 'hsl(var(--accent))', color: 'hsl(var(--accent-foreground))'}}>{t('auth.demoMode')}</span>
@@ -381,7 +381,7 @@ export function Header({ version = VERSION }) {
 
           {/* Mobile Menu Button */}
           <button
-              className="md:hidden p-2 focus:outline-none"
+              className="xl:hidden p-2 focus:outline-none"
               style={{color: 'hsl(var(--card-foreground))'}}
               onClick={toggleMobileMenu}
               aria-label={t('nav.toggleMenu')}
@@ -394,7 +394,7 @@ export function Header({ version = VERSION }) {
 
         {/* Mobile Navigation */}
         {mobileMenuOpen && (
-            <div className="md:hidden mt-2 border-t pt-2 container mx-auto px-4" style={{borderColor: 'hsl(var(--border))'}}>
+            <div className="xl:hidden mt-2 border-t pt-2 container mx-auto px-4" style={{borderColor: 'hsl(var(--border))'}}>
               <ul className="list-none m-0 p-0 flex flex-col w-full">
                 <li className="w-full">{renderLanguageSelector(true)}</li>
                 {navItems.map(renderNavItem)}
