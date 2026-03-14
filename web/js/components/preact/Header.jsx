@@ -43,7 +43,7 @@ export function Header({ version = VERSION }) {
   const [authEnabled, setAuthEnabled] = useState(true); // Default to true while loading
   const [demoMode, setDemoMode] = useState(false); // Demo mode state
   const [userRole, _setUserRole] = useState(localStorage.getItem('userrole') || null); // null = still loading
-  const { t, locale, localePreference, setLocalePreference, availableLocales, AUTO_LOCALE } = useI18n();
+  const { t, locale, setLocalePreference, availableLocales } = useI18n();
 
   const setUsername = (username) => {
     _setUsername(username);
@@ -237,10 +237,6 @@ export function Header({ version = VERSION }) {
   const isAdmin = userRole === null || userRole === 'admin';
   const canEditCurrentUser = authEnabled && !demoMode && Boolean(currentUser?.id);
   const displayUsername = username || (demoMode ? t('auth.demoViewer') : t('auth.user'));
-  const activeLocale = availableLocales.find((item) => item.code === locale);
-  const browserDefaultLabel = activeLocale
-    ? `${t('language.browserDefault')} (${activeLocale.nativeName})`
-    : t('language.browserDefault');
 
   // Navigation items - don't preserve query parameters when navigating via header
   // Admin-only tabs (System, Users) are hidden from non-admin roles.
@@ -252,15 +248,6 @@ export function Header({ version = VERSION }) {
     ...(isAdmin ? [{ id: 'nav-users', href: 'users.html', label: t('nav.users') }] : []),
     ...(isAdmin ? [{ id: 'nav-system', href: 'system.html', label: t('nav.system') }] : []),
   ];
-
-  const handleLocaleSelection = useCallback(async (value) => {
-    try {
-      await setLocalePreference(value === AUTO_LOCALE ? null : value);
-    } catch (error) {
-      console.error('Error changing locale:', error);
-      showStatusMessage(t('language.changeError'), 'error', 5000);
-    }
-  }, [AUTO_LOCALE, setLocalePreference, t]);
 
   // Render navigation item
   const renderNavItem = (item, mobile = false) => {
@@ -333,12 +320,9 @@ export function Header({ version = VERSION }) {
       <select
         aria-label={t('language.label')}
         className="rounded border border-input bg-background px-2 py-1 text-sm text-foreground"
-        value={localePreference || AUTO_LOCALE}
-        onChange={(e) => {
-          void handleLocaleSelection(e.currentTarget.value);
-        }}
+        value={locale}
+        onChange={(e) => setLocalePreference(e.currentTarget.value)}
       >
-        <option value={AUTO_LOCALE}>{browserDefaultLabel}</option>
         {availableLocales.map((item) => (
           <option key={item.code} value={item.code}>{item.nativeName}</option>
         ))}
