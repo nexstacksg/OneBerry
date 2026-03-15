@@ -28,7 +28,7 @@ let translationsCache = new Map();
 
 const listeners = new Set();
 
-function getLocalesUrl(fileName) {
+export function getLocalesUrl(fileName) {
   const origin = typeof window !== 'undefined' && window.location?.origin
     ? window.location.origin
     : 'http://localhost';
@@ -247,6 +247,7 @@ export function useI18n() {
     availableLocales: getAvailableLocales(),
     setLocalePreference,
     AUTO_LOCALE,
+    getLocalesUrl,
   };
 }
 

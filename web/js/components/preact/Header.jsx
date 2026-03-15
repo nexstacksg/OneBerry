@@ -11,7 +11,7 @@ import { showStatusMessage } from './ToastContainer.jsx';
 import { EditUserModal } from './users/EditUserModal.jsx';
 import { getAuthHeaders, isDemoMode, validateSession } from '../../utils/auth-utils.js';
 import { forceNavigation } from '../../utils/navigation-utils.js';
-import { useI18n } from '../../i18n.js';
+import { getLocalesUrl, useI18n } from '../../i18n.js';
 
 const buildProfileFormData = (user = {}) => ({
   username: user.username || '',
@@ -254,7 +254,7 @@ export function Header({ version = VERSION }) {
     const isActive = activeNav === item.id;
     const baseClasses = "no-underline rounded transition-colors cursor-pointer border-0 font-medium " + (item.baseClasses || "");
     const desktopClasses = "px-3 py-2";
-    const mobileClasses = "block w-full px-4 py-3 text-left";
+    const mobileClasses = "block w-full px-4 py-3";
     const activeClass = isActive ? 'bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))]' : 'text-[hsl(var(--card-foreground))] hover:bg-[hsl(var(--primary)/0.8)] hover:text-[hsl(var(--primary-foreground))]';
 
     return (
@@ -296,7 +296,7 @@ export function Header({ version = VERSION }) {
       onClick: openProfileModal,
       label: displayUsername,
       classNameLi: 'ml-3',
-      baseClasses: mobile ? 'text-left' : '',
+      baseClasses: mobile ? 'text-center' : '',
     }, mobile);
   };
 
@@ -310,25 +310,54 @@ export function Header({ version = VERSION }) {
     }, mobile);
   };
 
-  const renderLanguageSelector = (mobile = false) => (
-    <li className={mobile ? 'w-full px-4 py-2' : ''}>
-      {mobile && (
-        <div className="mb-1 text-xs uppercase tracking-wide text-muted-foreground">
-          {t('language.label')}
+  const renderLanguageSelector = (mobile = false) => {
+    const images = Object.fromEntries(availableLocales.map((item) => {
+      return [item.code, (menu = false) => {
+        return <>
+          <img width="40" height="22" class="p-0 ml-3" src={getLocalesUrl(item.code + '.png')} alt={`${item.code.toUpperCase()} (${item.nativeName})`}/>
+          <span
+            style={menu ? {whiteSpace: 'nowrap'} : {}}
+            class={menu ? 'ml-1' : 'ml-3 mr-3'}
+          >{item.code.toUpperCase() + (menu ? ` (${item.nativeName})` : '')}</span>
+        </>;
+      }];
+    }));
+
+    const baseClasses = "no-underline rounded transition-colors";
+    const activeClass = 'text-[hsl(var(--card-foreground))] hover:bg-[hsl(var(--primary)/0.8)] hover:text-[hsl(var(--primary-foreground))]';
+
+    const DesktopWrapper = mobile ? ({children}) => <>{children}</> : ({children}) => <li class="mx-1">{children}</li>
+
+    return (
+      <DesktopWrapper>
+        <div
+          class={`dropdown ${baseClasses} ${activeClass} ${mobile ? ' w-full ' : ''}`}
+        >
+          <div tabindex="0" class={`flex cursor-pointer border-0 font-medium items-center ${mobile ? 'w-full px-4 py-3' : 'py-1.5'}`}>
+            {images[locale]()}
+          </div>
+          <ul
+            tabindex="-1"
+            class="rounded transition-colors dropdown-content menu bg-[hsl(var(--card))]"
+            style="width: max-content; border: 1px solid hsl(var(--primary)/0.8);"
+          >
+            {Object.keys(images).map((code) => (
+              <li
+                style="flex-flow: row nowrap;"
+                class={`flex cursor-pointer border-0 font-medium items-center cursor-pointer ${baseClasses} py-1 ${activeClass}`}
+                onClick={(e) => {
+                  setLocalePreference(code);
+                  document.activeElement.blur();
+                }}
+              >
+                {images[code](true)}
+              </li>
+            ))}
+          </ul>
         </div>
-      )}
-      <select
-        aria-label={t('language.label')}
-        className="rounded border border-input bg-background px-2 py-1 text-sm text-foreground"
-        value={locale}
-        onChange={(e) => setLocalePreference(e.currentTarget.value)}
-      >
-        {availableLocales.map((item) => (
-          <option key={item.code} value={item.code}>{item.nativeName}</option>
-        ))}
-      </select>
-    </li>
-  );
+      </DesktopWrapper>
+    );
+  };
 
   return (
       <>
@@ -377,23 +406,25 @@ export function Header({ version = VERSION }) {
         {mobileMenuOpen && (
             <div className="xl:hidden mt-2 border-t pt-2 container mx-auto px-4" style={{borderColor: 'hsl(var(--border))'}}>
               <ul className="list-none m-0 p-0 flex flex-col w-full">
-                <li className="w-full">{renderLanguageSelector(true)}</li>
                 <div className="lg:hidden">
                   {navItems.map((navItem) => renderNavItem(navItem, true))}
                 </div>
-                {authEnabled && (
-                  <li className="w-full mt-2 pt-2 border-t" style={{borderColor: 'hsl(var(--border))'}}>
-                    <div className="flex justify-between items-center px-4 py-2">
-                      <div className="flex items-center">
+                <li className="w-full mt-2 pt-2 border-t" style={{borderColor: 'hsl(var(--border))'}}>
+                  <div className="flex justify-between items-center px-4 py-2">
+                    <li class="w-full">{renderLanguageSelector(true)}</li>
+                    {authEnabled && (
+                      <>
                         {demoMode && !localStorage.getItem('auth') && (
-                          <span className="mr-2 px-2 py-0.5 text-xs rounded" style={{backgroundColor: 'hsl(var(--accent))', color: 'hsl(var(--accent-foreground))'}}>{t('auth.demoShort')}</span>
+                          <li class="w-full">
+                            <span className="mr-2 px-2 py-0.5 text-xs rounded" style={{backgroundColor: 'hsl(var(--accent))', color: 'hsl(var(--accent-foreground))'}}>{t('auth.demoShort')}</span>
+                          </li>
                         )}
                         {renderUsername(true)}
-                      </div>
-                      {demoMode && !localStorage.getItem('auth') ? renderLoginLogout(true, true) : renderLoginLogout(false, true)}
-                    </div>
-                  </li>
-                )}
+                        {demoMode && !localStorage.getItem('auth') ? renderLoginLogout(true, true) : renderLoginLogout(false, true)}
+                      </>
+                    )}
+                  </div>
+                </li>
               </ul>
             </div>
         )}

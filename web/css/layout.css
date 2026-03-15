@@ -32,8 +32,12 @@ header {
     color: hsl(var(--muted-foreground));
 }
 
+nav ul:not([class*='dropdown']) {
+    @apply flex;
+}
+
 nav ul {
-    @apply flex list-none;
+    @apply list-none;
 }
 
 nav a {
