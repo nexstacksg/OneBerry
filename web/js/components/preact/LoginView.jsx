@@ -416,9 +416,9 @@ export function LoginView() {
           </div>
         )}
 
-        <div class="text-center mt-4 list-none">
+        <ul className="list-none flex justify-center mt-4 p-0">
           <LanguageSelector/>
-        </div>
+        </ul>
       </div>
     </section>
   );

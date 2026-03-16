@@ -258,15 +258,18 @@ export function Header({ version = VERSION }) {
     const mobileClasses = "block w-full px-4 py-3";
     const activeClass = isActive ? 'bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))]' : 'text-[hsl(var(--card-foreground))] hover:bg-[hsl(var(--primary)/0.8)] hover:text-[hsl(var(--primary-foreground))]';
 
+    const isDisabled = item.disabled === true;
     return (
         <li className={mobile ? "w-full" : item.classNameLi ? item.classNameLi : "mx-1"}>
           <a
-              href={item.href && item.href}
+              href={isDisabled ? undefined : item.href}
               id={item.id}
               title={item.title}
-              className={`${baseClasses} ${mobile ? mobileClasses : desktopClasses} ${activeClass}`}
-              disabled={item.disabled}
+              aria-disabled={isDisabled || undefined}
+              className={`${baseClasses} ${mobile ? mobileClasses : desktopClasses} ${activeClass}${isDisabled ? ' opacity-60 cursor-default pointer-events-none' : ''}`}
               onClick={(e) => {
+                if (isDisabled) return;
+
                 // Force navigation and prevent default behavior
                 if (item.href) {
                   forceNavigation(item.href, e);
@@ -358,16 +361,20 @@ export function Header({ version = VERSION }) {
         {mobileMenuOpen && (
             <div className="xl:hidden mt-2 border-t pt-2 container mx-auto px-4" style={{borderColor: 'hsl(var(--border))'}}>
               <ul className="list-none m-0 p-0 flex flex-col w-full">
-                <div className="lg:hidden">
-                  {navItems.map((navItem) => renderNavItem(navItem, true))}
-                </div>
+                {/* Main nav links — only shown on screens too narrow for Desktop Navigation */}
+                <li className="lg:hidden w-full">
+                  <ul className="list-none m-0 p-0 flex flex-col w-full">
+                    {navItems.map((navItem) => renderNavItem(navItem, true))}
+                  </ul>
+                </li>
+                {/* User / language section — always shown in mobile menu */}
                 <li className="w-full mt-2 pt-2 border-t" style={{borderColor: 'hsl(var(--border))'}}>
-                  <div className="flex justify-between items-center px-4 py-2">
-                    <li class="w-full"><LanguageSelector mobile={true}/></li>
+                  <ul className="list-none m-0 p-0 flex flex-row flex-wrap items-center justify-between px-4 py-2 w-full">
+                    <li className="w-full"><LanguageSelector mobile={true}/></li>
                     {authEnabled && (
                       <>
                         {demoMode && !localStorage.getItem('auth') && (
-                          <li class="w-full">
+                          <li className="w-full">
                             <span className="mr-2 px-2 py-0.5 text-xs rounded" style={{backgroundColor: 'hsl(var(--accent))', color: 'hsl(var(--accent-foreground))'}}>{t('auth.demoShort')}</span>
                           </li>
                         )}
@@ -375,7 +382,7 @@ export function Header({ version = VERSION }) {
                         {demoMode && !localStorage.getItem('auth') ? renderLoginLogout(true, true) : renderLoginLogout(false, true)}
                       </>
                     )}
-                  </div>
+                  </ul>
                 </li>
               </ul>
             </div>
