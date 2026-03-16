@@ -86,6 +86,14 @@ export function ZoneEditor({ streamName, zones = [], onZonesChange, onClose }) {
     }
   }, [streamName]);
 
+  // Read a CSS custom property and return a usable hsl() colour string.
+  // The project's theme variables are stored as bare "H S% L%" triplets so we
+  // must wrap them in hsl() before passing them to a Canvas 2D context.
+  const getThemeColor = (varName, fallback) => {
+    const val = getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
+    return val ? `hsl(${val})` : fallback;
+  };
+
   // Draw zones on canvas
   const drawCanvas = () => {
     const canvas = canvasRef.current;
@@ -129,12 +137,12 @@ export function ZoneEditor({ streamName, zones = [], onZonesChange, onClose }) {
       // Draw the image with proper aspect ratio
       ctx.drawImage(image, offsetX, offsetY, drawWidth, drawHeight);
     } else {
-      // Draw a placeholder background
-      ctx.fillStyle = '#1a1a1a';
+      // Draw a placeholder background using the current theme's card colour
+      ctx.fillStyle = getThemeColor('--card', '#ffffff');
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-      // Draw grid
-      ctx.strokeStyle = '#333';
+      // Draw grid using the current theme's border colour
+      ctx.strokeStyle = getThemeColor('--border', '#e5e7eb');
       ctx.lineWidth = 1;
       for (let i = 0; i < canvas.width; i += 50) {
         ctx.beginPath();
@@ -184,8 +192,8 @@ export function ZoneEditor({ streamName, zones = [], onZonesChange, onClose }) {
       ctx.closePath();
     }
 
-    // Fill with semi-transparent color
-    const color = zone.color || '#3b82f6';
+    // Fill with semi-transparent color; fall back to the theme primary colour
+    const color = zone.color || getThemeColor('--primary', '#6366f1');
     ctx.fillStyle = isSelected ? `${color}40` : `${color}20`;
     ctx.fill();
 
@@ -528,7 +536,7 @@ export function ZoneEditor({ streamName, zones = [], onZonesChange, onClose }) {
                 </div>
               )}
               {imageLoaded && snapshotError && (
-                <div className="absolute top-4 left-4 bg-yellow-500/20 border border-yellow-500 text-yellow-200 px-3 py-2 rounded text-sm">
+                <div className="absolute top-4 left-4 bg-[hsl(var(--warning-muted))] border border-[hsl(var(--warning))] text-[hsl(var(--warning-muted-foreground))] px-3 py-2 rounded text-sm">
                   ⚠️ {t('zoneEditor.snapshotUnavailable')}
                 </div>
               )}
@@ -551,7 +559,7 @@ export function ZoneEditor({ streamName, zones = [], onZonesChange, onClose }) {
                 </button>
                 <button
                   onClick={() => setEditMode('delete')}
-                  className={`px-4 py-2 rounded ${editMode === 'delete' ? 'bg-danger text-white' : 'bg-background'}`}
+                  className={`px-4 py-2 rounded ${editMode === 'delete' ? 'bg-[hsl(var(--danger))] text-[hsl(var(--danger-foreground))]' : 'bg-background'}`}
                 >
                   🗑️ {t('common.delete')}
                 </button>

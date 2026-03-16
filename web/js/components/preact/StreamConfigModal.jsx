@@ -422,7 +422,7 @@ export function StreamConfigModal({
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="md:col-span-2">
                   <label htmlFor="stream-name" className="block text-sm font-medium mb-2">
-                    {t('streamsConfig.streamName')} <span className="text-danger">*</span>
+                    {t('streamsConfig.streamName')} <span className="text-destructive">*</span>
                   </label>
                   <input
                     type="text"
@@ -442,7 +442,7 @@ export function StreamConfigModal({
 
                 <div className="md:col-span-2">
                   <label htmlFor="stream-url" className="block text-sm font-medium mb-2">
-                    {t('streamsConfig.streamUrl')} <span className="text-danger">*</span>
+                    {t('streamsConfig.streamUrl')} <span className="text-destructive">*</span>
                   </label>
                   <input
                     type="text"
@@ -518,7 +518,7 @@ export function StreamConfigModal({
                       type="checkbox"
                       id="stream-enabled"
                       name="enabled"
-                      className="h-4 w-4 rounded border-gray-300"
+                      className="h-4 w-4 rounded border-input"
                       style={primaryAccentStyle}
                       checked={currentStream.enabled}
                       onChange={onInputChange}
@@ -530,7 +530,7 @@ export function StreamConfigModal({
                       type="checkbox"
                       id="stream-streaming-enabled"
                       name="streamingEnabled"
-                      className="h-4 w-4 rounded border-gray-300"
+                      className="h-4 w-4 rounded border-input"
                       style={primaryAccentStyle}
                       checked={currentStream.streamingEnabled}
                       onChange={onInputChange}
@@ -545,7 +545,7 @@ export function StreamConfigModal({
                       type="checkbox"
                       id="stream-is-onvif"
                       name="isOnvif"
-                      className="h-4 w-4 rounded border-gray-300"
+                      className="h-4 w-4 rounded border-input"
                       style={primaryAccentStyle}
                       checked={currentStream.isOnvif}
                       onChange={onInputChange}
@@ -678,7 +678,7 @@ export function StreamConfigModal({
                           type="checkbox"
                           id="stream-record"
                           name="record"
-                          className="h-4 w-4 mt-0.5 rounded border-gray-300"
+                          className="h-4 w-4 mt-0.5 rounded border-input"
                           style={primaryAccentStyle}
                           checked={currentStream.record}
                           onChange={onInputChange}
@@ -701,7 +701,7 @@ export function StreamConfigModal({
                               type="checkbox"
                               id="stream-record-on-schedule"
                               name="recordOnSchedule"
-                              className="h-3.5 w-3.5 rounded border-gray-300"
+                              className="h-3.5 w-3.5 rounded border-input"
                               style={primaryAccentStyle}
                               checked={currentStream.recordOnSchedule || false}
                               onChange={onInputChange}
@@ -734,7 +734,7 @@ export function StreamConfigModal({
                         type="checkbox"
                         id="stream-detection-enabled"
                         name="detectionEnabled"
-                        className="h-4 w-4 mt-0.5 rounded border-gray-300"
+                        className="h-4 w-4 mt-0.5 rounded border-input"
                         style={primaryAccentStyle}
                         checked={currentStream.detectionEnabled}
                         onChange={onInputChange}
@@ -781,7 +781,7 @@ export function StreamConfigModal({
                         type="checkbox"
                         id="stream-record-audio"
                         name="recordAudio"
-                        className="h-4 w-4 rounded border-gray-300"
+                        className="h-4 w-4 rounded border-input"
                         style={primaryAccentStyle}
                         checked={currentStream.recordAudio}
                         onChange={onInputChange}
@@ -793,7 +793,7 @@ export function StreamConfigModal({
                         type="checkbox"
                         id="stream-backchannel-enabled"
                         name="backchannelEnabled"
-                        className="h-4 w-4 rounded border-gray-300"
+                        className="h-4 w-4 rounded border-input"
                         style={primaryAccentStyle}
                         checked={currentStream.backchannelEnabled}
                         onChange={onInputChange}
@@ -1147,14 +1147,14 @@ export function StreamConfigModal({
                           <div className="flex items-center space-x-3">
                             <div
                               className="w-4 h-4 rounded"
-                              style={{ backgroundColor: zone.color || '#3b82f6' }}
+                              style={{ backgroundColor: zone.color || 'hsl(var(--primary))' }}
                             />
                             <span className="font-medium">{zone.name}</span>
                             <span className="text-sm text-muted-foreground">
                               ({zone.polygon.length} points)
                             </span>
                           </div>
-                          <span className={`text-sm px-2 py-1 rounded ${zone.enabled ? 'bg-success/20 text-success' : 'bg-muted text-muted-foreground'}`}>
+                          <span className={`text-sm px-2 py-1 rounded ${zone.enabled ? 'bg-[hsl(var(--success-muted))] text-[hsl(var(--success-muted-foreground))]' : 'bg-muted text-muted-foreground'}`}>
                             {zone.enabled ? t('common.enabled') : t('common.disabled')}
                           </span>
                         </div>
@@ -1197,7 +1197,7 @@ export function StreamConfigModal({
                         type="checkbox"
                         id="motion-recording-enabled"
                         name="motionRecordingEnabled"
-                        className="h-4 w-4 rounded border-gray-300"
+                        className="h-4 w-4 rounded border-input"
                         style={primaryAccentStyle}
                         checked={currentStream.motionRecordingEnabled}
                         onChange={onInputChange}
