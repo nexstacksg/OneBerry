@@ -12,6 +12,7 @@ import { EditUserModal } from './users/EditUserModal.jsx';
 import { getAuthHeaders, isDemoMode, validateSession } from '../../utils/auth-utils.js';
 import { forceNavigation } from '../../utils/navigation-utils.js';
 import { useI18n } from '../../i18n.js';
+import LanguageSelector from './common/LanguageSelector.jsx';
 
 const buildProfileFormData = (user = {}) => ({
   username: user.username || '',
@@ -34,7 +35,7 @@ export function Header({ version = VERSION }) {
   // Get active navigation from data attribute on header container
   const headerContainer = document.getElementById('header-container');
   const activeNav = headerContainer?.dataset?.activeNav || '';
-  const [username, setUsername] = useState('');
+  const [username, _setUsername] = useState(localStorage.getItem('username') || '');
   const [currentUser, setCurrentUser] = useState(null);
   const [profileFormData, setProfileFormData] = useState(() => buildProfileFormData());
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
@@ -42,8 +43,18 @@ export function Header({ version = VERSION }) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [authEnabled, setAuthEnabled] = useState(true); // Default to true while loading
   const [demoMode, setDemoMode] = useState(false); // Demo mode state
-  const [userRole, setUserRole] = useState(null); // null = still loading
-  const { t, locale, localePreference, setLocalePreference, availableLocales, AUTO_LOCALE } = useI18n();
+  const [userRole, _setUserRole] = useState(localStorage.getItem('userrole') || null); // null = still loading
+  const { t } = useI18n();
+
+  const setUsername = (username) => {
+    _setUsername(username);
+    localStorage.setItem('username', username);
+  };
+
+  const setUserRole = (userrole) => {
+    _setUserRole(userrole);
+    localStorage.setItem('userrole', userrole);
+  };
 
   const syncSessionState = useCallback((session) => {
     if (session.valid && session.role) {
@@ -227,10 +238,6 @@ export function Header({ version = VERSION }) {
   const isAdmin = userRole === null || userRole === 'admin';
   const canEditCurrentUser = authEnabled && !demoMode && Boolean(currentUser?.id);
   const displayUsername = username || (demoMode ? t('auth.demoViewer') : t('auth.user'));
-  const activeLocale = availableLocales.find((item) => item.code === locale);
-  const browserDefaultLabel = activeLocale
-    ? `${t('language.browserDefault')} (${activeLocale.nativeName})`
-    : t('language.browserDefault');
 
   // Navigation items - don't preserve query parameters when navigating via header
   // Admin-only tabs (System, Users) are hidden from non-admin roles.
@@ -243,32 +250,32 @@ export function Header({ version = VERSION }) {
     ...(isAdmin ? [{ id: 'nav-system', href: 'system.html', label: t('nav.system') }] : []),
   ];
 
-  const handleLocaleSelection = useCallback(async (value) => {
-    try {
-      await setLocalePreference(value === AUTO_LOCALE ? null : value);
-    } catch (error) {
-      console.error('Error changing locale:', error);
-      showStatusMessage(t('language.changeError'), 'error', 5000);
-    }
-  }, [AUTO_LOCALE, setLocalePreference, t]);
-
   // Render navigation item
-  const renderNavItem = (item) => {
+  const renderNavItem = (item, mobile = false) => {
     const isActive = activeNav === item.id;
-    const baseClasses = "no-underline rounded transition-colors";
+    const baseClasses = "no-underline rounded transition-colors cursor-pointer border-0 font-medium " + (item.baseClasses || "");
     const desktopClasses = "px-3 py-2";
-    const mobileClasses = "block w-full px-4 py-3 text-left";
+    const mobileClasses = "block w-full px-4 py-3";
     const activeClass = isActive ? 'bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))]' : 'text-[hsl(var(--card-foreground))] hover:bg-[hsl(var(--primary)/0.8)] hover:text-[hsl(var(--primary-foreground))]';
 
     return (
-        <li className={mobileMenuOpen ? "w-full" : "mx-1"}>
+        <li className={mobile ? "w-full" : item.classNameLi ? item.classNameLi : "mx-1"}>
           <a
-              href={item.href}
+              href={item.href && item.href}
               id={item.id}
-              className={`${baseClasses} ${mobileMenuOpen ? mobileClasses : desktopClasses} ${activeClass}`}
+              title={item.title}
+              className={`${baseClasses} ${mobile ? mobileClasses : desktopClasses} ${activeClass}`}
+              disabled={item.disabled}
               onClick={(e) => {
                 // Force navigation and prevent default behavior
-                forceNavigation(item.href, e);
+                if (item.href) {
+                  forceNavigation(item.href, e);
+                }
+
+                // Call onClick function if provided
+                if (item.onClick) {
+                  item.onClick(e);
+                }
 
                 // Close mobile menu if open
                 if (mobileMenuOpen) {
@@ -283,47 +290,26 @@ export function Header({ version = VERSION }) {
   };
 
   const renderUsername = (mobile = false) => {
-    if (!canEditCurrentUser) {
-      return <span className="px-3 py-1">{displayUsername}</span>;
-    }
-
-    return (
-      <button
-        type="button"
-        className={`no-underline px-3 py-1 rounded transition-colors cursor-pointer border-0 font-medium ${mobile ? 'text-left w-full' : ''}`}
-        style={{ color: 'hsl(var(--card-foreground))', backgroundColor: 'transparent' }}
-        onMouseOver={(e) => e.currentTarget.style.backgroundColor = 'hsl(var(--primary) / 0.8)'}
-        onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
-        onClick={openProfileModal}
-        title={t('auth.editProfile')}
-      >
-        {displayUsername}
-      </button>
-    );
+    return renderNavItem({
+      id: 'nav-editProfile',
+      title: t('auth.editProfile'),
+      disabled: !canEditCurrentUser,
+      onClick: openProfileModal,
+      label: displayUsername,
+      classNameLi: 'ml-3',
+      baseClasses: mobile ? 'text-center' : '',
+    }, mobile);
   };
 
-  const renderLanguageSelector = (mobile = false) => (
-    <div className={mobile ? 'w-full px-4 py-2' : 'mr-3'}>
-      {mobile && (
-        <div className="mb-1 text-xs uppercase tracking-wide text-muted-foreground">
-          {t('language.label')}
-        </div>
-      )}
-      <select
-        aria-label={t('language.label')}
-        className="rounded border border-input bg-background px-2 py-1 text-sm text-foreground"
-        value={localePreference || AUTO_LOCALE}
-        onChange={(e) => {
-          void handleLocaleSelection(e.currentTarget.value);
-        }}
-      >
-        <option value={AUTO_LOCALE}>{browserDefaultLabel}</option>
-        {availableLocales.map((item) => (
-          <option key={item.code} value={item.code}>{item.nativeName}</option>
-        ))}
-      </select>
-    </div>
-  );
+  const renderLoginLogout = (login = false, mobile = false) => {
+    return renderNavItem({
+      id: login ? 'nav-login' : 'nav-logout',
+      href: login ? "/login.html" : "/logout",
+      label: login ? t('auth.login') : t('auth.logout'),
+      classNameLi: 'ml-2',
+      baseClasses: (mobile ? 'text-right ' : '') + (login ? 'login-link' : 'logout-link'),
+    }, mobile);
+  };
 
   return (
       <>
@@ -335,53 +321,29 @@ export function Header({ version = VERSION }) {
           </div>
 
           {/* Desktop Navigation */}
-          <nav className="hidden md:block" style={{ position: 'relative', zIndex: 20 }}>
+          <nav className="hidden lg:block" style={{ position: 'relative', zIndex: 20 }}>
             <ul className="flex list-none m-0 p-0">
-              {navItems.map(renderNavItem)}
+              {navItems.map((navItem) => renderNavItem(navItem))}
             </ul>
           </nav>
 
           {/* User Menu (Desktop) */}
-          <div className="user-menu hidden md:flex items-center">
-            {renderLanguageSelector()}
-            {demoMode && !localStorage.getItem('auth') && (
-              <span className="mr-2 px-2 py-0.5 text-xs rounded" style={{backgroundColor: 'hsl(var(--accent))', color: 'hsl(var(--accent-foreground))'}}>{t('auth.demoMode')}</span>
-            )}
-            <div className="mr-2">{renderUsername()}</div>
-            {authEnabled && (
-              demoMode && !localStorage.getItem('auth') ? (
-                <a
-                  href="/login.html"
-                  className="login-link no-underline px-3 py-1 rounded transition-colors"
-                  style={{
-                    color: 'hsl(var(--primary-foreground))',
-                    backgroundColor: 'hsl(var(--primary))'
-                  }}
-                  onMouseOver={(e) => e.currentTarget.style.backgroundColor = 'hsl(var(--primary) / 0.8)'}
-                  onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'hsl(var(--primary))'}
-                >
-                  {t('auth.login')}
-                </a>
-              ) : (
-                <a
-                  href="/logout"
-                  className="logout-link no-underline px-3 py-1 rounded transition-colors"
-                  style={{
-                    color: 'hsl(var(--card-foreground))',
-                    backgroundColor: 'transparent'
-                  }}
-                  onMouseOver={(e) => e.currentTarget.style.backgroundColor = 'hsl(var(--primary) / 0.8)'}
-                  onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
-                >
-                  {t('auth.logout')}
-                </a>
-              )
-            )}
-          </div>
+          <nav className="hidden xl:block" style={{ position: 'relative', zIndex: 20 }}>
+            <ul className="flex list-none m-0 p-0 user-menu items-center">
+              <LanguageSelector/>
+              {demoMode && !localStorage.getItem('auth') && (
+                <span className="mr-2 px-2 py-0.5 text-xs rounded" style={{backgroundColor: 'hsl(var(--accent))', color: 'hsl(var(--accent-foreground))'}}>{t('auth.demoMode')}</span>
+              )}
+              {renderUsername()}
+              {authEnabled && (
+                demoMode && !localStorage.getItem('auth') ? renderLoginLogout(true) : renderLoginLogout(false)
+              )}
+            </ul>
+          </nav>
 
           {/* Mobile Menu Button */}
           <button
-              className="md:hidden p-2 focus:outline-none"
+              className="xl:hidden p-2 focus:outline-none"
               style={{color: 'hsl(var(--card-foreground))'}}
               onClick={toggleMobileMenu}
               aria-label={t('nav.toggleMenu')}
@@ -394,49 +356,27 @@ export function Header({ version = VERSION }) {
 
         {/* Mobile Navigation */}
         {mobileMenuOpen && (
-            <div className="md:hidden mt-2 border-t pt-2 container mx-auto px-4" style={{borderColor: 'hsl(var(--border))'}}>
+            <div className="xl:hidden mt-2 border-t pt-2 container mx-auto px-4" style={{borderColor: 'hsl(var(--border))'}}>
               <ul className="list-none m-0 p-0 flex flex-col w-full">
-                <li className="w-full">{renderLanguageSelector(true)}</li>
-                {navItems.map(renderNavItem)}
-                {authEnabled && (
-                  <li className="w-full mt-2 pt-2 border-t" style={{borderColor: 'hsl(var(--border))'}}>
-                    <div className="flex justify-between items-center px-4 py-2">
-                      <div className="flex items-center">
+                <div className="lg:hidden">
+                  {navItems.map((navItem) => renderNavItem(navItem, true))}
+                </div>
+                <li className="w-full mt-2 pt-2 border-t" style={{borderColor: 'hsl(var(--border))'}}>
+                  <div className="flex justify-between items-center px-4 py-2">
+                    <li class="w-full"><LanguageSelector mobile={true}/></li>
+                    {authEnabled && (
+                      <>
                         {demoMode && !localStorage.getItem('auth') && (
-                          <span className="mr-2 px-2 py-0.5 text-xs rounded" style={{backgroundColor: 'hsl(var(--accent))', color: 'hsl(var(--accent-foreground))'}}>{t('auth.demoShort')}</span>
+                          <li class="w-full">
+                            <span className="mr-2 px-2 py-0.5 text-xs rounded" style={{backgroundColor: 'hsl(var(--accent))', color: 'hsl(var(--accent-foreground))'}}>{t('auth.demoShort')}</span>
+                          </li>
                         )}
                         {renderUsername(true)}
-                      </div>
-                      {demoMode && !localStorage.getItem('auth') ? (
-                        <a
-                          href="/login.html"
-                          className="login-link no-underline px-3 py-1 rounded transition-colors"
-                          style={{
-                            color: 'hsl(var(--primary-foreground))',
-                            backgroundColor: 'hsl(var(--primary))'
-                          }}
-                          onMouseOver={(e) => e.currentTarget.style.backgroundColor = 'hsl(var(--primary) / 0.8)'}
-                          onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'hsl(var(--primary))'}
-                        >
-                          {t('auth.login')}
-                        </a>
-                      ) : (
-                        <a
-                          href="/logout"
-                          className="logout-link no-underline px-3 py-1 rounded transition-colors"
-                          style={{
-                            color: 'hsl(var(--card-foreground))',
-                            backgroundColor: 'transparent'
-                          }}
-                          onMouseOver={(e) => e.currentTarget.style.backgroundColor = 'hsl(var(--primary) / 0.8)'}
-                          onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
-                        >
-                          {t('auth.logout')}
-                        </a>
-                      )}
-                    </div>
-                  </li>
-                )}
+                        {demoMode && !localStorage.getItem('auth') ? renderLoginLogout(true, true) : renderLoginLogout(false, true)}
+                      </>
+                    )}
+                  </div>
+                </li>
               </ul>
             </div>
         )}

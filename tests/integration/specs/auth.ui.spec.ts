@@ -143,7 +143,7 @@ test.describe('Authentication @ui @auth', () => {
     test('should show the current username in the header and open the edit profile modal', async ({ page }) => {
       await login(page, USERS.admin);
 
-      const profileButton = page.locator('button[title="Edit profile"]').filter({ hasText: USERS.admin.username }).first();
+      const profileButton = page.locator('a[title="Edit profile"]').filter({ hasText: USERS.admin.username }).first();
       await expect(profileButton).toBeVisible();
 
       await profileButton.click();
