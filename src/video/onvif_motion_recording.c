@@ -450,6 +450,7 @@ static void update_recording_state(motion_recording_context_t *ctx, time_t curre
  * Event processor thread function
  */
 static void* event_processor_thread_func(void *arg) {
+    log_set_thread_context("ONVIFMotion", NULL);
     log_info("Motion event processor thread started");
 
     while (event_processor_running) {

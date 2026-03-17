@@ -150,6 +150,7 @@ static void put_stream_worker(put_stream_task_t *task) {
         return;
     }
 
+    log_set_thread_context("StreamAPI", task->decoded_id);
     log_info("Processing PUT /api/streams/%s in worker thread", task->decoded_id);
 
     // Update stream configuration in database first
@@ -1520,6 +1521,7 @@ static void delete_stream_worker(delete_stream_task_t *task) {
         return;
     }
 
+    log_set_thread_context("StreamAPI", task->decoded_id);
     log_info("Processing DELETE /api/streams/%s in worker thread", task->decoded_id);
 
     // Stop stream if it's running
@@ -1693,6 +1695,7 @@ static void refresh_stream_worker(refresh_stream_task_t *task) {
         return;
     }
 
+    log_set_thread_context("StreamAPI", task->stream_name);
     log_info("Processing stream refresh for %s in worker thread", task->stream_name);
 
     // If go2rtc integration is not initialized, try to start it

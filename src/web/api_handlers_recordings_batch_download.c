@@ -217,6 +217,7 @@ static uint16_t to_dos_date(const struct tm *t) {
 }
 
 static void *zip_worker(void *arg) {
+    log_set_thread_context("BatchDownload", NULL);
     dl_thread_arg_t *a = (dl_thread_arg_t *)arg;
     char job_id[64];
     strncpy(job_id, a->job_id, sizeof(job_id)-1);

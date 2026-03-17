@@ -148,6 +148,7 @@ static proxy_thread_ctx_t *dequeue_all_done(void) {
 // ============================================================================
 
 static void *proxy_worker_thread(void *arg) {
+    log_set_thread_context("go2rtcProxy", NULL);
     proxy_thread_ctx_t *ctx = (proxy_thread_ctx_t *)arg;
 
     CURL *curl = curl_easy_init();

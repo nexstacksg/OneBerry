@@ -168,6 +168,7 @@ static thumbnail_work_t *dequeue_all_done(void) {
  * @brief Detached pthread worker function
  */
 static void *thumbnail_worker_thread(void *arg) {
+    log_set_thread_context("Thumbnail", NULL);
     thumbnail_work_t *work = (thumbnail_work_t *)arg;
 
     // Generate the thumbnail

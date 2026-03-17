@@ -68,6 +68,7 @@ typedef struct {
 static void mqtt_settings_worker(mqtt_settings_task_t *task) {
     if (!task) return;
 
+    log_set_thread_context("Settings", NULL);
     log_info("MQTT settings worker: reinitializing MQTT client...");
 
     int rc = mqtt_reinit(&g_config);
@@ -95,6 +96,7 @@ typedef struct {
 static void go2rtc_settings_worker(go2rtc_settings_task_t *task) {
     if (!task) return;
 
+    log_set_thread_context("Settings", NULL);
     stream_config_t *all_streams = calloc(g_config.max_streams, sizeof(stream_config_t));
     if (!all_streams) {
         log_error("go2rtc_settings_worker: out of memory");

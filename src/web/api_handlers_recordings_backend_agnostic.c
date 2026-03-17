@@ -295,6 +295,7 @@ static void *batch_delete_worker_thread(void *arg) {
         return NULL;
     }
 
+    log_set_thread_context("BatchDelete", NULL);
     char *job_id = data->job_id;
     cJSON *json = data->json;
 
