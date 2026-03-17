@@ -102,9 +102,11 @@ export const formatUtils = {
    * as local time, so we convert to local before building the URL.
    * @param {string} stream - Stream name
    * @param {number|string} startTime - Unix epoch (s), ISO string, or legacy UTC string
+   * @param {boolean} [fromFullscreen=false] - When true, appends fullscreen=1&nav=fine so the
+   *   Timeline page can prompt the user to re-enter fullscreen and pre-select 'fine' nav mode
    * @returns {string} Timeline URL with local date and time params
    */
-  getTimelineUrl: (stream, startTime) => {
+  getTimelineUrl: (stream, startTime, fromFullscreen = false) => {
     const base = `timeline.html?stream=${encodeURIComponent(stream || '')}`;
     if (startTime === null || startTime === undefined || startTime === '') return `${base}&date=&time=`;
 
@@ -119,7 +121,8 @@ export const formatUtils = {
 
     const date = local.format('YYYY-MM-DD');
     const time = local.format('HH:mm:ss');
-    return `${base}&date=${date}&time=${time}`;
+    const url = `${base}&date=${date}&time=${time}`;
+    return fromFullscreen ? `${url}&fullscreen=1&nav=fine` : url;
   },
 
   /**

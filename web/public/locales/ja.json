@@ -287,5 +287,6 @@
   "fields.email": "メールアドレス",
   "fields.role": "役割",
   "footer.github": "GitHub",
-  "live.cannotConnectToSource": "カメラソースに接続できません"
+  "live.cannotConnectToSource": "カメラソースに接続できません",
+  "timeline.clickToEnterFullscreen": "クリックしてフルスクリーンに切り替える"
 }

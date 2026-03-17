@@ -21,7 +21,7 @@ const DETECTION_SCALE_BASE = 400; // Baseline display dimension (px) for detecti
  * TimelinePlayer component
  * @returns {JSX.Element} TimelinePlayer component
  */
-export function TimelinePlayer({ videoElementRef = null }) {
+export function TimelinePlayer({ videoElementRef = null, autoFullscreen = false }) {
   const { t } = useI18n();
   // Local state
   const [currentSegmentIndex, setCurrentSegmentIndex] = useState(-1);
@@ -32,6 +32,11 @@ export function TimelinePlayer({ videoElementRef = null }) {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [segmentRecordingData, setSegmentRecordingData] = useState(null);
+  // When arriving from a Live View fullscreen session, show a one-time overlay
+  // that lets the user re-enter fullscreen with a single click.  Browser security
+  // (transient activation requirement) prevents auto-calling requestFullscreen()
+  // after a page navigation, so we surface this clear call-to-action instead.
+  const [showFullscreenPrompt, setShowFullscreenPrompt] = useState(autoFullscreen);
 
   // Refs
   const videoRef = useRef(null);
@@ -864,6 +869,32 @@ export function TimelinePlayer({ videoElementRef = null }) {
               className="absolute top-0 left-0 w-full h-full pointer-events-none"
               style={{ zIndex: 2 }}
             />
+          )}
+
+          {/* Fullscreen prompt — shown when arriving from a Live View fullscreen session.
+              Clicking the overlay is the user gesture needed for requestFullscreen(). */}
+          {showFullscreenPrompt && (
+            <div
+              className="absolute inset-0 flex items-center justify-center bg-black/65 cursor-pointer rounded-lg"
+              style={{ zIndex: 10 }}
+              onClick={async () => {
+                setShowFullscreenPrompt(false);
+                await handleToggleFullscreen();
+              }}
+            >
+              <div className="flex flex-col items-center gap-3 text-white pointer-events-none select-none">
+                <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24"
+                     fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" />
+                </svg>
+                <span className="text-sm font-medium">{t('timeline.clickToEnterFullscreen')}</span>
+              </div>
+              <button
+                className="absolute top-2 right-2 w-7 h-7 flex items-center justify-center rounded-full bg-black/40 text-white/70 hover:text-white text-lg leading-none"
+                onClick={(e) => { e.stopPropagation(); setShowFullscreenPrompt(false); }}
+                aria-label={t('timeline.exitFullscreen')}
+              >×</button>
+            </div>
           )}
 
           {/* Add a message for invalid segments */}

@@ -783,7 +783,10 @@ export function HLSVideoCell({
           className="timeline-btn"
           title={t('live.viewInTimeline')}
           aria-label={t('live.viewInTimeline')}
-          onClick={(event) => forceNavigation(formatUtils.getTimelineUrl(stream.name, new Date().toISOString()), event)}
+          onClick={(event) => {
+            const fromFullscreen = !!(document.fullscreenElement || document.webkitFullscreenElement);
+            forceNavigation(formatUtils.getTimelineUrl(stream.name, new Date().toISOString(), fromFullscreen), event);
+          }}
           style={{
             backgroundColor: 'transparent',
             border: 'none',

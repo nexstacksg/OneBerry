@@ -287,5 +287,6 @@
   "fields.email": "Email",
   "fields.role": "Ruolo",
   "footer.github": "GitHub",
-  "live.cannotConnectToSource": "Impossibile connettersi alla sorgente telecamera"
+  "live.cannotConnectToSource": "Impossibile connettersi alla sorgente telecamera",
+  "timeline.clickToEnterFullscreen": "Clicca per attivare la schermata intera"
 }

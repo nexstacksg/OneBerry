@@ -287,5 +287,6 @@
   "fields.email": "E-Mail",
   "fields.role": "Rolle",
   "footer.github": "GitHub",
-  "live.cannotConnectToSource": "Keine Verbindung zur Kameraquelle möglich"
+  "live.cannotConnectToSource": "Keine Verbindung zur Kameraquelle möglich",
+  "timeline.clickToEnterFullscreen": "Klicken, um Vollbild zu aktivieren"
 }

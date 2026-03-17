@@ -164,8 +164,10 @@ function parseUrlParams() {
   return {
     stream: params.get('stream') || '',
     date: params.get('date') || currentDateInputValue(),
-    time: params.get('time') || '',  // Optional HH:MM:SS to auto-seek on load
-    ids: params.get('ids') || ''     // Comma-separated recording IDs for selected-recordings mode
+    time: params.get('time') || '',         // Optional HH:MM:SS to auto-seek on load
+    ids: params.get('ids') || '',           // Comma-separated recording IDs for selected-recordings mode
+    fullscreen: params.get('fullscreen') === '1', // Prompt user to re-enter fullscreen (from Live View)
+    nav: params.get('nav') || '',           // Pre-select keyboard nav mode ('fine' | '')
   };
 }
 
@@ -177,7 +179,9 @@ function updateUrlParams(stream, date) {
   const url = new URL(window.location.href);
   url.searchParams.set('stream', stream);
   url.searchParams.set('date', date);
-  url.searchParams.delete('time');  // Remove one-time seek param after initial load
+  url.searchParams.delete('time');        // Remove one-time seek param after initial load
+  url.searchParams.delete('fullscreen');  // Remove one-shot fullscreen hint
+  url.searchParams.delete('nav');         // Remove one-shot nav hint
   window.history.replaceState({}, '', url);
 }
 
@@ -237,7 +241,9 @@ export function TimelinePage() {
   const [idsSegmentInfo, setIdsSegmentInfo] = useState(null);  // metadata from IDs endpoint
   const [idsTimelineSegments, setIdsTimelineSegments] = useState([]);
   const [isDownloadModalOpen, setIsDownloadModalOpen] = useState(false);
-  const [keyboardNavigationMode, setKeyboardNavigationMode] = useState('broad');
+  const [keyboardNavigationMode, setKeyboardNavigationMode] = useState(
+    urlParams.nav === 'fine' ? 'fine' : 'broad'
+  );
 
   // Refs
   const timelineContainerRef = useRef(null);
@@ -1046,7 +1052,7 @@ export function TimelinePage() {
     return (
       <>
         {/* Video player */}
-        <TimelinePlayer videoElementRef={videoElementRef} />
+        <TimelinePlayer videoElementRef={videoElementRef} autoFullscreen={urlParams.fullscreen} />
 
         {/* Playback controls (includes time display) */}
         <TimelineControls />

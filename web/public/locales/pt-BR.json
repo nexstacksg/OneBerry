@@ -335,6 +335,7 @@
   "timeline.selectSegmentOrPlay": "Clique em um segmento na linha do tempo ou use o botão reproduzir para iniciar a reprodução.",
   "timeline.exitFullscreen": "Sair da tela cheia",
   "timeline.enterFullscreen": "Entrar em tela cheia",
+  "timeline.clickToEnterFullscreen": "Clique para entrar em tela cheia",
   "timeline.fullscreen": "Tela cheia",
   "timeline.takeSnapshot": "Capturar snapshot",
   "timeline.snapshot": "Snapshot",

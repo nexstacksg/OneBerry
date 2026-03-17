@@ -335,6 +335,7 @@
   "timeline.selectSegmentOrPlay": "Click on a segment in the timeline or use the play button to start playback.",
   "timeline.exitFullscreen": "Exit Fullscreen",
   "timeline.enterFullscreen": "Enter Fullscreen",
+  "timeline.clickToEnterFullscreen": "Click to enter fullscreen",
   "timeline.fullscreen": "Fullscreen",
   "timeline.takeSnapshot": "Take Snapshot",
   "timeline.snapshot": "Snapshot",

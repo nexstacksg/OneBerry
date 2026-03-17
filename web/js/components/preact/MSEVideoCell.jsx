@@ -707,7 +707,10 @@ export function MSEVideoCell({
           <button
             type="button"
             className="timeline-btn"
-            onClick={(event) => forceNavigation(formatUtils.getTimelineUrl(stream.name, new Date().toISOString()), event)}
+            onClick={(event) => {
+              const fromFullscreen = !!(document.fullscreenElement || document.webkitFullscreenElement);
+              forceNavigation(formatUtils.getTimelineUrl(stream.name, new Date().toISOString(), fromFullscreen), event);
+            }}
             style={{
               padding: '8px 12px',
               backgroundColor: 'rgba(0, 0, 0, 0.7)',

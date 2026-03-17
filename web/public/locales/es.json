@@ -259,6 +259,7 @@
   "timeline.selectSegmentOrPlay": "Haz clic en un segmento de la línea de tiempo o usa el botón de reproducción para iniciar la reproducción.",
   "timeline.exitFullscreen": "Salir de pantalla completa",
   "timeline.enterFullscreen": "Entrar en pantalla completa",
+  "timeline.clickToEnterFullscreen": "Haz clic para entrar en pantalla completa",
   "timeline.fullscreen": "Pantalla completa",
   "timeline.takeSnapshot": "Tomar instantánea",
   "timeline.snapshot": "Instantánea",

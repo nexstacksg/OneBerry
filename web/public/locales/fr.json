@@ -287,5 +287,6 @@
   "fields.email": "E-mail",
   "fields.role": "Rôle",
   "footer.github": "GitHub",
-  "live.cannotConnectToSource": "Impossible de se connecter à la source caméra"
+  "live.cannotConnectToSource": "Impossible de se connecter à la source caméra",
+  "timeline.clickToEnterFullscreen": "Cliquez pour activer le plein écran"
 }
