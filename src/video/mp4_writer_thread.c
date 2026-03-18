@@ -217,6 +217,60 @@ static void *mp4_writer_rtsp_thread(void *arg) {
                         thread_ctx->writer->has_audio ? "enabled" : "disabled",
                         has_audio ? "enabled" : "disabled");
                 thread_ctx->writer->has_audio = has_audio;
+
+                // Update the RTSP URL to reflect the new audio setting so the
+                // change takes effect immediately on the next segment without
+                // requiring a manual stream restart.
+                //
+                // When recording via go2rtc (URL contains "localhost" or
+                // "127.0.0.1") the URL has "?video" appended when audio is
+                // disabled to request a video-only RTSP track.  We must
+                // add/remove that suffix whenever the audio setting changes.
+                const char *video_suffix = "?video";
+                size_t url_len = strlen(thread_ctx->rtsp_url);
+                size_t suffix_len = strlen(video_suffix);
+                bool ends_with_video = (url_len > suffix_len &&
+                    strcmp(thread_ctx->rtsp_url + url_len - suffix_len, video_suffix) == 0);
+
+                if (has_audio && ends_with_video) {
+                    // Audio enabled: strip ?video so go2rtc delivers audio+video
+                    thread_ctx->rtsp_url[url_len - suffix_len] = '\0';
+                    log_info("Removed ?video suffix from RTSP URL for stream %s (audio now enabled): %s",
+                             stream_name, thread_ctx->rtsp_url);
+                } else if (!has_audio && !ends_with_video &&
+                           (strstr(thread_ctx->rtsp_url, "localhost") != NULL ||
+                            strstr(thread_ctx->rtsp_url, "127.0.0.1") != NULL)) {
+                    // Audio disabled on a go2rtc URL: append ?video to request
+                    // video-only and avoid phantom audio track issues.
+                    if (url_len + suffix_len < sizeof(thread_ctx->rtsp_url)) {
+                        strncat(thread_ctx->rtsp_url, video_suffix,
+                                sizeof(thread_ctx->rtsp_url) - url_len - 1);
+                        log_info("Appended ?video suffix to RTSP URL for stream %s (audio now disabled): %s",
+                                 stream_name, thread_ctx->rtsp_url);
+                    }
+                }
+
+                // Close the existing RTSP connection so the next call to
+                // record_segment opens a fresh connection using the updated URL.
+                // This is safe here because we are between segments (record_segment
+                // is not currently executing).
+                if (thread_ctx->input_ctx) {
+                    avformat_close_input(&thread_ctx->input_ctx);
+                    thread_ctx->input_ctx = NULL;
+                    log_info("Closed RTSP connection for stream %s to apply audio setting change on next segment",
+                             stream_name);
+                }
+
+                // Discard any pending keyframe carried from the old connection —
+                // it belongs to the previous stream state and must not be reused
+                // with a new connection that may have different stream indices.
+                if (thread_ctx->segment_info.pending_video_keyframe) {
+                    av_packet_unref(thread_ctx->segment_info.pending_video_keyframe);
+                    av_packet_free(&thread_ctx->segment_info.pending_video_keyframe);
+                    thread_ctx->segment_info.pending_video_keyframe = NULL;
+                    log_debug("Cleared pending keyframe for stream %s due to audio setting change",
+                              stream_name);
+                }
             }
         }
 
