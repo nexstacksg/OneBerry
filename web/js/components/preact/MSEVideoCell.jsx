@@ -15,6 +15,7 @@ import { formatFilenameTimestamp } from '../../utils/date-utils.js';
 import { forceNavigation } from '../../utils/navigation-utils.js';
 import { formatUtils } from './recordings/formatUtils.js';
 import { useI18n } from '../../i18n.js';
+import { useQueryClient } from '../../query-client.js';
 
 /**
  * MSEVideoCell component
@@ -35,6 +36,8 @@ export function MSEVideoCell({
   globalShowDetections = true
 }) {
   const { t } = useI18n();
+  const queryClient = useQueryClient();
+
   // Component state
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -51,6 +54,11 @@ export function MSEVideoCell({
 
   // PTZ controls state
   const [showPTZControls, setShowPTZControls] = useState(false);
+
+  // Disable/enable stream state
+  const [showDisableConfirm, setShowDisableConfirm] = useState(false);
+  const [localIsDisabled, setLocalIsDisabled] = useState(false);
+  const [isTogglingEnabled, setIsTogglingEnabled] = useState(false);
 
   // Detection overlay visibility state (per-camera toggle, constrained by global toggle)
   const [localShowDetections, setLocalShowDetections] = useState(true);
@@ -372,6 +380,46 @@ export function MSEVideoCell({
   };
 
   /**
+   * Handle disable stream (soft delete)
+   */
+  const handleDisableStream = async () => {
+    setIsTogglingEnabled(true);
+    try {
+      const res = await fetch(`/api/streams/${encodeURIComponent(stream.name)}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setLocalIsDisabled(true);
+      setShowDisableConfirm(false);
+      queryClient.invalidateQueries({ queryKey: ['streams'] });
+    } catch (err) {
+      showStatusMessage(`${t('live.disableStream')}: ${err.message}`, 'error', 5000);
+      setShowDisableConfirm(false);
+    } finally {
+      setIsTogglingEnabled(false);
+    }
+  };
+
+  /**
+   * Handle enable stream
+   */
+  const handleEnableStream = async () => {
+    setIsTogglingEnabled(true);
+    try {
+      const res = await fetch(`/api/streams/${encodeURIComponent(stream.name)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enable_disabled: true, enabled: true })
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setLocalIsDisabled(false);
+      queryClient.invalidateQueries({ queryKey: ['streams'] });
+    } catch (err) {
+      showStatusMessage(`${t('live.enableStream')}: ${err.message}`, 'error', 5000);
+    } finally {
+      setIsTogglingEnabled(false);
+    }
+  };
+
+  /**
    * Handle snapshot button click
    */
   const handleSnapshot = () => {
@@ -667,6 +715,31 @@ export function MSEVideoCell({
           {/* Snapshot button */}
           <SnapshotButton streamId={streamId} streamName={stream.name} onSnapshot={handleSnapshot} />
 
+          {/* Disable stream button */}
+          <button
+            type="button"
+            title={t('live.disableStream')}
+            onClick={() => setShowDisableConfirm(true)}
+            style={{
+              padding: '8px 12px',
+              backgroundColor: 'rgba(0, 0, 0, 0.7)',
+              color: 'white',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              boxShadow: '0 2px 4px rgba(0, 0, 0, 0.3)',
+              transition: 'background-color 0.2s ease',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M18.36 6.64A9 9 0 1 1 5.64 17.36"/>
+              <line x1="12" y1="2" x2="12" y2="12"/>
+            </svg>
+          </button>
+
           {/* Detection overlay toggle button */}
           {stream.detection_based_recording && stream.detection_model && isPlaying && (
             <button
@@ -781,6 +854,68 @@ export function MSEVideoCell({
           ptzType={stream.ptz_type}
           onClose={() => setShowPTZControls(false)}
         />
+      )}
+
+      {/* Inline disable confirmation overlay */}
+      {showDisableConfirm && (
+        <div style={{
+          position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+          backgroundColor: 'rgba(0,0,0,0.75)', zIndex: 20,
+          display: 'flex', flexDirection: 'column',
+          alignItems: 'center', justifyContent: 'center', gap: '12px',
+          padding: '16px', textAlign: 'center'
+        }}>
+          <p style={{ color: 'white', fontSize: '14px', maxWidth: '240px', lineHeight: '1.4' }}>
+            {t('live.disableStreamConfirm')}
+          </p>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button
+              onClick={handleDisableStream}
+              disabled={isTogglingEnabled}
+              style={{
+                padding: '6px 16px', backgroundColor: '#dc2626', color: 'white',
+                border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '13px'
+              }}
+            >
+              {t('live.disableStream')}
+            </button>
+            <button
+              onClick={() => setShowDisableConfirm(false)}
+              style={{
+                padding: '6px 16px', backgroundColor: 'rgba(255,255,255,0.2)', color: 'white',
+                border: '1px solid rgba(255,255,255,0.4)', borderRadius: '4px', cursor: 'pointer', fontSize: '13px'
+              }}
+            >
+              {t('common.cancel')}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Locally disabled overlay */}
+      {localIsDisabled && (
+        <div style={{
+          position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+          backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 15,
+          display: 'flex', flexDirection: 'column',
+          alignItems: 'center', justifyContent: 'center', gap: '12px'
+        }}>
+          <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.5)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M18.36 6.64A9 9 0 1 1 5.64 17.36"/>
+            <line x1="12" y1="2" x2="12" y2="12"/>
+          </svg>
+          <p style={{ color: 'rgba(255,255,255,0.7)', fontSize: '14px' }}>{t('live.streamDisabled')}</p>
+          <button
+            onClick={handleEnableStream}
+            disabled={isTogglingEnabled}
+            style={{
+              padding: '6px 16px', backgroundColor: '#16a34a', color: 'white',
+              border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '13px'
+            }}
+          >
+            {t('live.enableStream')}
+          </button>
+        </div>
       )}
 
       {/* MSE mode indicator */}

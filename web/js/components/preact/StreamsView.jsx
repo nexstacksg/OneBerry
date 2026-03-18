@@ -430,6 +430,36 @@ export function StreamsView() {
     }
   });
 
+  const enableStreamMutation = useMutation({
+    mutationFn: async (streamId) => {
+      return await fetchJSON(`/api/streams/${encodeURIComponent(streamId)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enable_disabled: true, enabled: true }),
+        timeout: 15000,
+        retries: 1,
+        retryDelay: 1000
+      });
+    },
+    onSuccess: () => {
+      showStatusMessage(t('streams.streamSuccessfullyEnabled') || 'Stream enabled.');
+      queryClient.invalidateQueries({ queryKey: ['streams'] });
+    },
+    onError: (error) => {
+      showStatusMessage(t('streams.errorEnablingStream', { message: error.message }) || `Error enabling stream: ${error.message}`, 'error', 5000);
+    }
+  });
+
+  const handleToggleStreamEnabled = (stream) => {
+    if (stream.enabled) {
+      if (window.confirm(t('live.disableStreamConfirm'))) {
+        disableStreamMutation.mutate({ streamId: stream.name });
+      }
+    } else {
+      enableStreamMutation.mutate(stream.name);
+    }
+  };
+
   // Bulk action handlers — open the confirmation modal instead of using alert()
   const handleBulkEnable = () => {
     if (selectedStreams.size === 0 || isBulkWorking) return;
@@ -1589,6 +1619,22 @@ export function StreamsView() {
                             >
                               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                              </svg>
+                            </button>
+                          )}
+                          {/* Enable/Disable toggle button - only show if user can modify streams */}
+                          {canModifyStreams && (
+                            <button
+                                className="p-1 rounded-full focus:outline-none"
+                                style={{color: stream.enabled ? 'hsl(var(--success))' : 'hsl(var(--muted-foreground))'}}
+                                onMouseOver={(e) => e.currentTarget.style.backgroundColor = stream.enabled ? 'hsl(var(--success) / 0.1)' : 'hsl(var(--muted-foreground) / 0.1)'}
+                                onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+                                onClick={(e) => { e.stopPropagation(); handleToggleStreamEnabled(stream); }}
+                                title={stream.enabled ? t('streams.toggleDisable') : t('streams.toggleEnable')}
+                            >
+                              {/* Power icon */}
+                              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
                               </svg>
                             </button>
                           )}
