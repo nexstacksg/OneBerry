@@ -424,12 +424,30 @@ export function TimelinePage() {
             return;
           }
           event.preventDefault();
-          if (videoPlayer.paused) {
-            videoPlayer.play().catch(e => {
-              if (e.name !== 'AbortError') console.warn('Space play error:', e);
-            });
-          } else {
+          // Toggle through timelineState *before* touching the video element.
+          // This mirrors the "state first, video second" ordering used by
+          // pausePlayback() / resumePlayback() in TimelineControls and
+          // eliminates the race condition that causes the repeating play/pause
+          // loop in Firefox: previously, calling videoPlayer.pause() made
+          // video.paused=true synchronously, but timelineState.isPlaying was
+          // still true until the asynchronous 'pause' event fired.  Any
+          // handleVideoPlayback call in between (e.g. triggered by a timeupdate)
+          // would see isPlaying=true && video.paused=true and call play() again.
+          if (timelineState.isPlaying) {
+            // Set state first so every subsequent handleVideoPlayback call sees
+            // isPlaying=false and does NOT try to resume playback.
+            timelineState.setState({ isPlaying: false });
+            // handleVideoPlayback synchronously calls video.pause() via the
+            // '!isPlaying && !video.paused' branch; also call it directly as a
+            // belt-and-suspenders measure for edge cases (e.g. no valid segment).
             videoPlayer.pause();
+          } else if (
+            timelineState.currentSegmentIndex >= 0 &&
+            (timelineState.timelineSegments?.length ?? 0) > 0
+          ) {
+            // Set state first; handleVideoPlayback synchronously calls
+            // video.play() via the 'isPlaying && video.paused' branch.
+            timelineState.setState({ isPlaying: true });
           }
         }
         return;
