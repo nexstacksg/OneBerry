@@ -484,26 +484,27 @@ export function WebRTCView() {
       />
 
       <div className="page-header flex justify-between items-center mb-4 p-4 bg-card text-card-foreground rounded-lg shadow" style={{ position: 'relative', zIndex: 10, pointerEvents: 'auto' }}>
-        <div className="flex items-center space-x-2">
-          <h2 className="text-xl font-bold mr-4">{t('live.liveViewMode', { mode: 'WebRTC' })}</h2>
-          <div className="flex space-x-2">
+        <div className="flex items-center gap-3">
+          <h2 className="text-xl font-bold whitespace-nowrap">{t('live.liveView')}</h2>
+          {/* View-mode tab strip: WebRTC | HLS | MSE */}
+          <div className="inline-flex items-center bg-muted rounded-lg p-1 gap-1" style={{ position: 'relative', zIndex: 50 }}>
+            <span className="px-3 py-1.5 rounded text-sm font-medium bg-primary text-primary-foreground select-none">
+              WebRTC
+            </span>
             <a
               href="/hls.html"
-              className="btn-secondary focus:outline-none focus:ring-2 focus:ring-primary inline-block text-center"
-              style={{ position: 'relative', zIndex: 50 }}
+              className="px-3 py-1.5 rounded text-sm font-medium transition-colors no-underline text-muted-foreground hover:bg-background hover:text-foreground focus:outline-none"
             >
-              {t('live.hlsView')}
+              {t('live.hlsShort')}
             </a>
             {go2rtcAvailable && (
-            <a
-              href="/hls.html?mode=mse"
-              className="btn-secondary focus:outline-none focus:ring-2 focus:ring-primary inline-block text-center"
-              style={{ position: 'relative', zIndex: 50 }}
-            >
-              {t('live.mseView')}
-            </a>
-                )}
-
+              <a
+                href="/hls.html?mode=mse"
+                className="px-3 py-1.5 rounded text-sm font-medium transition-colors no-underline text-muted-foreground hover:bg-background hover:text-foreground focus:outline-none"
+              >
+                {t('live.mseShort')}
+              </a>
+            )}
           </div>
         </div>
         <div className="controls flex items-center space-x-2">

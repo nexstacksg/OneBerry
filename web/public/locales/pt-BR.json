@@ -520,6 +520,7 @@
   "live.speedLabel": "Velocidade:",
   "live.goToPreset": "Ir para o preset...",
   "live.presetNumber": "Preset {token}",
+  "live.liveView": "Visualização ao vivo",
   "live.liveViewMode": "Visualização ao vivo ({mode})",
   "live.mseShort": "MSE",
   "live.hlsShort": "HLS",

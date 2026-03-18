@@ -521,6 +521,7 @@
   "live.speedLabel": "Speed:",
   "live.goToPreset": "Go to Preset...",
   "live.presetNumber": "Preset {token}",
+  "live.liveView": "Live View",
   "live.liveViewMode": "Live View ({mode})",
   "live.mseShort": "MSE",
   "live.hlsShort": "HLS",

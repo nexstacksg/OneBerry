@@ -488,38 +488,46 @@ export function LiveView({isWebRTCDisabled}) {
       />
 
       <div className="page-header flex justify-between items-center mb-4 p-4 bg-card text-card-foreground rounded-lg shadow" style={{ position: 'relative', zIndex: 10, pointerEvents: 'auto' }}>
-        <div className="flex items-center space-x-2">
-          <h2 className="text-xl font-bold mr-4">{t('live.liveViewMode', { mode: useMSE ? t('live.mseShort') : t('live.hlsShort') })}</h2>
-          <div className="flex space-x-2">
+        <div className="flex items-center gap-3">
+          <h2 className="text-xl font-bold whitespace-nowrap">{t('live.liveView')}</h2>
+          {/* View-mode tab strip: WebRTC | HLS | MSE */}
+          <div className="inline-flex items-center bg-muted rounded-lg p-1 gap-1" style={{ position: 'relative', zIndex: 50 }}>
             {!isWebRTCDisabled && (
-            <a
-              href="/index.html"
-              className="btn-secondary focus:outline-none focus:ring-2 focus:ring-primary inline-block text-center"
-              style={{ position: 'relative', zIndex: 50 }}
-            >
-              {t('live.webrtcView')}
-            </a>
-                )}
-            {go2rtcAvailable && (
+              <a
+                href="/index.html"
+                className="px-3 py-1.5 rounded text-sm font-medium transition-colors no-underline text-muted-foreground hover:bg-background hover:text-foreground focus:outline-none"
+              >
+                WebRTC
+              </a>
+            )}
             <button
-              className="btn-secondary focus:outline-none focus:ring-2 focus:ring-primary inline-block text-center"
-              style={{ position: 'relative', zIndex: 50 }}
+              className={`px-3 py-1.5 rounded text-sm font-medium transition-colors focus:outline-none ${!useMSE ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-background hover:text-foreground'}`}
               onClick={() => {
-                setUseMSE(!useMSE);
-                // Update URL to reflect mode
-                const url = new URL(window.location);
-                if (!useMSE) {
-                  url.searchParams.set('mode', 'mse');
-                } else {
+                if (useMSE) {
+                  setUseMSE(false);
+                  const url = new URL(window.location);
                   url.searchParams.delete('mode');
+                  window.history.replaceState({}, '', url);
                 }
-                window.history.replaceState({}, '', url);
               }}
             >
-              {useMSE ? t('live.hlsView') : t('live.mseView')}
+              {t('live.hlsShort')}
             </button>
-                )}
-
+            {go2rtcAvailable && (
+              <button
+                className={`px-3 py-1.5 rounded text-sm font-medium transition-colors focus:outline-none ${useMSE ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-background hover:text-foreground'}`}
+                onClick={() => {
+                  if (!useMSE) {
+                    setUseMSE(true);
+                    const url = new URL(window.location);
+                    url.searchParams.set('mode', 'mse');
+                    window.history.replaceState({}, '', url);
+                  }
+                }}
+              >
+                {t('live.mseShort')}
+              </button>
+            )}
           </div>
         </div>
         <div className="controls flex items-center space-x-2">
