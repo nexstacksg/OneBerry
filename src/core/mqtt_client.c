@@ -235,6 +235,10 @@ static void on_connect(struct mosquitto *m, void *userdata, int rc) {
                 log_warn("MQTT: Failed to subscribe to HA birth topic: %s",
                          mosquitto_strerror(sub_rc));
             }
+
+            // Publish discovery now, in case HA is already running.
+            mqtt_publish_ha_discovery();
+            mqtt_start_ha_services();
         }
     } else {
         connected = false;
@@ -1304,11 +1308,7 @@ int mqtt_reinit(const config_t *config) {
     } else {
         log_info("MQTT reinit: Connected to MQTT broker");
 
-        // Step 6: Publish HA discovery and start services if enabled
-        if (config->mqtt_ha_discovery) {
-            mqtt_publish_ha_discovery();
-            mqtt_start_ha_services();
-        }
+        // on_connect callback will publish HA discovery and start services if enabled
     }
 
     log_info("MQTT reinit: Hot-reload complete");
