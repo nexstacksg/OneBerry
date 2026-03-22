@@ -394,16 +394,15 @@ void load_default_config(config_t *config) {
     config->go2rtc_enabled = true;  // Enable go2rtc by default
     // Use the cmake-compiled-in path when available (set via -DGO2RTC_BINARY_PATH_RAW at build time),
     // falling back to the conventional system install location.
-    // Stringification macros to convert the raw token from -D into a C string literal.
-#define STRINGIFY_HELPER(x) #x
-#define STRINGIFY(x) STRINGIFY_HELPER(x)
+    // CMake passes these as string literals already (e.g. -DGO2RTC_BINARY_PATH_RAW="/usr/local/bin/go2rtc"),
+    // so they must be used directly — NOT through STRINGIFY, which would double-quote the value.
 #ifdef GO2RTC_BINARY_PATH_RAW
-    snprintf(config->go2rtc_binary_path, MAX_PATH_LENGTH, "%s", STRINGIFY(GO2RTC_BINARY_PATH_RAW));
+    snprintf(config->go2rtc_binary_path, MAX_PATH_LENGTH, "%s", GO2RTC_BINARY_PATH_RAW);
 #else
     snprintf(config->go2rtc_binary_path, MAX_PATH_LENGTH, "/usr/local/bin/go2rtc");
 #endif
 #ifdef GO2RTC_CONFIG_DIR_RAW
-    snprintf(config->go2rtc_config_dir, MAX_PATH_LENGTH, "%s", STRINGIFY(GO2RTC_CONFIG_DIR_RAW));
+    snprintf(config->go2rtc_config_dir, MAX_PATH_LENGTH, "%s", GO2RTC_CONFIG_DIR_RAW);
 #else
     snprintf(config->go2rtc_config_dir, MAX_PATH_LENGTH, "/etc/lightnvr/go2rtc");
 #endif

@@ -164,6 +164,7 @@ EOF
     
     # Create go2rtc config directory if it doesn't exist
     mkdir -p /etc/lightnvr/go2rtc
+    chown -R "$(id -u):$(id -g)" /etc/lightnvr/go2rtc
     
     # Always regenerate go2rtc.yaml fresh at startup to avoid stale/corrupted
     # configs from prior versions causing stream errors (see issue #165).
@@ -213,6 +214,11 @@ EOF
     
     # Ensure proper permissions (may fail on NFS, which is okay)
     log_info "Setting permissions..."
+    CURRENT_UID="$(id -u)"
+    CURRENT_GID="$(id -g)"
+    chown -R "${CURRENT_UID}:${CURRENT_GID}" /var/lib/lightnvr 2>/dev/null || log_warn "Could not set ownership on /var/lib/lightnvr (may be on NFS)"
+    chown -R "${CURRENT_UID}:${CURRENT_GID}" /etc/lightnvr 2>/dev/null || log_warn "Could not set ownership on /etc/lightnvr (may be on NFS)"
+    chown -R "${CURRENT_UID}:${CURRENT_GID}" /var/log/lightnvr 2>/dev/null || log_warn "Could not set ownership on /var/log/lightnvr"
     chmod -R 755 /var/lib/lightnvr 2>/dev/null || log_warn "Could not set permissions on /var/lib/lightnvr (may be on NFS)"
     chmod -R 755 /etc/lightnvr 2>/dev/null || log_warn "Could not set permissions on /etc/lightnvr (may be on NFS)"
     chmod -R 755 /var/log/lightnvr 2>/dev/null || log_warn "Could not set permissions on /var/log/lightnvr"
