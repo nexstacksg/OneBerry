@@ -14,6 +14,7 @@
 #include "utils/memory.h"
 #include "web/libuv_server.h"
 #include "web/libuv_connection.h"
+#define LOG_COMPONENT "HTTP"
 #include "core/logger.h"
 
 // HTTP status reason phrases

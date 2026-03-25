@@ -10,6 +10,7 @@
 #include <sys/random.h>
 
 #include "web/batch_delete_progress.h"
+#define LOG_COMPONENT "RecordingsAPI"
 #include "core/logger.h"
 
 /**

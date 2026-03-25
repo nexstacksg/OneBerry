@@ -24,6 +24,7 @@
 #include "web/libuv_connection.h"
 #include "web/request_response.h"
 #include "core/config.h"
+#define LOG_COMPONENT "go2rtcProxy"
 #include "core/logger.h"
 #include "utils/memory.h"
 

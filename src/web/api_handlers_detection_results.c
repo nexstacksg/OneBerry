@@ -13,6 +13,7 @@
 #include <cjson/cJSON.h>
 #include "web/api_handlers_detection.h"
 #include "web/api_handlers_common.h"
+#define LOG_COMPONENT "DetectionAPI"
 #include "core/logger.h"
 #include "core/config.h"
 #include "core/mqtt_client.h"

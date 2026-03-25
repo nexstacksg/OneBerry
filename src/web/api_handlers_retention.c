@@ -14,6 +14,7 @@
 #include "web/api_handlers.h"
 #include "web/request_response.h"
 #include "web/httpd_utils.h"
+#define LOG_COMPONENT "RecordingsAPI"
 #include "core/logger.h"
 #include "database/db_streams.h"
 #include "database/db_recordings.h"

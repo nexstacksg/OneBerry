@@ -146,6 +146,79 @@ int is_syslog_enabled(void);
 int is_logger_available(void);
 
 /* -----------------------------------------------------------------------
+ * Compile-time per-translation-unit context macros
+ *
+ * A source file may set a component label BEFORE including this header:
+ *
+ *   #define LOG_COMPONENT "WebAPI"
+ *   #include "core/logger.h"
+ *
+ * Every log_* call in that TU will then carry a [WebAPI] prefix whenever
+ * the calling thread has no TLS component set.  TLS set via
+ * log_set_thread_context() always takes priority over LOG_COMPONENT.
+ *
+ * A per-scope stream name can be injected by redefining _log_stream_name
+ * around the relevant log calls, e.g. inside a function that handles a
+ * specific stream:
+ *
+ *   #undef  _log_stream_name
+ *   #define _log_stream_name  stream_name   // local variable
+ *   log_info("handling request");
+ *   #undef  _log_stream_name
+ *   #define _log_stream_name  ((const char *)NULL)   // restore default
+ *
+ * This keeps _log_stream_name as a pure macro so that -Wshadow warnings
+ * are never triggered by the ubiquitous 'stream_name' parameter name.
+ * ----------------------------------------------------------------------- */
+
+/**
+ * Internal variant called by the log_* macros below.
+ *
+ * Prefers TLS context (set via log_set_thread_context); falls back to
+ * the explicit (component, stream) arguments when TLS is unset.
+ *
+ * Not intended to be called directly — use the log_* macros instead.
+ */
+void _log_message_ctx(log_level_t level, const char *component, const char *stream,
+                      const char *format, ...)
+     __attribute__((format(printf, 4, 5)));
+
+/** Default component: NULL (no prefix).  Override per-file with
+ *  #define LOG_COMPONENT "MySubsystem"  before #include "core/logger.h". */
+#ifndef LOG_COMPONENT
+#  define LOG_COMPONENT ((const char *)NULL)
+#endif
+
+/** Default stream: NULL (no stream prefix).
+ *  Override per-scope:  #undef _log_stream_name / #define _log_stream_name var */
+#ifndef _log_stream_name
+#  define _log_stream_name ((const char *)NULL)
+#endif
+
+/* Redefine the public log_* names to call _log_message_ctx so that every
+ * call site automatically picks up LOG_COMPONENT and _log_stream_name.
+ *
+ * Define LOG_DISABLE_CONTEXT_MACROS before including this header to opt
+ * out (logger.c uses this to protect its own function definitions).       */
+#ifndef LOG_DISABLE_CONTEXT_MACROS
+#  undef  log_error
+#  define log_error(...)        _log_message_ctx(LOG_LEVEL_ERROR, LOG_COMPONENT, \
+                                                 _log_stream_name, __VA_ARGS__)
+#  undef  log_warn
+#  define log_warn(...)         _log_message_ctx(LOG_LEVEL_WARN,  LOG_COMPONENT, \
+                                                 _log_stream_name, __VA_ARGS__)
+#  undef  log_info
+#  define log_info(...)         _log_message_ctx(LOG_LEVEL_INFO,  LOG_COMPONENT, \
+                                                 _log_stream_name, __VA_ARGS__)
+#  undef  log_debug
+#  define log_debug(...)        _log_message_ctx(LOG_LEVEL_DEBUG, LOG_COMPONENT, \
+                                                 _log_stream_name, __VA_ARGS__)
+#  undef  log_message
+#  define log_message(lvl, ...) _log_message_ctx((lvl), LOG_COMPONENT, \
+                                                 _log_stream_name, __VA_ARGS__)
+#endif /* LOG_DISABLE_CONTEXT_MACROS */
+
+/* -----------------------------------------------------------------------
  * Per-thread logging context
  *
  * Each long-running thread may call log_set_thread_context() once at

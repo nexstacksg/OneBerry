@@ -18,6 +18,7 @@
 #include <errno.h>
 
 #include "web/thumbnail_thread.h"
+#define LOG_COMPONENT "Thumbnail"
 #include "core/logger.h"
 #include "utils/memory.h"
 

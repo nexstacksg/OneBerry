@@ -10,6 +10,7 @@
 #include "web/api_handlers_onvif.h"
 #include "web/request_response.h"
 #include "web/httpd_utils.h"
+#define LOG_COMPONENT "ONVIFAPI"
 #include "core/logger.h"
 #include "core/config.h"
 #include "core/url_utils.h"

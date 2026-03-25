@@ -32,6 +32,7 @@
 #include "web/api_handlers_go2rtc_proxy.h"
 #include "web/api_handlers_setup.h"
 #include "web/api_handlers_recording_tags.h"
+#define LOG_COMPONENT "HTTP"
 #include "core/logger.h"
 #include "core/config.h"
 

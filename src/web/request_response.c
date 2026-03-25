@@ -8,6 +8,7 @@
 
 #include "web/request_response.h"
 #include "web/web_server.h"
+#define LOG_COMPONENT "HTTP"
 #include "core/logger.h"
 #include "web/libuv_server.h"
 

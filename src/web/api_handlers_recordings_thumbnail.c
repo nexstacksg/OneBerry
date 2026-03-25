@@ -25,6 +25,7 @@
 #include "web/httpd_utils.h"
 #include "web/thumbnail_thread.h"
 #include "web/libuv_server.h"
+#define LOG_COMPONENT "RecordingsAPI"
 #include "core/logger.h"
 #include "core/config.h"
 #include "database/database_manager.h"

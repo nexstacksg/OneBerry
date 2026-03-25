@@ -25,6 +25,7 @@
 #include "web/api_handlers_totp.h"
 #include "web/httpd_utils.h"
 #include "web/request_response.h"
+#define LOG_COMPONENT "AuthAPI"
 #include "core/logger.h"
 #include "core/config.h"
 #include "database/db_auth.h"

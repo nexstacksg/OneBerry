@@ -4,6 +4,7 @@
 #include "web/httpd_utils.h"
 #include "core/config.h"
 #include "database/db_zones.h"
+#define LOG_COMPONENT "ZonesAPI"
 #include "core/logger.h"
 #include <cjson/cJSON.h>
 #include <stdlib.h>

@@ -14,6 +14,7 @@
 #include "web/httpd_utils.h"
 #include "storage/storage_manager.h"
 #include "core/config.h"
+#define LOG_COMPONENT "StorageAPI"
 #include "core/logger.h"
 #include "database/db_auth.h"
 

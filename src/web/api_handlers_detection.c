@@ -11,6 +11,7 @@
 
 #include "web/api_handlers.h"
 #include "web/request_response.h"
+#define LOG_COMPONENT "DetectionAPI"
 #include "core/logger.h"
 #include "core/config.h"
 #include "video/detection.h"

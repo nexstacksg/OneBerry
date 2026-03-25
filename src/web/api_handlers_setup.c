@@ -12,6 +12,7 @@
 #include "web/request_response.h"
 #include "web/http_server.h"
 #include "database/db_system_settings.h"
+#define LOG_COMPONENT "SetupAPI"
 #include "core/logger.h"
 #include "cjson/cJSON.h"
 

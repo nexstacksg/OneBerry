@@ -18,6 +18,7 @@
 #include "utils/memory.h"
 #include "web/libuv_server.h"
 #include "web/libuv_connection.h"
+#define LOG_COMPONENT "HTTP"
 #include "core/logger.h"
 
 // Forward declaration for response helper defined in libuv_response.c

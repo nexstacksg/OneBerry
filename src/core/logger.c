@@ -1,3 +1,6 @@
+/* Prevent logger.h's macro layer from redefining our own function bodies. */
+#define LOG_DISABLE_CONTEXT_MACROS
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -350,49 +353,56 @@ const char *sanitize_for_logging(const char *str, size_t max_len) {
     return sanitized;
 }
 
-// Log a message at the specified level with va_list
-void log_message_v(log_level_t level, const char *format, va_list args) {
-    // Copy va_list before use so each code path gets a fresh, initialized copy.
-    // A va_list parameter is only valid for a single traversal; copying it here
-    // satisfies static-analysis tools (clang-analyzer-valist.Uninitialized) and
-    // makes the intent explicit.
+// Internal helper: build "[component] [stream] " prefix into buf (max bufsz bytes).
+static void build_ctx_prefix(char *buf, size_t bufsz,
+                              const char *component, const char *stream) {
+    if (component && component[0]) {
+        if (stream && stream[0]) {
+            snprintf(buf, bufsz, "[%s] [%s] ", component, stream);
+        } else {
+            snprintf(buf, bufsz, "[%s] ", component);
+        }
+    } else {
+        buf[0] = '\0';
+    }
+}
+
+// Core logging implementation shared by log_message_v and _log_message_ctx.
+// component and stream are already resolved by the caller; NULL or "" means
+// no prefix for that field.
+static void do_log_internal(log_level_t level,
+                             const char *component, const char *stream,
+                             const char *format, va_list args) {
+    // Copy va_list: a va_list may only be traversed once; copying satisfies
+    // static-analysis tools (clang-analyzer-valist.Uninitialized).
     va_list args_copy;
     va_copy(args_copy, args);
 
-    // CRITICAL: Check if logger is shutting down or destroyed
-    // If so, just write to console without mutex to avoid use-after-destroy
+    // CRITICAL: Check if logger is shutting down or destroyed.
+    // Write directly to console without the mutex to avoid use-after-destroy.
     if (logger.shutdown) {
-        // Logger is shutting down or destroyed - use fallback console logging only
-        // This is safe because we don't use the mutex
         char message[4096];
         vsnprintf(message, sizeof(message), format, args_copy); // NOLINT(clang-analyzer-valist.Uninitialized)
         va_end(args_copy);
 
         time_t now;
         struct tm tm_buf;
-        const struct tm *tm_info;
         char timestamp[32];
         time(&now);
-        tm_info = localtime_r(&now, &tm_buf);
-        strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", tm_info);
+        strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S",
+                 localtime_r(&now, &tm_buf));
 
-        char shutdown_prefix[224] = {0};
-        if (tls_log_component[0] != '\0') {
-            if (tls_log_stream[0] != '\0') {
-                snprintf(shutdown_prefix, sizeof(shutdown_prefix), "[%s] [%s] ",
-                         tls_log_component, tls_log_stream);
-            } else {
-                snprintf(shutdown_prefix, sizeof(shutdown_prefix), "[%s] ", tls_log_component);
-            }
-        }
+        char ctx_prefix[224] = {0};
+        build_ctx_prefix(ctx_prefix, sizeof(ctx_prefix), component, stream);
+
         FILE *console = (level == LOG_LEVEL_ERROR) ? stderr : stdout;
-        fprintf(console, "[%s] [%s] %s%s\n", timestamp, log_level_strings[level], shutdown_prefix, message);
+        fprintf(console, "[%s] [%s] %s%s\n",
+                timestamp, log_level_strings[level], ctx_prefix, message);
         fflush(console);
         return;
     }
 
-    // Only log messages at or below the configured log level
-    // For example, if log_level is INFO (2), we log ERROR (0), WARN (1), and INFO (2), but not DEBUG (3)
+    // Only log messages at or below the configured log level.
     if (level > logger.log_level) {
         va_end(args_copy);
         return;
@@ -400,90 +410,84 @@ void log_message_v(log_level_t level, const char *format, va_list args) {
 
     time_t now;
     struct tm tm_buf;
-    const struct tm *tm_info;
     char timestamp[32];
     char iso_timestamp[32];
 
-    // Get current time
     time(&now);
-    tm_info = localtime_r(&now, &tm_buf);
+    localtime_r(&now, &tm_buf);
+    strftime(timestamp,     sizeof(timestamp),     "%Y-%m-%d %H:%M:%S",  &tm_buf);
+    strftime(iso_timestamp, sizeof(iso_timestamp), "%Y-%m-%dT%H:%M:%S",  &tm_buf);
 
-    // Format timestamp for text log
-    strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", tm_info);
-
-    // Format ISO timestamp for JSON log
-    strftime(iso_timestamp, sizeof(iso_timestamp), "%Y-%m-%dT%H:%M:%S", tm_info);
-
-    // Format the log message
     char message[4096];
     vsnprintf(message, sizeof(message), format, args_copy); // NOLINT(clang-analyzer-valist.Uninitialized)
     va_end(args_copy);
 
-    // Build optional [component] [stream] prefix from per-thread context.
-    // If the thread has not called log_set_thread_context() both strings are
-    // empty and ctx_prefix is "" (no prefix — fully backward compatible).
     char ctx_prefix[224] = {0};
-    if (tls_log_component[0] != '\0') {
-        if (tls_log_stream[0] != '\0') {
-            snprintf(ctx_prefix, sizeof(ctx_prefix), "[%s] [%s] ",
-                     tls_log_component, tls_log_stream);
-        } else {
-            snprintf(ctx_prefix, sizeof(ctx_prefix), "[%s] ", tls_log_component);
-        }
-    }
+    build_ctx_prefix(ctx_prefix, sizeof(ctx_prefix), component, stream);
 
-    // Double-check shutdown flag before acquiring mutex
+    // Double-check shutdown before acquiring mutex.
     if (logger.shutdown) {
         FILE *console = (level == LOG_LEVEL_ERROR) ? stderr : stdout;
-        fprintf(console, "[%s] [%s] %s%s\n", timestamp, log_level_strings[level], ctx_prefix, message);
+        fprintf(console, "[%s] [%s] %s%s\n",
+                timestamp, log_level_strings[level], ctx_prefix, message);
         fflush(console);
         return;
     }
 
     pthread_mutex_lock(&logger.mutex);
 
-    // Write to log file if available
     if (logger.log_file && logger.log_file != stdout && logger.log_file != stderr) {
-        fprintf(logger.log_file, "[%s] [%s] %s%s\n", timestamp, log_level_strings[level], ctx_prefix, message);
+        fprintf(logger.log_file, "[%s] [%s] %s%s\n",
+                timestamp, log_level_strings[level], ctx_prefix, message);
         fflush(logger.log_file);
     }
 
-    // Always write to console (tee behavior)
-    // Use stderr for errors, stdout for other levels
     FILE *console = (level == LOG_LEVEL_ERROR) ? stderr : stdout;
-    fprintf(console, "[%s] [%s] %s%s\n", timestamp, log_level_strings[level], ctx_prefix, message);
+    fprintf(console, "[%s] [%s] %s%s\n",
+            timestamp, log_level_strings[level], ctx_prefix, message);
     fflush(console);
 
-    // Write to syslog if enabled
     if (logger.syslog_enabled) {
-        // Map our log levels to syslog priorities
         int syslog_priority;
         switch (level) {
-            case LOG_LEVEL_ERROR:
-                syslog_priority = LOG_ERR;
-                break;
-            case LOG_LEVEL_WARN:
-                syslog_priority = LOG_WARNING;
-                break;
-            case LOG_LEVEL_INFO:
-                syslog_priority = LOG_INFO;
-                break;
-            case LOG_LEVEL_DEBUG:
-                syslog_priority = LOG_DEBUG;
-                break;
-            default:
-                syslog_priority = LOG_INFO;
-                break;
+            case LOG_LEVEL_ERROR: syslog_priority = LOG_ERR;     break;
+            case LOG_LEVEL_WARN:  syslog_priority = LOG_WARNING; break;
+            case LOG_LEVEL_INFO:  syslog_priority = LOG_INFO;    break;
+            case LOG_LEVEL_DEBUG: syslog_priority = LOG_DEBUG;   break;
+            default:              syslog_priority = LOG_INFO;    break;
         }
         syslog(syslog_priority, "%s", message);
     }
 
     pthread_mutex_unlock(&logger.mutex);
 
-    // Write to JSON log file if the function is available (weak symbol, no-op when not linked)
     if (write_json_log) {
         write_json_log(level, iso_timestamp, message);
     }
+}
+
+// Log a message at the specified level with va_list.
+// Reads component/stream from the calling thread's TLS context.
+void log_message_v(log_level_t level, const char *format, va_list args) {
+    do_log_internal(level, tls_log_component, tls_log_stream, format, args);
+}
+
+// Internal variant called by the log_* macros.
+// Prefers TLS context; falls back to (component, stream) when TLS is unset.
+void _log_message_ctx(log_level_t level, const char *component, const char *stream,
+                      const char *format, ...) {
+    // TLS takes priority: it represents the most specific runtime context
+    // (set explicitly for a thread or operation via log_set_thread_context).
+    // The compile-time LOG_COMPONENT / _log_stream_name macros act as
+    // fallbacks for threads that have not set a TLS context.
+    const char *eff_comp   = (tls_log_component[0]) ? tls_log_component
+                           : (component && component[0]) ? component : "";
+    const char *eff_stream = (tls_log_stream[0]) ? tls_log_stream
+                           : (stream    && stream[0])    ? stream    : "";
+    va_list args;
+    va_start(args, format);
+    do_log_internal(level, eff_comp, eff_stream, format, args);
+    va_end(args);
 }
 
 // Get the string representation of a log level

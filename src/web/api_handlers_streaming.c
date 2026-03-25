@@ -6,6 +6,7 @@
 #include <sys/stat.h>
 #include "web/request_response.h"
 #include "web/httpd_utils.h"
+#define LOG_COMPONENT "StreamsAPI"
 #include "core/logger.h"
 #include "core/config.h"
 #include "web/http_server.h"

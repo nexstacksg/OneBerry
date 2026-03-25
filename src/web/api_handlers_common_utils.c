@@ -8,6 +8,7 @@
 
 #include <cjson/cJSON.h>
 #include "web/api_handlers_common.h"
+#define LOG_COMPONENT "WebAPI"
 #include "core/logger.h"
 #include "web/request_response.h"
 

@@ -11,6 +11,7 @@
 
 #include "web/httpd_utils.h"
 #include "web/request_response.h"
+#define LOG_COMPONENT "HTTP"
 #include "core/logger.h"
 #include "core/config.h"
 #include "database/db_auth.h"

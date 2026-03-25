@@ -18,6 +18,7 @@
 #include "web/api_handlers_go2rtc_proxy.h"
 #include "web/request_response.h"
 #include "core/config.h"
+#define LOG_COMPONENT "go2rtcAPI"
 #include "core/logger.h"
 #include "utils/memory.h"
 

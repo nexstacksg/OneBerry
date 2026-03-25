@@ -18,6 +18,7 @@
 #include "web/request_response.h"
 #include "web/httpd_utils.h"
 #include "web/batch_delete_progress.h"
+#define LOG_COMPONENT "RecordingsAPI"
 #include "core/logger.h"
 #include "core/config.h"
 #include "core/shutdown_coordinator.h"

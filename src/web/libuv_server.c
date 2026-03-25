@@ -21,6 +21,7 @@
 #include "web/go2rtc_proxy_thread.h"
 #include "web/api_handlers_health.h"
 #include "core/config.h"
+#define LOG_COMPONENT "HTTP"
 #include "core/logger.h"
 
 // Initial handler capacity

@@ -11,6 +11,7 @@
 
 #include "web/api_handlers_recordings.h"
 #include "web/request_response.h"
+#define LOG_COMPONENT "RecordingsAPI"
 #include "core/logger.h"
 
 /**

@@ -12,6 +12,7 @@
 #include "web/api_handlers_users.h"
 #include "web/httpd_utils.h"
 #include "web/request_response.h"
+#define LOG_COMPONENT "UsersAPI"
 #include "core/logger.h"
 #include "database/db_auth.h"
 #include "database/db_core.h"

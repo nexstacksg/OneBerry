@@ -12,6 +12,7 @@
 #include <errno.h>
 
 #include "web/api_handlers.h"
+#define LOG_COMPONENT "SystemAPI"
 #include "core/logger.h"
 #include "core/config.h"
 #include <cjson/cJSON.h>

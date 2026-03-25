@@ -25,6 +25,7 @@
 #include "web/api_handlers_health.h"
 #include "web/http_server.h"
 #include "web/request_response.h"
+#define LOG_COMPONENT "HealthCheck"
 #include "core/logger.h"
 #include "core/config.h"
 

@@ -5,6 +5,7 @@
 
 #include "web/api_handlers_system.h"
 #include "video/go2rtc/go2rtc_process.h"
+#define LOG_COMPONENT "SystemAPI"
 #include "core/logger.h"
 #include <stdio.h>
 #include <stdlib.h>

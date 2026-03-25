@@ -18,6 +18,7 @@
 #include "web/libuv_connection.h"
 #include "web/go2rtc_proxy_thread.h"
 #include "web/api_handlers_health.h"
+#define LOG_COMPONENT "HTTP"
 #include "core/logger.h"
 
 // Forward declaration for MIME type helper defined in libuv_file_serve.c

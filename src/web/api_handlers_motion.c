@@ -10,6 +10,7 @@
 #include "web/api_handlers.h"
 #include "web/request_response.h"
 #include "web/httpd_utils.h"
+#define LOG_COMPONENT "MotionAPI"
 #include "core/logger.h"
 #include "database/db_motion_config.h"
 #include "video/onvif_motion_recording.h"

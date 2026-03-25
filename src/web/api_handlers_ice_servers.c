@@ -11,6 +11,7 @@
 #include "web/api_handlers.h"
 #include "web/request_response.h"
 #include "core/config.h"
+#define LOG_COMPONENT "WebAPI"
 #include "core/logger.h"
 
 /**

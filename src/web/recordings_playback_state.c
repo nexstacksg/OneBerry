@@ -7,6 +7,7 @@
 #include <pthread.h>
 #include <time.h>
 #include "web/recordings_playback_state.h"
+#define LOG_COMPONENT "RecordingsAPI"
 #include "core/logger.h"
 
 // Maximum number of concurrent playback sessions
