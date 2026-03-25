@@ -36,7 +36,7 @@ typedef struct {
 // Structure to hold ONVIF subscription information
 typedef struct {
     char camera_url[512];           // URL of the camera (used as the key for lookup)
-    char subscription_address[512]; // Address returned by the ONVIF service
+    char subscription_address[512]; // Address returned by CreatePullPointSubscription (full URL)
     char username[64];              // Username for authentication
     char password[64];              // Password for authentication
     time_t creation_time;
@@ -179,6 +179,65 @@ static char *send_onvif_request(const char *url, const char *username, const cha
     return chunk.memory;
 }
 
+// Send ONVIF request to a full URL (bypassing the base URL + /onvif/ + service construction)
+static char *send_onvif_request_to_url(const char *full_url, const char *username,
+                                       const char *password, const char *request_body) {
+    if (!initialized || !curl_handle) {
+        log_error("ONVIF detection system not initialized");
+        return NULL;
+    }
+
+    pthread_mutex_lock(&curl_mutex);
+    log_info("ONVIF Detection: Sending request to %s", full_url);
+
+    char *soap_request = create_onvif_request(username, password, request_body);
+    if (!soap_request) {
+        log_error("Failed to create ONVIF request");
+        pthread_mutex_unlock(&curl_mutex);
+        return NULL;
+    }
+
+    curl_easy_setopt(curl_handle, CURLOPT_URL, full_url);
+    curl_easy_setopt(curl_handle, CURLOPT_POSTFIELDS, soap_request);
+    curl_easy_setopt(curl_handle, CURLOPT_POSTFIELDSIZE, strlen(soap_request));
+
+    struct curl_slist *headers = NULL;
+    headers = curl_slist_append(headers, "Content-Type: application/soap+xml; charset=utf-8");
+    curl_easy_setopt(curl_handle, CURLOPT_HTTPHEADER, headers);
+
+    memory_struct_t chunk;
+    chunk.memory = malloc(1);
+    chunk.size = 0;
+
+    curl_easy_setopt(curl_handle, CURLOPT_WRITEFUNCTION, write_memory_callback);
+    curl_easy_setopt(curl_handle, CURLOPT_WRITEDATA, (void *)&chunk);
+    curl_easy_setopt(curl_handle, CURLOPT_TIMEOUT, 10);
+
+    CURLcode res = curl_easy_perform(curl_handle);
+    free(soap_request);
+    curl_slist_free_all(headers);
+
+    if (res != CURLE_OK) {
+        log_error("ONVIF Detection: curl_easy_perform() failed: %s", curl_easy_strerror(res));
+        free(chunk.memory);
+        pthread_mutex_unlock(&curl_mutex);
+        return NULL;
+    }
+
+    long http_code = 0;
+    curl_easy_getinfo(curl_handle, CURLINFO_RESPONSE_CODE, &http_code);
+
+    if (http_code != 200) {
+        log_error("ONVIF request to %s failed with HTTP code %ld", full_url, http_code);
+        free(chunk.memory);
+        pthread_mutex_unlock(&curl_mutex);
+        return NULL;
+    }
+
+    pthread_mutex_unlock(&curl_mutex);
+    return chunk.memory;
+}
+
 // Extract subscription address from response
 static char *extract_subscription_address(const char *response) {
     if (!response) return NULL;
@@ -210,6 +269,63 @@ static char *extract_subscription_address(const char *response) {
     return NULL;
 }
 
+// Query GetServices and return the event service URL, or NULL if not found.
+// The returned string is heap-allocated; caller must free() it.
+static char *discover_event_service_url(const char *url, const char *username, const char *password) {
+    const char *request_body =
+        "<GetServices xmlns=\"http://www.onvif.org/ver10/device/wsdl\">"
+            "<IncludeCapability>false</IncludeCapability>"
+        "</GetServices>";
+
+    // GetServices is always sent to the standard device management endpoint
+    char *response = send_onvif_request(url, username, password, request_body, "device_service");
+    if (!response) {
+        log_warn("ONVIF: GetServices to device_service endpoint failed");
+        return NULL;
+    }
+
+    // Find the events service namespace in the response
+    const char *events_ns = "http://www.onvif.org/ver10/events/wsdl";
+    const char *ns_pos = strstr(response, events_ns);
+    if (!ns_pos) {
+        log_warn("ONVIF: Events service namespace not found in GetServices response");
+        free(response);
+        return NULL;
+    }
+
+    // Search forward from the namespace position for XAddr (prefixed and un-prefixed variants)
+    const char *xaddr_open[]  = {"<tds:XAddr>", "<XAddr>", NULL};
+    const char *xaddr_close[] = {"</tds:XAddr>", "</XAddr>", NULL};
+    char *event_url = NULL;
+
+    for (int i = 0; xaddr_open[i] != NULL; i++) {
+        const char *tag = strstr(ns_pos, xaddr_open[i]);
+        // Only accept the XAddr if it is within the same Service element (~512 bytes window)
+        if (tag && (tag - ns_pos) < 512) {
+            const char *val_start = tag + strlen(xaddr_open[i]);
+            const char *val_end   = strstr(val_start, xaddr_close[i]);
+            if (val_end) {
+                size_t url_len = (size_t)(val_end - val_start);
+                event_url = malloc(url_len + 1);
+                if (event_url) {
+                    strncpy(event_url, val_start, url_len);
+                    event_url[url_len] = '\0';
+                }
+                break;
+            }
+        }
+    }
+
+    if (event_url) {
+        log_info("ONVIF: Discovered event service URL: %s", event_url);
+    } else {
+        log_warn("ONVIF: Could not find XAddr for events service in GetServices response");
+    }
+
+    free(response);
+    return event_url;
+}
+
 // Find or create subscription for a camera
 static onvif_subscription_t *get_subscription(const char *url, const char *username, const char *password) {
     pthread_mutex_lock(&subscription_mutex);
@@ -237,14 +353,33 @@ static onvif_subscription_t *get_subscription(const char *url, const char *usern
     log_info("Creating new ONVIF subscription for %s", url);
 
     // Create a new subscription
-    const char *request_body = 
+    const char *request_body =
         "<CreatePullPointSubscription xmlns=\"http://www.onvif.org/ver10/events/wsdl\">\n"
         "  <InitialTerminationTime>PT1H</InitialTerminationTime>\n"
         "</CreatePullPointSubscription>";
 
-    char *response = send_onvif_request(url, username, password, request_body, "service");
+    // Dynamically discover the correct event service URL via GetServices.
+    // Different vendors use different paths (e.g. Tapo uses "service", Lorex uses "event_service").
+    char *discovered_url = discover_event_service_url(url, username, password);
+    char *response = NULL;
+
+    if (discovered_url) {
+        log_info("ONVIF: Sending CreatePullPointSubscription to discovered URL: %s", discovered_url);
+        response = send_onvif_request_to_url(discovered_url, username, password, request_body);
+        free(discovered_url);
+    }
+
     if (!response) {
-        log_error("Failed to create subscription");
+        // Fall back through common event service path suffixes
+        const char *fallback_services[] = {"service", "event_service", NULL};
+        for (int i = 0; fallback_services[i] && !response; i++) {
+            log_info("ONVIF: Trying fallback event endpoint: onvif/%s", fallback_services[i]);
+            response = send_onvif_request(url, username, password, request_body, fallback_services[i]);
+        }
+    }
+
+    if (!response) {
+        log_error("Failed to create subscription on any endpoint");
         pthread_mutex_unlock(&subscription_mutex);
         return NULL;
     }
@@ -458,27 +593,38 @@ int detect_motion_onvif(const char *onvif_url, const char *username, const char 
         return -1;
     }
 
-    // Extract service name from subscription address
-    char *service = extract_service_name(subscription->subscription_address);
-    if (!service) {
-        log_error("Failed to extract service name from subscription address");
-        return -1;
-    }
-
     // Create pull messages request
-    const char *request_body = 
+    const char *request_body =
         "<PullMessages xmlns=\"http://www.onvif.org/ver10/events/wsdl\">\n"
         "  <Timeout>PT5S</Timeout>\n"
         "  <MessageLimit>100</MessageLimit>\n"
         "</PullMessages>";
 
-    // Send request using the stored credentials from the subscription
-    char *response = send_onvif_request(subscription->camera_url, 
-                                       subscription->username, 
-                                       subscription->password, 
-                                       request_body, 
-                                       service);
-    free(service);
+    // Send PullMessages directly to the subscription address (the full URL returned by
+    // CreatePullPointSubscription per ONVIF spec).  Fall back to the legacy path-extraction
+    // approach only when the stored address is not an absolute HTTP URL.
+    char *response = NULL;
+    if (strncmp(subscription->subscription_address, "http://", 7) == 0 ||
+        strncmp(subscription->subscription_address, "https://", 8) == 0) {
+        log_info("ONVIF Detection: Sending PullMessages to %s", subscription->subscription_address);
+        response = send_onvif_request_to_url(subscription->subscription_address,
+                                             subscription->username,
+                                             subscription->password,
+                                             request_body);
+    } else {
+        // Legacy fallback: extract last path component and re-append under /onvif/
+        log_warn("ONVIF Detection: subscription_address is not a full URL ('%s'), using legacy path extraction",
+                 subscription->subscription_address);
+        char *service = extract_service_name(subscription->subscription_address);
+        if (service) {
+            response = send_onvif_request(subscription->camera_url,
+                                         subscription->username,
+                                         subscription->password,
+                                         request_body,
+                                         service);
+            free(service);
+        }
+    }
 
     if (!response) {
         log_error("Failed to pull messages from subscription");
