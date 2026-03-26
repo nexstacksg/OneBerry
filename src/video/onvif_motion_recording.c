@@ -21,6 +21,7 @@
 #include "core/shutdown_coordinator.h"
 #include "database/database_manager.h"
 #include "database/db_recordings.h"
+#include "database/db_streams.h"
 
 // Forward declaration for recording function defined in recording.c
 extern int stop_mp4_recording(const char *stream_name);
@@ -789,6 +790,40 @@ int process_motion_event(const char *stream_name, bool motion_detected, time_t t
     }
 
     log_debug("Queued motion event for stream: %s (active: %d)", stream_name, motion_detected);
+
+    // Cross-stream motion trigger: propagate this event to any streams that
+    // have their motion_trigger_source set to the current stream's name.
+    // This enables dual-lens cameras (e.g. TP-Link C545D) where the fixed
+    // wide-angle lens provides ONVIF events and the PTZ lens does not.
+    int max_streams = g_config.max_streams > 0 ? g_config.max_streams : MAX_STREAMS;
+    stream_config_t *all_streams = calloc(max_streams, sizeof(stream_config_t));
+    if (all_streams) {
+        int count = get_all_stream_configs(all_streams, max_streams);
+        for (int i = 0; i < count; i++) {
+            if (all_streams[i].motion_trigger_source[0] != '\0' &&
+                strcmp(all_streams[i].motion_trigger_source, stream_name) == 0) {
+                // This stream is slaved to the current stream's motion events
+                motion_event_t linked_event;
+                memset(&linked_event, 0, sizeof(motion_event_t));
+                strncpy(linked_event.stream_name, all_streams[i].name, MAX_STREAM_NAME - 1);
+                linked_event.stream_name[MAX_STREAM_NAME - 1] = '\0';
+                linked_event.timestamp = timestamp;
+                linked_event.active = motion_detected;
+                linked_event.confidence = 1.0f;
+                strncpy(linked_event.event_type, "motion", sizeof(linked_event.event_type) - 1);
+
+                if (push_event(&linked_event) != 0) {
+                    log_error("Failed to push linked motion event to stream: %s (triggered by: %s)",
+                              all_streams[i].name, stream_name);
+                } else {
+                    log_info("Propagated motion event (%s) from '%s' to linked stream '%s'",
+                             motion_detected ? "start" : "end", stream_name, all_streams[i].name);
+                }
+            }
+        }
+        free(all_streams);
+    }
+
     return 0;
 }
 

@@ -214,6 +214,63 @@ void test_get_all_stream_names(void) {
     TEST_ASSERT_EQUAL_INT(2, n);
 }
 
+/* ================================================================
+ * motion_trigger_source field
+ * ================================================================ */
+
+void test_motion_trigger_source_defaults_empty(void) {
+    stream_config_t s = make_stream("cam_mts_def", true);
+    add_stream_config(&s);
+
+    stream_config_t got;
+    TEST_ASSERT_EQUAL_INT(0, get_stream_config_by_name("cam_mts_def", &got));
+    TEST_ASSERT_EQUAL_STRING("", got.motion_trigger_source);
+}
+
+void test_motion_trigger_source_round_trip(void) {
+    stream_config_t s = make_stream("cam_ptz", true);
+    strncpy(s.motion_trigger_source, "cam_fixed", sizeof(s.motion_trigger_source) - 1);
+    add_stream_config(&s);
+
+    stream_config_t got;
+    TEST_ASSERT_EQUAL_INT(0, get_stream_config_by_name("cam_ptz", &got));
+    TEST_ASSERT_EQUAL_STRING("cam_fixed", got.motion_trigger_source);
+}
+
+void test_motion_trigger_source_update(void) {
+    stream_config_t s = make_stream("cam_ptz_upd", true);
+    strncpy(s.motion_trigger_source, "cam_fixed_old", sizeof(s.motion_trigger_source) - 1);
+    add_stream_config(&s);
+
+    strncpy(s.motion_trigger_source, "cam_fixed_new", sizeof(s.motion_trigger_source) - 1);
+    TEST_ASSERT_EQUAL_INT(0, update_stream_config("cam_ptz_upd", &s));
+
+    stream_config_t got;
+    TEST_ASSERT_EQUAL_INT(0, get_stream_config_by_name("cam_ptz_upd", &got));
+    TEST_ASSERT_EQUAL_STRING("cam_fixed_new", got.motion_trigger_source);
+}
+
+void test_motion_trigger_source_in_get_all(void) {
+    stream_config_t src = make_stream("cam_src", true);
+    stream_config_t ptz = make_stream("cam_ptz_all", true);
+    strncpy(ptz.motion_trigger_source, "cam_src", sizeof(ptz.motion_trigger_source) - 1);
+    add_stream_config(&src);
+    add_stream_config(&ptz);
+
+    stream_config_t out[10];
+    int n = get_all_stream_configs(out, 10);
+    TEST_ASSERT_EQUAL_INT(2, n);
+
+    bool found_ptz = false;
+    for (int i = 0; i < n; i++) {
+        if (strcmp(out[i].name, "cam_ptz_all") == 0) {
+            TEST_ASSERT_EQUAL_STRING("cam_src", out[i].motion_trigger_source);
+            found_ptz = true;
+        }
+    }
+    TEST_ASSERT_TRUE(found_ptz);
+}
+
 void test_repair_onvif_embedded_credentials_migration_normalizes_legacy_rows(void) {
     sqlite3 *db = get_db_handle();
     exec_sql_or_fail(db, "DELETE FROM streams;");
@@ -262,6 +319,10 @@ int main(void) {
     RUN_TEST(test_stream_retention_config_round_trip);
     RUN_TEST(test_get_all_stream_names);
     RUN_TEST(test_repair_onvif_embedded_credentials_migration_normalizes_legacy_rows);
+    RUN_TEST(test_motion_trigger_source_defaults_empty);
+    RUN_TEST(test_motion_trigger_source_round_trip);
+    RUN_TEST(test_motion_trigger_source_update);
+    RUN_TEST(test_motion_trigger_source_in_get_all);
 
     int result = UNITY_END();
     shutdown_database();

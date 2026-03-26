@@ -131,7 +131,8 @@ uint64_t add_stream_config(const stream_config_t *stream) {
                                 "tier_critical_multiplier = ?, tier_important_multiplier = ?, tier_ephemeral_multiplier = ?, storage_priority = ?, "
                                 "ptz_enabled = ?, ptz_max_x = ?, ptz_max_y = ?, ptz_max_z = ?, ptz_has_home = ?, "
                                 "onvif_username = ?, onvif_password = ?, onvif_profile = ?, onvif_port = ?, "
-                                "record_on_schedule = ?, recording_schedule = ?, tags = ?, admin_url = ? "
+                                "record_on_schedule = ?, recording_schedule = ?, tags = ?, admin_url = ?, "
+                                "privacy_mode = ?, motion_trigger_source = ? "
                                 "WHERE id = ?;";
 
         rc = sqlite3_prepare_v2(db, update_sql, -1, &stmt, NULL);
@@ -208,12 +209,14 @@ uint64_t add_stream_config(const stream_config_t *stream) {
         serialize_recording_schedule(stream->recording_schedule, schedule_buf, sizeof(schedule_buf));
         sqlite3_bind_text(stmt, 41, schedule_buf, -1, SQLITE_TRANSIENT);
 
-        // Bind tags and admin URL parameters
+        // Bind tags, admin URL, privacy_mode and motion_trigger_source parameters
         sqlite3_bind_text(stmt, 42, stream->tags, -1, SQLITE_STATIC);
         sqlite3_bind_text(stmt, 43, stream->admin_url, -1, SQLITE_STATIC);
+        sqlite3_bind_int(stmt, 44, stream->privacy_mode ? 1 : 0);
+        sqlite3_bind_text(stmt, 45, stream->motion_trigger_source, -1, SQLITE_STATIC);
 
         // Bind ID parameter
-        sqlite3_bind_int64(stmt, 44, (sqlite3_int64)existing_id);
+        sqlite3_bind_int64(stmt, 46, (sqlite3_int64)existing_id);
 
         // Execute statement
         rc = sqlite3_step(stmt);
@@ -261,8 +264,8 @@ uint64_t add_stream_config(const stream_config_t *stream) {
           "tier_critical_multiplier, tier_important_multiplier, tier_ephemeral_multiplier, storage_priority, "
           "ptz_enabled, ptz_max_x, ptz_max_y, ptz_max_z, ptz_has_home, "
           "onvif_username, onvif_password, onvif_profile, onvif_port, "
-          "record_on_schedule, recording_schedule, tags, admin_url, privacy_mode) "
-          "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);";
+          "record_on_schedule, recording_schedule, tags, admin_url, privacy_mode, motion_trigger_source) "
+          "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);";
 
     rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
     if (rc != SQLITE_OK) {
@@ -339,10 +342,11 @@ uint64_t add_stream_config(const stream_config_t *stream) {
     serialize_recording_schedule(stream->recording_schedule, insert_schedule_buf, sizeof(insert_schedule_buf));
     sqlite3_bind_text(stmt, 42, insert_schedule_buf, -1, SQLITE_TRANSIENT);
 
-    // Bind tags, admin URL, and privacy_mode parameters
+    // Bind tags, admin URL, privacy_mode, and motion_trigger_source parameters
     sqlite3_bind_text(stmt, 43, stream->tags, -1, SQLITE_STATIC);
     sqlite3_bind_text(stmt, 44, stream->admin_url, -1, SQLITE_STATIC);
     sqlite3_bind_int(stmt, 45, stream->privacy_mode ? 1 : 0);
+    sqlite3_bind_text(stmt, 46, stream->motion_trigger_source, -1, SQLITE_STATIC);
 
     // Execute statement
     rc = sqlite3_step(stmt);
@@ -412,7 +416,8 @@ int update_stream_config(const char *name, const stream_config_t *stream) {
                       "tier_critical_multiplier = ?, tier_important_multiplier = ?, tier_ephemeral_multiplier = ?, storage_priority = ?, "
                       "ptz_enabled = ?, ptz_max_x = ?, ptz_max_y = ?, ptz_max_z = ?, ptz_has_home = ?, "
                       "onvif_username = ?, onvif_password = ?, onvif_profile = ?, onvif_port = ?, "
-                      "record_on_schedule = ?, recording_schedule = ?, tags = ?, admin_url = ?, privacy_mode = ? "
+                      "record_on_schedule = ?, recording_schedule = ?, tags = ?, admin_url = ?, privacy_mode = ?, "
+                      "motion_trigger_source = ? "
                       "WHERE name = ?;";
 
     rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
@@ -490,13 +495,14 @@ int update_stream_config(const char *name, const stream_config_t *stream) {
     serialize_recording_schedule(stream->recording_schedule, update_schedule_buf, sizeof(update_schedule_buf));
     sqlite3_bind_text(stmt, 42, update_schedule_buf, -1, SQLITE_TRANSIENT);
 
-    // Bind tags, admin URL, and privacy_mode parameters
+    // Bind tags, admin URL, privacy_mode, and motion_trigger_source parameters
     sqlite3_bind_text(stmt, 43, stream->tags, -1, SQLITE_STATIC);
     sqlite3_bind_text(stmt, 44, stream->admin_url, -1, SQLITE_STATIC);
     sqlite3_bind_int(stmt, 45, stream->privacy_mode ? 1 : 0);
+    sqlite3_bind_text(stmt, 46, stream->motion_trigger_source, -1, SQLITE_STATIC);
 
     // Bind the WHERE clause parameter
-    sqlite3_bind_text(stmt, 46, name, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 47, name, -1, SQLITE_STATIC);
 
     // Execute statement
     rc = sqlite3_step(stmt);
@@ -768,7 +774,7 @@ int get_stream_config_by_name(const char *name, stream_config_t *stream) {
         "tier_critical_multiplier, tier_important_multiplier, tier_ephemeral_multiplier, storage_priority, "
         "ptz_enabled, ptz_max_x, ptz_max_y, ptz_max_z, ptz_has_home, "
         "onvif_username, onvif_password, onvif_profile, onvif_port, "
-        "record_on_schedule, recording_schedule, tags, admin_url, privacy_mode "
+        "record_on_schedule, recording_schedule, tags, admin_url, privacy_mode, motion_trigger_source "
         "FROM streams WHERE name = ?;";
 
     // Column index constants for readability
@@ -783,7 +789,8 @@ int get_stream_config_by_name(const char *name, stream_config_t *stream) {
         COL_TIER_CRITICAL_MULTIPLIER, COL_TIER_IMPORTANT_MULTIPLIER, COL_TIER_EPHEMERAL_MULTIPLIER, COL_STORAGE_PRIORITY,
         COL_PTZ_ENABLED, COL_PTZ_MAX_X, COL_PTZ_MAX_Y, COL_PTZ_MAX_Z, COL_PTZ_HAS_HOME,
         COL_ONVIF_USERNAME, COL_ONVIF_PASSWORD, COL_ONVIF_PROFILE, COL_ONVIF_PORT,
-        COL_RECORD_ON_SCHEDULE, COL_RECORDING_SCHEDULE, COL_TAGS, COL_ADMIN_URL, COL_PRIVACY_MODE
+        COL_RECORD_ON_SCHEDULE, COL_RECORDING_SCHEDULE, COL_TAGS, COL_ADMIN_URL, COL_PRIVACY_MODE,
+        COL_MOTION_TRIGGER_SOURCE
     };
 
     rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
@@ -948,6 +955,15 @@ int get_stream_config_by_name(const char *name, stream_config_t *stream) {
         // Privacy mode
         stream->privacy_mode = sqlite3_column_int(stmt, COL_PRIVACY_MODE) != 0;
 
+        // Cross-stream motion trigger source
+        const char *motion_trigger_source = (const char *)sqlite3_column_text(stmt, COL_MOTION_TRIGGER_SOURCE);
+        if (motion_trigger_source) {
+            strncpy(stream->motion_trigger_source, motion_trigger_source, sizeof(stream->motion_trigger_source) - 1);
+            stream->motion_trigger_source[sizeof(stream->motion_trigger_source) - 1] = '\0';
+        } else {
+            stream->motion_trigger_source[0] = '\0';
+        }
+
         result = 0;
     }
 
@@ -999,7 +1015,7 @@ int get_all_stream_configs(stream_config_t *streams, int max_count) {
         "tier_critical_multiplier, tier_important_multiplier, tier_ephemeral_multiplier, storage_priority, "
         "ptz_enabled, ptz_max_x, ptz_max_y, ptz_max_z, ptz_has_home, "
         "onvif_username, onvif_password, onvif_profile, onvif_port, "
-        "record_on_schedule, recording_schedule, tags, admin_url, privacy_mode "
+        "record_on_schedule, recording_schedule, tags, admin_url, privacy_mode, motion_trigger_source "
         "FROM streams ORDER BY name;";
 
     // Column index constants (same as get_stream_config_by_name)
@@ -1014,7 +1030,8 @@ int get_all_stream_configs(stream_config_t *streams, int max_count) {
         COL_TIER_CRITICAL_MULTIPLIER, COL_TIER_IMPORTANT_MULTIPLIER, COL_TIER_EPHEMERAL_MULTIPLIER, COL_STORAGE_PRIORITY,
         COL_PTZ_ENABLED, COL_PTZ_MAX_X, COL_PTZ_MAX_Y, COL_PTZ_MAX_Z, COL_PTZ_HAS_HOME,
         COL_ONVIF_USERNAME, COL_ONVIF_PASSWORD, COL_ONVIF_PROFILE, COL_ONVIF_PORT,
-        COL_RECORD_ON_SCHEDULE, COL_RECORDING_SCHEDULE, COL_TAGS, COL_ADMIN_URL, COL_PRIVACY_MODE
+        COL_RECORD_ON_SCHEDULE, COL_RECORDING_SCHEDULE, COL_TAGS, COL_ADMIN_URL, COL_PRIVACY_MODE,
+        COL_MOTION_TRIGGER_SOURCE
     };
 
     rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
@@ -1177,6 +1194,15 @@ int get_all_stream_configs(stream_config_t *streams, int max_count) {
 
         // Privacy mode
         s->privacy_mode = sqlite3_column_int(stmt, COL_PRIVACY_MODE) != 0;
+
+        // Cross-stream motion trigger source
+        const char *motion_trigger_src = (const char *)sqlite3_column_text(stmt, COL_MOTION_TRIGGER_SOURCE);
+        if (motion_trigger_src) {
+            strncpy(s->motion_trigger_source, motion_trigger_src, sizeof(s->motion_trigger_source) - 1);
+            s->motion_trigger_source[sizeof(s->motion_trigger_source) - 1] = '\0';
+        } else {
+            s->motion_trigger_source[0] = '\0';
+        }
 
         count++;
     }

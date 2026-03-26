@@ -617,6 +617,12 @@ static const char migration_0038_up[] =
 static const char migration_0038_down[] =
     "SELECT 1;";
 
+static const char migration_0039_up[] =
+    "ALTER TABLE streams ADD COLUMN motion_trigger_source TEXT DEFAULT '';";
+
+static const char migration_0039_down[] =
+    "SELECT 1;";
+
 static const migration_t embedded_migrations_data[] = {
     {
         .version = "0001",
@@ -884,8 +890,15 @@ static const migration_t embedded_migrations_data[] = {
         .sql_down = migration_0038_down,
         .is_embedded = true
     },
+    {
+        .version = "0039",
+        .description = "add_motion_trigger_source",
+        .sql_up = migration_0039_up,
+        .sql_down = migration_0039_down,
+        .is_embedded = true
+    },
 };
 
-#define EMBEDDED_MIGRATIONS_COUNT 38
+#define EMBEDDED_MIGRATIONS_COUNT 39
 
 #endif /* DB_EMBEDDED_MIGRATIONS_H */

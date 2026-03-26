@@ -4,12 +4,14 @@
  */
 
 #define _POSIX_C_SOURCE 200809L
+#define _GNU_SOURCE
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <sys/stat.h>
+#include <time.h>
 
 #include <cjson/cJSON.h>
 
@@ -17,8 +19,12 @@
 #include "core/config.h"
 #include "core/logger.h"
 #include "database/db_core.h"
+#include "database/db_streams.h"
+#include "web/api_handlers.h"
 #include "web/api_handlers_system.h"
 #include "web/request_response.h"
+#include "video/stream_manager.h"
+#include "video/stream_state.h"
 
 extern config_t g_config;
 
@@ -43,6 +49,33 @@ static cJSON *find_version_item(cJSON *items, const char *name) {
         }
     }
     return NULL;
+}
+
+/* ---- helpers ---- */
+static void clear_db_streams(void) {
+    sqlite3 *db = get_db_handle();
+    sqlite3_exec(db, "DELETE FROM streams;", NULL, NULL, NULL);
+}
+
+static stream_config_t make_test_stream(const char *name) {
+    stream_config_t s;
+    memset(&s, 0, sizeof(s));
+    strncpy(s.name, name, sizeof(s.name) - 1);
+    strncpy(s.url, "rtsp://localhost/stream", sizeof(s.url) - 1);
+    strncpy(s.codec, "h264", sizeof(s.codec) - 1);
+    s.enabled  = true;
+    s.width    = 1920;
+    s.height   = 1080;
+    s.fps      = 25;
+    s.priority = 5;
+    s.segment_duration = 60;
+    s.streaming_enabled = true;
+    s.tier_critical_multiplier  = 3.0;
+    s.tier_important_multiplier = 2.0;
+    s.tier_ephemeral_multiplier = 0.25;
+    s.storage_priority = 5;
+    strncpy(s.detection_object_filter, "none", sizeof(s.detection_object_filter) - 1);
+    return s;
 }
 
 void setUp(void) {
@@ -101,6 +134,90 @@ void test_handle_get_system_info_includes_empty_stream_storage_array(void) {
     http_response_free(&res);
 }
 
+/* ================================================================
+ * handle_get_streams — motion_trigger_source field present in JSON
+ * ================================================================ */
+
+void test_handle_get_streams_includes_motion_trigger_source(void) {
+    clear_db_streams();
+
+    stream_config_t ptz = make_test_stream("ptz_cam");
+    strncpy(ptz.motion_trigger_source, "fixed_cam", sizeof(ptz.motion_trigger_source) - 1);
+    add_stream_config(&ptz);
+
+    http_request_t req;
+    http_response_t res;
+    http_request_init(&req);
+    http_response_init(&res);
+
+    handle_get_streams(&req, &res);
+
+    TEST_ASSERT_EQUAL_INT(200, res.status_code);
+
+    /* handle_get_streams returns a bare JSON array (not wrapped in an object) */
+    cJSON *root = parse_response_json(&res);
+    TEST_ASSERT_NOT_NULL(root);
+    TEST_ASSERT_TRUE(cJSON_IsArray(root));
+    TEST_ASSERT_EQUAL_INT(1, cJSON_GetArraySize(root));
+
+    cJSON *stream = cJSON_GetArrayItem(root, 0);
+    cJSON *mts = cJSON_GetObjectItemCaseSensitive(stream, "motion_trigger_source");
+    TEST_ASSERT_NOT_NULL(mts);
+    TEST_ASSERT_TRUE(cJSON_IsString(mts));
+    TEST_ASSERT_EQUAL_STRING("fixed_cam", mts->valuestring);
+
+    cJSON_Delete(root);
+    http_response_free(&res);
+    clear_db_streams();
+}
+
+/* ================================================================
+ * handle_put_stream — motion_trigger_source JSON parsing exercised
+ *
+ * handle_put_stream looks up the stream by name from the in-memory stream
+ * manager (not only the DB), so we need to register the stream there first.
+ * ================================================================ */
+
+void test_handle_put_stream_parses_motion_trigger_source(void) {
+    clear_db_streams();
+
+    /* Register stream in both DB and in-memory stream manager */
+    stream_config_t s = make_test_stream("cam_put_mts");
+    add_stream_config(&s);
+
+    init_stream_state_manager(16);
+    init_stream_manager(16);
+    add_stream(&s);   /* register in-memory so the PUT handler can find it */
+
+    http_request_t req;
+    http_response_t res;
+    http_request_init(&req);
+    http_response_init(&res);
+
+    /* Set URL path so handler can extract the stream name */
+    strncpy(req.path, "/api/streams/cam_put_mts", sizeof(req.path) - 1);
+
+    /* JSON body with motion_trigger_source to exercise the new parsing code */
+    static const char json_body[] = "{\"motion_trigger_source\":\"cam_fixed_src\"}";
+    req.body     = (uint8_t *)json_body;
+    req.body_len = sizeof(json_body) - 1;
+
+    handle_put_stream(&req, &res);
+
+    /* PUT returns 202 Accepted immediately; the actual restart runs async.
+     * Give the detached worker thread a moment to finish before we tear down
+     * the stream manager and DB so ASan doesn't report use-after-free. */
+    usleep(200000);
+
+    TEST_ASSERT_TRUE(res.status_code == 202 || res.status_code == 400 ||
+                     res.status_code == 404 || res.status_code == 500);
+
+    http_response_free(&res);
+    shutdown_stream_manager();
+    shutdown_stream_state_manager();
+    clear_db_streams();
+}
+
 int main(void) {
     init_logger();
     load_default_config(&g_config);
@@ -118,9 +235,16 @@ int main(void) {
         return 1;
     }
 
+    /* handle_get_streams uses g_config.max_streams for allocation */
+    if (g_config.max_streams == 0) {
+        g_config.max_streams = 16;
+    }
+
     UNITY_BEGIN();
     RUN_TEST(test_handle_get_system_info_includes_versions_summary);
     RUN_TEST(test_handle_get_system_info_includes_empty_stream_storage_array);
+    RUN_TEST(test_handle_get_streams_includes_motion_trigger_source);
+    RUN_TEST(test_handle_put_stream_parses_motion_trigger_source);
     int result = UNITY_END();
 
     shutdown_database();

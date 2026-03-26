@@ -657,6 +657,16 @@ void handle_post_stream(const http_request_t *req, http_response_t *res) {
         config.admin_url[0] = '\0';
     }
 
+    // Parse cross-stream motion trigger source
+    cJSON *motion_trigger_source_post = cJSON_GetObjectItem(stream_json, "motion_trigger_source");
+    if (motion_trigger_source_post && cJSON_IsString(motion_trigger_source_post)) {
+        strncpy(config.motion_trigger_source, motion_trigger_source_post->valuestring,
+                sizeof(config.motion_trigger_source) - 1);
+        config.motion_trigger_source[sizeof(config.motion_trigger_source) - 1] = '\0';
+    } else {
+        config.motion_trigger_source[0] = '\0';
+    }
+
     // Check if isOnvif flag is set in the request
     cJSON *is_onvif = cJSON_GetObjectItem(stream_json, "isOnvif");
     if (is_onvif && cJSON_IsBool(is_onvif)) {
@@ -1254,6 +1264,25 @@ void handle_put_stream(const http_request_t *req, http_response_t *res) {
     } else if (admin_url_put && cJSON_IsNull(admin_url_put)) {
         if (config.admin_url[0] != '\0') {
             config.admin_url[0] = '\0';
+            config_changed = true;
+        }
+    }
+
+    // Parse cross-stream motion trigger source
+    cJSON *motion_trigger_source_put = cJSON_GetObjectItem(stream_json, "motion_trigger_source");
+    if (motion_trigger_source_put && cJSON_IsString(motion_trigger_source_put)) {
+        if (strncmp(config.motion_trigger_source, motion_trigger_source_put->valuestring,
+                    sizeof(config.motion_trigger_source) - 1) != 0) {
+            strncpy(config.motion_trigger_source, motion_trigger_source_put->valuestring,
+                    sizeof(config.motion_trigger_source) - 1);
+            config.motion_trigger_source[sizeof(config.motion_trigger_source) - 1] = '\0';
+            config_changed = true;
+            log_info("Motion trigger source changed to '%s' for stream %s",
+                     config.motion_trigger_source, config.name);
+        }
+    } else if (motion_trigger_source_put && cJSON_IsNull(motion_trigger_source_put)) {
+        if (config.motion_trigger_source[0] != '\0') {
+            config.motion_trigger_source[0] = '\0';
             config_changed = true;
         }
     }

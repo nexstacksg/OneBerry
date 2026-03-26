@@ -92,6 +92,12 @@ typedef struct {
     // When true the stream is stopped (equivalent to disabled) but remains
     // visible in the Live View with a privacy overlay.
     bool privacy_mode;
+
+    // Cross-stream motion trigger: when set to another stream's name, this
+    // stream's recording is triggered by motion events from that source stream.
+    // Useful for dual-lens cameras where one lens provides ONVIF events and
+    // the other (e.g. PTZ) does not expose its own motion events.
+    char motion_trigger_source[MAX_STREAM_NAME];
 } stream_config_t;
 
 // Size of recording schedule text buffer: 168 values + 167 commas + null terminator

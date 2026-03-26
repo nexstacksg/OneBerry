@@ -240,6 +240,7 @@ void handle_get_streams(const http_request_t *req, http_response_t *res) {
         cJSON_AddStringToObject(stream_obj, "tags", db_streams[i].tags);
         cJSON_AddStringToObject(stream_obj, "admin_url", db_streams[i].admin_url);
         cJSON_AddBoolToObject(stream_obj, "privacy_mode", db_streams[i].privacy_mode);
+        cJSON_AddStringToObject(stream_obj, "motion_trigger_source", db_streams[i].motion_trigger_source);
 
         // Get stream status
         stream_handle_t stream = get_stream_by_name(db_streams[i].name);
@@ -399,6 +400,7 @@ void handle_get_stream(const http_request_t *req, http_response_t *res) {
     cJSON_AddStringToObject(stream_obj, "tags", config.tags);
     cJSON_AddStringToObject(stream_obj, "admin_url", config.admin_url);
     cJSON_AddBoolToObject(stream_obj, "privacy_mode", config.privacy_mode);
+    cJSON_AddStringToObject(stream_obj, "motion_trigger_source", config.motion_trigger_source);
 
     // Get stream status — resolve using UDT state so that go2rtc-managed
     // streams (which stay INACTIVE in the state manager) report accurately.
@@ -552,6 +554,7 @@ void handle_get_stream_full(const http_request_t *req, http_response_t *res) {
     cJSON_AddStringToObject(stream_obj, "tags", config.tags);
     cJSON_AddStringToObject(stream_obj, "admin_url", config.admin_url);
     cJSON_AddBoolToObject(stream_obj, "privacy_mode", config.privacy_mode);
+    cJSON_AddStringToObject(stream_obj, "motion_trigger_source", config.motion_trigger_source);
 
     // Status — resolve using UDT state for accurate reporting when go2rtc
     // manages the stream (state manager stays INACTIVE/STOPPED at startup).
