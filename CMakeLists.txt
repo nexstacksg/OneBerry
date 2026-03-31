@@ -77,11 +77,14 @@ set(LIGHTNVR_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/include)
 # Find required packages
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(FFMPEG REQUIRED
-    libavcodec>=61
-    libavformat>=61
-    libavutil>=59
-    libswscale>=8
-    libswresample>=5)
+    # The codebase supports older FFmpeg releases via version guards in the
+    # recorder and MP4 writer paths, so keep the configure floor aligned with
+    # that compatibility instead of requiring the newest major versions.
+    libavcodec>=59
+    libavformat>=59
+    libavutil>=58
+    libswscale>=7
+    libswresample>=4)
 pkg_check_modules(SQLITE REQUIRED sqlite3)
 pkg_check_modules(CURL REQUIRED libcurl)
 find_package(Threads REQUIRED)
@@ -254,7 +257,7 @@ if(NOT LLHTTP_FOUND)
 
         # Download the pinned llhttp release
         # LLHTTP_VERSION is defined as a cache variable earlier; use it here without overriding it
-        set(LLHTTP_BASE_URL "https://raw.githubusercontent.com/nodejs/llhttp/${LLHTTP_VERSION}")
+        set(LLHTTP_BASE_URL "https://raw.githubusercontent.com/nodejs/llhttp/refs/tags/${LLHTTP_VERSION}")
 
         file(DOWNLOAD
             "${LLHTTP_BASE_URL}/src/llhttp.c"

@@ -22,6 +22,8 @@ sudo apt-get install -y \
     libswscale-dev \
     libcurl4-openssl-dev \
     libmbedtls-dev \
+    libuv1-dev \
+    libcjson-dev \
     curl \
     wget
 ```
@@ -42,6 +44,8 @@ sudo dnf install -y \
     ffmpeg-devel \
     libcurl-devel \
     mbedtls-devel \
+    libuv-devel \
+    cjson-devel \
     curl \
     wget
 ```
@@ -59,7 +63,11 @@ sudo pacman -S \
     ffmpeg \
     curl \
     wget \
-    mbedtls
+    libuv \
+    cjson \
+    mbedtls \
+    curl \
+    wget
 ```
 
 **Note**: `mbedtls` is **required** for ONVIF support and authentication system (cryptographic functions).
