@@ -10,6 +10,7 @@ import { SnapshotButton } from './SnapshotManager.jsx';
 import { LoadingIndicator } from './LoadingIndicator.jsx';
 import { showStatusMessage } from './ToastContainer.jsx';
 import { PTZControls } from './PTZControls.jsx';
+import { FullscreenTimelineOverlay } from './FullscreenTimelineOverlay.jsx';
 import { ConfirmDialog } from './UI.jsx';
 import { getGo2rtcBaseUrl } from '../../utils/settings-utils.js';
 import { formatFilenameTimestamp } from '../../utils/date-utils.js';
@@ -94,6 +95,7 @@ export function WebRTCVideoCell({
   const [connectionQuality, setConnectionQuality] = useState('unknown'); // 'unknown', 'good', 'fair', 'poor', 'bad'
   const [retryCount, setRetryCount] = useState(0); // Used to trigger WebRTC re-initialization
   const [showRefreshConfirm, setShowRefreshConfirm] = useState(false);
+  const [isFullscreenCell, setIsFullscreenCell] = useState(false);
 
   // Backchannel (two-way audio) state
   const [isTalking, setIsTalking] = useState(false);
@@ -153,6 +155,22 @@ export function WebRTCVideoCell({
   const analyserRef = useRef(null);
   const audioLevelIntervalRef = useRef(null);
   const disconnectRecoveryTimeoutRef = useRef(null);
+
+  useEffect(() => {
+    const syncFullscreenState = () => {
+      const fullscreenElement = document.fullscreenElement || document.webkitFullscreenElement;
+      setIsFullscreenCell(fullscreenElement === cellRef.current);
+    };
+
+    syncFullscreenState();
+    document.addEventListener('fullscreenchange', syncFullscreenState);
+    document.addEventListener('webkitfullscreenchange', syncFullscreenState);
+
+    return () => {
+      document.removeEventListener('fullscreenchange', syncFullscreenState);
+      document.removeEventListener('webkitfullscreenchange', syncFullscreenState);
+    };
+  }, []);
 
   // Initialize WebRTC connection when component mounts
   useEffect(() => {
@@ -1150,7 +1168,7 @@ export function WebRTCVideoCell({
       )}
 
       {/* Stream name overlay with connection quality indicator */}
-      {showLabels && (
+      {showLabels && !isFullscreenCell && (
         <div
           className="stream-name-overlay"
           style={{
@@ -1217,7 +1235,7 @@ export function WebRTCVideoCell({
       )}
 
       {/* Stream controls */}
-      {showControls && (
+      {showControls && !isFullscreenCell && (
       <div
         className="stream-controls"
         style={{
@@ -1570,10 +1588,18 @@ export function WebRTCVideoCell({
       </div>
       )}
 
+      {/* Fullscreen-only timeline dock */}
+      {isFullscreenCell && isPlaying && !error && (
+        <FullscreenTimelineOverlay
+          streamName={stream.name}
+          isVisible={true}
+        />
+      )}
+
       {/* PTZ Controls overlay */}
       <PTZControls
         stream={stream}
-        isVisible={showPTZControls}
+        isVisible={showPTZControls && !isFullscreenCell}
         onClose={() => setShowPTZControls(false)}
       />
 
