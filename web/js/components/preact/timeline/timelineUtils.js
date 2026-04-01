@@ -61,7 +61,14 @@ export function panTimelineRange(startHour, endHour, deltaHours, maxHours = MAX_
   };
 }
 
-export function zoomTimelineRange(startHour, endHour, zoomFactor, anchorHour = null, maxHours = MAX_TIMELINE_VIEW_HOURS) {
+export function zoomTimelineRange(
+  startHour,
+  endHour,
+  zoomFactor,
+  anchorHour = null,
+  maxHours = MAX_TIMELINE_VIEW_HOURS,
+  minHours = MIN_TIMELINE_VIEW_HOURS
+) {
   const normalized = normalizeTimelineRange(startHour, endHour, maxHours);
   if (!Number.isFinite(zoomFactor) || zoomFactor <= 0 || zoomFactor === 1) {
     return normalized;
@@ -71,7 +78,10 @@ export function zoomTimelineRange(startHour, endHour, zoomFactor, anchorHour = n
     ? maxHours
     : MAX_TIMELINE_VIEW_HOURS;
   const currentRange = normalized.endHour - normalized.startHour;
-  const nextRange = clamp(currentRange * zoomFactor, MIN_TIMELINE_VIEW_HOURS, cappedMaxHours);
+  const safeMinHours = Number.isFinite(minHours) && minHours > 0
+    ? minHours
+    : MIN_TIMELINE_VIEW_HOURS;
+  const nextRange = clamp(currentRange * zoomFactor, safeMinHours, cappedMaxHours);
   const resolvedAnchorHour = clamp(
     Number.isFinite(anchorHour) ? anchorHour : ((normalized.startHour + normalized.endHour) / 2),
     normalized.startHour,
@@ -376,4 +386,3 @@ export function getClippedSegmentHourRange(segment, selectedDate) {
     endHour: (visibleEnd - bounds.startTimestamp) / 3600
   };
 }
-

@@ -96,6 +96,7 @@ export function WebRTCVideoCell({
   const [retryCount, setRetryCount] = useState(0); // Used to trigger WebRTC re-initialization
   const [showRefreshConfirm, setShowRefreshConfirm] = useState(false);
   const [isFullscreenCell, setIsFullscreenCell] = useState(false);
+  const [fullscreenPlayback, setFullscreenPlayback] = useState(null);
 
   // Backchannel (two-way audio) state
   const [isTalking, setIsTalking] = useState(false);
@@ -141,6 +142,7 @@ export function WebRTCVideoCell({
 
   // Refs
   const videoRef = useRef(null);
+  const playbackVideoRef = useRef(null);
   const cellRef = useRef(null);
   const peerConnectionRef = useRef(null);
   const detectionOverlayRef = useRef(null);
@@ -171,6 +173,38 @@ export function WebRTCVideoCell({
       document.removeEventListener('webkitfullscreenchange', syncFullscreenState);
     };
   }, []);
+
+  useEffect(() => {
+    if (!isFullscreenCell && fullscreenPlayback) {
+      setFullscreenPlayback(null);
+    }
+  }, [fullscreenPlayback, isFullscreenCell]);
+
+  useEffect(() => {
+    const video = playbackVideoRef.current;
+    if (!fullscreenPlayback || !video) {
+      return undefined;
+    }
+
+    const seekTo = Math.max(0, fullscreenPlayback.offsetSeconds || 0);
+    const applySeek = () => {
+      try {
+        video.currentTime = seekTo;
+      } catch (error) {
+        console.warn('Unable to seek fullscreen playback video', error);
+      }
+
+      video.play().catch(() => {});
+    };
+
+    if (video.readyState >= 1) {
+      applySeek();
+      return undefined;
+    }
+
+    video.addEventListener('loadedmetadata', applySeek, { once: true });
+    return () => video.removeEventListener('loadedmetadata', applySeek);
+  }, [fullscreenPlayback]);
 
   // Initialize WebRTC connection when component mounts
   useEffect(() => {
@@ -1132,6 +1166,23 @@ export function WebRTCVideoCell({
     }
   }, [talkMode, isTalking, startTalking, stopTalking]);
 
+  const handleFullscreenPreviewSelect = useCallback((sample) => {
+    if (!sample || !sample.playbackUrl) {
+      return;
+    }
+
+    setFullscreenPlayback({
+      playbackUrl: sample.playbackUrl,
+      offsetSeconds: sample.offsetSeconds || 0,
+      timestamp: sample.timestamp || null,
+      segmentId: sample.segmentId || null
+    });
+  }, []);
+
+  const handleReturnToLive = useCallback(() => {
+    setFullscreenPlayback(null);
+  }, []);
+
   return (
     <div
       className="video-cell"
@@ -1141,7 +1192,10 @@ export function WebRTCVideoCell({
       style={{
         position: 'relative',
         pointerEvents: 'auto',
-        zIndex: 1
+        zIndex: 1,
+        display: isFullscreenCell ? 'flex' : 'block',
+        flexDirection: isFullscreenCell ? 'column' : 'row',
+        overflow: 'hidden'
       }}
     >
       {/* Video element */}
@@ -1153,11 +1207,41 @@ export function WebRTCVideoCell({
         muted={!audioEnabled}
         disablePictureInPicture
         playsInline
-        style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+        style={{
+          width: '100%',
+          height: '100%',
+          objectFit: 'contain',
+          position: isFullscreenCell ? 'relative' : 'absolute',
+          flex: isFullscreenCell ? '1 1 auto' : undefined,
+          minHeight: isFullscreenCell ? 0 : undefined,
+          display: isFullscreenCell && fullscreenPlayback ? 'none' : undefined
+        }}
       />
 
+      {isFullscreenCell && fullscreenPlayback && (
+        <video
+          ref={playbackVideoRef}
+          className="video-element"
+          autoPlay
+          muted={!audioEnabled}
+          playsInline
+          disablePictureInPicture
+          src={fullscreenPlayback.playbackUrl}
+          onEnded={handleReturnToLive}
+          style={{
+            width: '100%',
+            height: '100%',
+            objectFit: 'contain',
+            position: 'relative',
+            flex: '1 1 auto',
+            minHeight: 0,
+            backgroundColor: 'black'
+          }}
+        />
+      )}
+
       {/* Detection overlay component */}
-      {stream.detection_based_recording && stream.detection_model && showDetections && (
+      {stream.detection_based_recording && stream.detection_model && showDetections && !isFullscreenCell && (
         <DetectionOverlay
           ref={detectionOverlayRef}
           streamName={stream.name}
@@ -1593,6 +1677,8 @@ export function WebRTCVideoCell({
         <FullscreenTimelineOverlay
           streamName={stream.name}
           isVisible={true}
+          onPreviewSelect={handleFullscreenPreviewSelect}
+          onReturnToLive={handleReturnToLive}
         />
       )}
 
