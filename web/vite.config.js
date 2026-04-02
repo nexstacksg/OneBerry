@@ -134,6 +134,7 @@ export default defineConfig({
         index: resolve(__dirname, 'index.html'),
         login: resolve(__dirname, 'login.html'),
         recordings: resolve(__dirname, 'recordings.html'),
+        cameraAccess: resolve(__dirname, 'camera-access.html'),
         settings: resolve(__dirname, 'settings.html'),
         streams: resolve(__dirname, 'streams.html'),
         system: resolve(__dirname, 'system.html'),
