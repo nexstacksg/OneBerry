@@ -754,6 +754,9 @@ export function StreamConfigModal({
                       <p className="text-sm text-muted-foreground">
                         <strong className="text-foreground">{t('streamsConfig.bothModesEnabled')}</strong> {t('streamsConfig.bothModesEnabledHelp')}
                       </p>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Built-in motion detection will annotate the continuous recording. If you want motion-triggered clips only, turn off continuous recording.
+                      </p>
                     </div>
                   )}
                   {!currentStream.record && currentStream.detectionEnabled && (
@@ -929,7 +932,10 @@ export function StreamConfigModal({
 
                       <div>
                         <label htmlFor="stream-detection-threshold" className="block text-sm font-medium mb-2">
-                          {t('streamsConfig.detectionThreshold')}: <span className="text-primary font-semibold">{currentStream.detectionThreshold}%</span>
+                          {currentStream.detectionModel === 'motion'
+                            ? t('streamsConfig.motionSensitivity', 'Motion sensitivity')
+                            : t('streamsConfig.detectionThreshold')}
+                          : <span className="text-primary font-semibold">{currentStream.detectionThreshold}%</span>
                         </label>
                         <input
                           type="range"
@@ -943,26 +949,35 @@ export function StreamConfigModal({
                           onInput={onThresholdChange}
                         />
                         <p className="mt-1 text-xs text-muted-foreground">
-                          {t('streamsConfig.detectionThresholdHelp')}
+                          {currentStream.detectionModel === 'motion'
+                            ? t('streamsConfig.motionSensitivityHelp', 'Lower values are more sensitive. Built-in motion uses this value directly.')
+                            : t('streamsConfig.detectionThresholdHelp')}
                         </p>
                       </div>
 
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         <div>
                           <label htmlFor="stream-detection-interval" className="block text-sm font-medium mb-2">
-                            {t('streamsConfig.detectionIntervalFrames')}
+                            {currentStream.detectionModel === 'motion'
+                              ? t('streamsConfig.detectionIntervalSeconds', 'Motion check interval')
+                              : t('streamsConfig.detectionIntervalFrames')}
                           </label>
                           <input
                             type="number"
                             id="stream-detection-interval"
                             name="detectionInterval"
-                            className="w-full px-3 py-2 border border-input rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-primary bg-background text-foreground"
+                            className="w-full px-3 py-2 border border-input rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-primary bg-background text-foreground disabled:opacity-60 disabled:cursor-not-allowed"
                             min="1"
                             max="100"
                             value={currentStream.detectionInterval}
                             onChange={onInputChange}
+                            disabled={currentStream.detectionModel === 'motion'}
                           />
-                          <p className="mt-1 text-xs text-muted-foreground">{t('streamsConfig.detectionIntervalHelp')}</p>
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            {currentStream.detectionModel === 'motion'
+                              ? t('streamsConfig.detectionIntervalMotionHelp', 'Built-in motion is evaluated on each keyframe, so this field is ignored in motion mode.')
+                              : t('streamsConfig.detectionIntervalHelp')}
+                          </p>
                         </div>
 
                         <div>
@@ -1528,4 +1543,3 @@ export function StreamConfigModal({
     </>
   );
 }
-

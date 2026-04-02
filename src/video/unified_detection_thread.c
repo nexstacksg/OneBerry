@@ -1344,6 +1344,7 @@ stats_done:
     // We check on keyframes as a convenient trigger point, but the decision is time-based
     // This ensures detection_interval is interpreted as seconds, not keyframe count
     if (is_keyframe && current_state != UDT_STATE_POST_BUFFER) {
+        const bool motion_model = is_motion_detection_model(ctx->model_path);
         time_t time_since_last_check = now - (time_t)atomic_load(&ctx->last_detection_check_time);
 
         // Log periodically to show detection is running
@@ -1353,8 +1354,14 @@ stats_done:
                      ctx->model_path, current_state);
         }
 
+        // Built-in motion detection is intentionally evaluated on every keyframe.
+        // The generic interval is still respected for API/ONVIF/object models.
+        // Motion uses lightweight frame differencing, so the direct path should
+        // stay responsive and not wait for the coarser detection interval.
+        bool should_run_detection = motion_model || (time_since_last_check >= ctx->detection_interval);
+
         // Run detection if enough time has passed (detection_interval is in seconds)
-        if (time_since_last_check >= ctx->detection_interval) {
+        if (should_run_detection) {
             atomic_store(&ctx->last_detection_check_time, (long long)now);
 
             log_info("[%s] Running detection (interval=%ds, elapsed=%lds, model=%s)",
@@ -1631,6 +1638,7 @@ static bool run_detection_on_frame(unified_detection_ctx_t *ctx, AVPacket *pkt) 
 
     detection_result_t result;
     memset(&result, 0, sizeof(detection_result_t));
+    const bool motion_model = is_motion_detection_model(ctx->model_path);
 
     // Check if this is API-based detection
     if (is_api_detection(ctx->model_path)) {
@@ -1768,7 +1776,7 @@ static bool run_detection_on_frame(unified_detection_ctx_t *ctx, AVPacket *pkt) 
     }
 
     // Built-in motion detection - requires frame decoding but no external model file
-    if (is_motion_detection_model(ctx->model_path)) {
+    if (motion_model) {
         if (!pkt || !ctx->decoder_ctx) return false;
 
         // Decode the packet to get a frame
@@ -1843,32 +1851,18 @@ static bool run_detection_on_frame(unified_detection_ctx_t *ctx, AVPacket *pkt) 
             }
         }
 
-        // Filter out detections below the threshold so they are not stored
-        // or displayed on the overlay.  Keep only those that meet the
-        // configured detection_threshold.
-        bool mot_triggered = false;
-        {
-            int kept = 0;
+        // Built-in motion already uses the configured sensitivity inside
+        // detect_motion() to decide whether motion exists. Do not apply the
+        // generic detection_threshold again here, because that threshold is
+        // tuned for AI confidence scores and can suppress valid motion events.
+        bool mot_triggered = (result.count > 0);
+        if (mot_triggered) {
             for (int i = 0; i < result.count; i++) {
-                if (result.detections[i].confidence >= ctx->detection_threshold) {
-                    mot_triggered = true;
-                    log_info("[%s] Motion detected: %s (%.1f%%)",
-                             ctx->stream_name,
-                             result.detections[i].label,
-                             result.detections[i].confidence * 100.0f);
-                    if (kept != i) {
-                        result.detections[kept] = result.detections[i];
-                    }
-                    kept++;
-                } else {
-                    log_debug("[%s] Motion below threshold: %s (%.1f%% < %.1f%%)",
-                              ctx->stream_name,
-                              result.detections[i].label,
-                              result.detections[i].confidence * 100.0f,
-                              ctx->detection_threshold * 100.0f);
-                }
+                log_info("[%s] Motion detected: %s (%.1f%%)",
+                         ctx->stream_name,
+                         result.detections[i].label,
+                         result.detections[i].confidence * 100.0f);
             }
-            result.count = kept;
         }
 
         // Store detections in database if any passed the threshold
