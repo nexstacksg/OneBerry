@@ -998,6 +998,21 @@ export function StreamsView() {
         }));
         return;
       }
+
+      if (value === 'motion') {
+        // Built-in motion is a direct frame-difference detector, not an AI
+        // model. Give it a motion-friendly default sensitivity instead of the
+        // generic AI threshold so users get immediate motion-triggered clips.
+        setCurrentStream(prev => ({
+          ...prev,
+          detectionModel: value,
+          detectionThreshold:
+            Number.isFinite(Number(prev.detectionThreshold)) && Number(prev.detectionThreshold) !== 50
+              ? prev.detectionThreshold
+              : 15
+        }));
+        return;
+      }
     }
 
     // Special handling for custom API URL input
@@ -1579,7 +1594,11 @@ export function StreamsView() {
                       <td className="px-6 py-4 whitespace-nowrap">
                         {stream.record ? t('common.enabled') : t('common.disabled')}
                         {stream.record && stream.record_on_schedule ? ` (${t('streams.schedule')})` : ''}
-                        {stream.detection_based_recording ? ` (${t('streams.detection')})` : ''}
+                        {stream.detection_based_recording
+                          ? (stream.record
+                            ? ` (${t('streams.detection')} + ${t('streams.continuous', 'Continuous')})`
+                            : ` (${t('streams.detection')})`)
+                          : ''}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                         <div className="flex space-x-2">
@@ -1702,7 +1721,9 @@ export function StreamsView() {
                               <span className="font-medium text-muted-foreground">{t('streams.detection')}:</span>
                               <span style={{color: stream.detection_based_recording ? 'hsl(var(--success))' : 'hsl(var(--muted-foreground))'}}>
                                 {stream.detection_based_recording
-                                  ? (stream.detection_model ? stream.detection_model.split('/').pop() : t('common.enabled'))
+                                  ? (stream.record
+                                    ? `${stream.detection_model ? stream.detection_model.split('/').pop() : t('common.enabled')} (${t('streams.continuous', 'continuous recording active')})`
+                                    : (stream.detection_model ? stream.detection_model.split('/').pop() : t('common.enabled')))
                                   : t('streams.off')}
                               </span>
                             </div>

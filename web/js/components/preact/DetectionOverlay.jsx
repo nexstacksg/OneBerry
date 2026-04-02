@@ -8,6 +8,52 @@ import { formatFilenameTimestamp } from '../../utils/date-utils.js';
 
 import { forwardRef, useImperativeHandle } from 'preact/compat';
 
+const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+const mix = (a, b, t) => a + ((b - a) * t);
+
+const pathRoundedRect = (ctx, x, y, width, height, radius) => {
+  const r = Math.min(radius, width / 2, height / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + width - r, y);
+  ctx.quadraticCurveTo(x + width, y, x + width, y + r);
+  ctx.lineTo(x + width, y + height - r);
+  ctx.quadraticCurveTo(x + width, y + height, x + width - r, y + height);
+  ctx.lineTo(x + r, y + height);
+  ctx.quadraticCurveTo(x, y + height, x, y + height - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+};
+
+const pointInPolygon = (px, py, polygon) => {
+  let inside = false;
+
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const xi = polygon[i].x;
+    const yi = polygon[i].y;
+    const xj = polygon[j].x;
+    const yj = polygon[j].y;
+    const intersects = ((yi > py) !== (yj > py)) &&
+      (px < ((xj - xi) * (py - yi)) / (((yj - yi) || 0.000001)) + xi);
+    if (intersects) inside = !inside;
+  }
+
+  return inside;
+};
+
+const getZoneMatch = (zones, px, py) => {
+  if (!zones || zones.length === 0) return null;
+
+  for (const zone of zones) {
+    if (zone.polygon && zone.polygon.length >= 3 && pointInPolygon(px, py, zone.polygon)) {
+      return zone;
+    }
+  }
+
+  return null;
+};
+
 /**
  * DetectionOverlay component
  * @param {Object} props - Component props
@@ -25,17 +71,23 @@ export const DetectionOverlay = forwardRef(({
   detectionModel = null
 }, ref) => {
   const [detections, setDetections] = useState([]);
+  const [motionSnapshot, setMotionSnapshot] = useState(null);
   const [zones, setZones] = useState([]);
   const canvasRef = useRef(null);
   const intervalRef = useRef(null);
+  const animationFrameRef = useRef(null);
+  const motionSnapshotRef = useRef(null);
+  const motionTrailRef = useRef({ gridSize: 0, values: new Array(1024).fill(0), lastUpdate: 0 });
   const errorCountRef = useRef(0);
-  const currentIntervalRef = useRef(1000); // Start with 1 second polling interval
+  const isMotionModel = detectionModel === 'motion';
+  const currentIntervalRef = useRef(isMotionModel ? 150 : 1000);
 
   // Expose the canvas ref to parent components
   useImperativeHandle(ref, () => ({
     getCanvasRef: () => canvasRef,
-    getDetections: () => detections
-  }));
+    getDetections: () => detections,
+    getMotionSnapshot: () => motionSnapshot
+  }), [detections, motionSnapshot]);
 
   // Fetch detection zones for this stream
   useEffect(() => {
@@ -50,35 +102,35 @@ export const DetectionOverlay = forwardRef(({
       .catch(err => console.warn('Failed to load detection zones:', err));
   }, [streamName]);
 
-  // Function to draw bounding boxes and zone polygons
-  const drawDetectionBoxes = useCallback(() => {
-    if (!canvasRef.current || !videoRef.current) return;
+  useEffect(() => {
+    motionSnapshotRef.current = motionSnapshot;
+  }, [motionSnapshot]);
+
+  const getLayout = useCallback(() => {
+    if (!canvasRef.current || !videoRef.current) return null;
 
     const canvas = canvasRef.current;
     const videoElement = videoRef.current;
     const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
 
-    // Set canvas dimensions to match the displayed video element
     canvas.width = videoElement.clientWidth;
     canvas.height = videoElement.clientHeight;
-
-    // Clear previous drawings
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    // Get the actual video dimensions
     const videoWidth = videoElement.videoWidth;
     const videoHeight = videoElement.videoHeight;
-
-    // If video dimensions aren't available yet, skip drawing
-    if (!videoWidth || !videoHeight) {
-      return;
+    if (!videoWidth || !videoHeight || canvas.width === 0 || canvas.height === 0) {
+      return null;
     }
 
-    // Calculate the scaling and positioning to maintain aspect ratio
     const videoAspect = videoWidth / videoHeight;
     const canvasAspect = canvas.width / canvas.height;
 
-    let drawWidth, drawHeight, offsetX = 0, offsetY = 0;
+    let drawWidth;
+    let drawHeight;
+    let offsetX = 0;
+    let offsetY = 0;
 
     if (videoAspect > canvasAspect) {
       drawWidth = canvas.width;
@@ -89,6 +141,227 @@ export const DetectionOverlay = forwardRef(({
       drawWidth = canvas.height * videoAspect;
       offsetX = (canvas.width - drawWidth) / 2;
     }
+
+    return { canvas, ctx, drawWidth, drawHeight, offsetX, offsetY };
+  }, [videoRef]);
+
+  const drawMotionGrid = useCallback((nowMs = performance.now()) => {
+    const layout = getLayout();
+    if (!layout) return;
+
+    const { ctx, drawWidth, drawHeight, offsetX, offsetY } = layout;
+    const snapshot = motionSnapshotRef.current;
+    const sourceGridSize = Math.max(2, snapshot && snapshot.grid_size ? snapshot.grid_size : 6);
+    const gridSize = Math.max(12, Math.min(32, sourceGridSize * 2));
+    const totalCells = Math.min(
+      gridSize * gridSize,
+      motionTrailRef.current.values.length
+    );
+    const cellWidth = drawWidth / gridSize;
+    const cellHeight = drawHeight / gridSize;
+    const activePulse = 0.5 + (Math.sin(nowMs / 180) * 0.5);
+    const glowPulse = 0.35 + (Math.sin(nowMs / 420) * 0.15);
+    const trailState = motionTrailRef.current;
+
+    if (trailState.gridSize !== gridSize) {
+      trailState.gridSize = gridSize;
+      trailState.values = new Array(1024).fill(0);
+      trailState.lastUpdate = 0;
+    }
+
+    const dt = trailState.lastUpdate > 0 ? Math.max(16, nowMs - trailState.lastUpdate) : 16;
+    trailState.lastUpdate = nowMs;
+    const decay = Math.exp(-dt / 280);
+
+    let activeMinX = gridSize;
+    let activeMinY = gridSize;
+    let activeMaxX = -1;
+    let activeMaxY = -1;
+    let activeCount = 0;
+    let zoneActiveCount = 0;
+
+    ctx.save();
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.03)';
+    ctx.fillRect(offsetX, offsetY, drawWidth, drawHeight);
+
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(offsetX, offsetY, drawWidth, drawHeight);
+
+    if (zones && zones.length > 0) {
+      zones.forEach(zone => {
+        if (!zone.polygon || zone.polygon.length < 3) return;
+        ctx.save();
+        ctx.beginPath();
+        const p0x = offsetX + (zone.polygon[0].x * drawWidth);
+        const p0y = offsetY + (zone.polygon[0].y * drawHeight);
+        ctx.moveTo(p0x, p0y);
+        for (let i = 1; i < zone.polygon.length; i++) {
+          const px = offsetX + (zone.polygon[i].x * drawWidth);
+          const py = offsetY + (zone.polygon[i].y * drawHeight);
+          ctx.lineTo(px, py);
+        }
+        ctx.closePath();
+        ctx.fillStyle = 'rgba(255, 194, 72, 0.035)';
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(255, 194, 72, 0.14)';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([5, 4]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.restore();
+      });
+    }
+
+    for (let gy = 0; gy < gridSize; gy++) {
+      for (let gx = 0; gx < gridSize; gx++) {
+        const idx = gy * gridSize + gx;
+        if (idx >= totalCells) break;
+        const sourceX = Math.min(sourceGridSize - 1, Math.floor(gx / 2));
+        const sourceY = Math.min(sourceGridSize - 1, Math.floor(gy / 2));
+        const sourceIdx = sourceY * sourceGridSize + sourceX;
+        const score = snapshot && snapshot.cell_scores ? (snapshot.cell_scores[sourceIdx] || 0) : 0;
+        const rawIntensity = trailState.values[idx] || 0;
+        const x = offsetX + gx * cellWidth;
+        const y = offsetY + gy * cellHeight;
+        const centerX = (gx + 0.5) / gridSize;
+        const centerY = (gy + 0.5) / gridSize;
+        const matchedZone = getZoneMatch(zones, centerX, centerY);
+        const edgeDistance = Math.min(gx, gy, gridSize - 1 - gx, gridSize - 1 - gy);
+        const edgeFactor = clamp(edgeDistance / Math.max(1, gridSize / 2), 0, 1);
+        const incoming = clamp(score + (matchedZone ? 0.18 : 0), 0, 1);
+        trailState.values[idx] = Math.max(rawIntensity * decay, incoming);
+        const intensity = trailState.values[idx];
+        const baseAlpha = 0.010 + (0.014 * edgeFactor);
+        const heat = clamp(intensity * 1.25, 0, 1);
+        const pulseBoost = intensity > 0.02 ? (0.11 + (activePulse * 0.20)) : 0;
+        const alpha = clamp(baseAlpha + (heat * 0.54) + pulseBoost, 0.02, 0.88);
+        const warm = clamp((heat * 1.08) + glowPulse * 0.16 + (matchedZone ? 0.12 : 0), 0, 1);
+        const red = mix(78, 255, warm);
+        const green = mix(136, 176, warm);
+        const blue = mix(186, 26, warm);
+
+        ctx.fillStyle = `rgba(${red | 0}, ${green | 0}, ${blue | 0}, ${alpha})`;
+        ctx.fillRect(x, y, Math.ceil(cellWidth) + 1, Math.ceil(cellHeight) + 1);
+
+        if (intensity > 0.04) {
+          activeCount++;
+          if (gx < activeMinX) activeMinX = gx;
+          if (gy < activeMinY) activeMinY = gy;
+          if (gx > activeMaxX) activeMaxX = gx;
+          if (gy > activeMaxY) activeMaxY = gy;
+        }
+
+        if (matchedZone && intensity > 0.06) {
+          zoneActiveCount++;
+        }
+
+        ctx.strokeStyle = intensity > 0.02
+          ? `rgba(255, 238, 176, ${0.20 + (activePulse * 0.20)})`
+          : 'rgba(148, 163, 184, 0.08)';
+        ctx.lineWidth = intensity > 0.02 ? 1.15 : 1;
+        ctx.strokeRect(x, y, cellWidth, cellHeight);
+
+        if (intensity > 0.32) {
+          const innerInset = Math.max(1, Math.min(cellWidth, cellHeight) * 0.13);
+          ctx.save();
+          ctx.shadowColor = 'rgba(255, 210, 120, 0.50)';
+          ctx.shadowBlur = 8 + (activePulse * 6);
+          ctx.strokeStyle = `rgba(255, 231, 165, ${0.34 + (activePulse * 0.18)})`;
+          ctx.lineWidth = 1.25;
+          ctx.strokeRect(
+            x + innerInset,
+            y + innerInset,
+            cellWidth - (innerInset * 2),
+            cellHeight - (innerInset * 2)
+          );
+          ctx.restore();
+        }
+      }
+    }
+
+    ctx.strokeStyle = 'rgba(148, 163, 184, 0.16)';
+    ctx.lineWidth = 1;
+    for (let gx = 0; gx <= gridSize; gx++) {
+      const x = offsetX + gx * cellWidth;
+      ctx.beginPath();
+      ctx.moveTo(x, offsetY);
+      ctx.lineTo(x, offsetY + drawHeight);
+      ctx.stroke();
+    }
+    for (let gy = 0; gy <= gridSize; gy++) {
+      const y = offsetY + gy * cellHeight;
+      ctx.beginPath();
+      ctx.moveTo(offsetX, y);
+      ctx.lineTo(offsetX + drawWidth, y);
+      ctx.stroke();
+    }
+
+    if (snapshot && snapshot.motion_detected) {
+      ctx.strokeStyle = `rgba(255, 194, 72, ${0.42 + (activePulse * 0.24)})`;
+      ctx.lineWidth = 1.8;
+      ctx.strokeRect(offsetX + 0.5, offsetY + 0.5, drawWidth - 1, drawHeight - 1);
+
+      ctx.fillStyle = 'rgba(255, 194, 72, 0.15)';
+      ctx.fillRect(offsetX, offsetY, drawWidth, 3);
+      ctx.fillRect(offsetX, offsetY + drawHeight - 3, drawWidth, 3);
+    }
+
+    if (activeCount > 0 && activeMaxX >= activeMinX && activeMaxY >= activeMinY) {
+      const outlineX = offsetX + (activeMinX * cellWidth) + 0.5;
+      const outlineY = offsetY + (activeMinY * cellHeight) + 0.5;
+      const outlineW = ((activeMaxX - activeMinX + 1) * cellWidth) - 1;
+      const outlineH = ((activeMaxY - activeMinY + 1) * cellHeight) - 1;
+      const outlineHue = zoneActiveCount > 0 ? '255, 194, 72' : '255, 220, 142';
+      const outlineAlpha = zoneActiveCount > 0 ? (0.54 + (activePulse * 0.22)) : (0.36 + (activePulse * 0.18));
+
+      ctx.save();
+      ctx.shadowColor = 'rgba(255, 194, 72, 0.55)';
+      ctx.shadowBlur = 10 + (activePulse * 8);
+      ctx.strokeStyle = `rgba(${outlineHue}, ${outlineAlpha})`;
+      ctx.lineWidth = zoneActiveCount > 0 ? 2.6 : 2.2;
+      ctx.strokeRect(outlineX, outlineY, outlineW, outlineH);
+
+      ctx.fillStyle = `rgba(${outlineHue}, ${0.10 + (activePulse * 0.08)})`;
+      ctx.fillRect(outlineX, outlineY, outlineW, 2);
+      ctx.fillRect(outlineX, outlineY + outlineH - 2, outlineW, 2);
+      ctx.restore();
+    }
+
+    if (snapshot) {
+      const chipText = snapshot.motion_detected
+        ? `MOTION ${snapshot.active_cells || 0}${zoneActiveCount > 0 ? ' ZONE' : ''}`
+        : 'MOTION';
+      ctx.save();
+      ctx.font = '600 12px Arial';
+      const chipWidth = ctx.measureText(chipText).width + 24;
+      const chipHeight = 22;
+      const chipX = offsetX + 10;
+      const chipY = offsetY + 10;
+      ctx.fillStyle = snapshot.motion_detected
+        ? 'rgba(45, 22, 0, 0.74)'
+        : 'rgba(10, 15, 25, 0.62)';
+      ctx.strokeStyle = snapshot.motion_detected
+        ? `rgba(255, 194, 72, ${0.58 + (activePulse * 0.2)})`
+        : 'rgba(148, 163, 184, 0.34)';
+      ctx.lineWidth = 1;
+      pathRoundedRect(ctx, chipX, chipY, chipWidth, chipHeight, 6);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = snapshot.motion_detected ? 'rgba(255, 234, 178, 0.96)' : 'rgba(203, 213, 225, 0.9)';
+      ctx.fillText(chipText, chipX + 11, chipY + 15);
+      ctx.restore();
+    }
+
+    ctx.restore();
+  }, [getLayout, zones]);
+
+  // Function to draw bounding boxes and zone polygons
+  const drawDetectionBoxes = useCallback(() => {
+    const layout = getLayout();
+    if (!layout) return;
+
+    const { ctx, drawWidth, drawHeight, offsetX, offsetY } = layout;
 
     // Draw zone polygons first (underneath detections)
     zones.forEach(zone => {
@@ -106,28 +379,24 @@ export const DetectionOverlay = forwardRef(({
       }
       ctx.closePath();
 
-      // Semi-transparent fill
-      ctx.fillStyle = color + '1A'; // ~10% opacity
+      ctx.fillStyle = color + '1A';
       ctx.fill();
-      // Solid border
-      ctx.strokeStyle = color + 'CC'; // ~80% opacity
+      ctx.strokeStyle = color + 'CC';
       ctx.lineWidth = 2;
       ctx.setLineDash([6, 3]);
       ctx.stroke();
       ctx.setLineDash([]);
 
-      // Draw zone name label
       if (zone.name) {
         ctx.font = '12px Arial';
         const labelWidth = ctx.measureText(zone.name).width;
-        ctx.fillStyle = color + 'B3'; // ~70% opacity
+        ctx.fillStyle = color + 'B3';
         ctx.fillRect(p0x, p0y - 18, labelWidth + 8, 18);
         ctx.fillStyle = 'white';
         ctx.fillText(zone.name, p0x + 4, p0y - 4);
       }
     });
 
-    // Draw each detection
     if (detections && detections.length > 0) {
       detections.forEach(detection => {
         const x = (detection.x * drawWidth) + offsetX;
@@ -135,123 +404,187 @@ export const DetectionOverlay = forwardRef(({
         const width = detection.width * drawWidth;
         const height = detection.height * drawHeight;
 
-        // Draw bounding box
         ctx.strokeStyle = 'rgba(255, 0, 0, 0.8)';
         ctx.lineWidth = 3;
         ctx.strokeRect(x, y, width, height);
 
-        // Draw label background
         const label = `${detection.label} (${Math.round(detection.confidence * 100)}%)`;
         ctx.font = '14px Arial';
         const textWidth = ctx.measureText(label).width;
         ctx.fillStyle = 'rgba(255, 0, 0, 0.7)';
         ctx.fillRect(x, y - 20, textWidth + 10, 20);
 
-        // Draw label text
         ctx.fillStyle = 'white';
         ctx.fillText(label, x + 5, y - 5);
       });
     }
-  }, [detections, zones, videoRef]);
+  }, [detections, getLayout, zones]);
 
-  // Poll for detections
   const pollDetections = useCallback(() => {
     if (!videoRef.current || !videoRef.current.videoWidth) {
-      // Video not loaded yet, skip this cycle
       return;
     }
 
-    // Fetch detection results from API
-    fetch(`/api/detection/results/${encodeURIComponent(streamName)}`)
+    const url = isMotionModel
+      ? `/api/detection/results/${encodeURIComponent(streamName)}?live=1`
+      : `/api/detection/results/${encodeURIComponent(streamName)}`;
+
+    fetch(url)
       .then(response => {
         if (!response.ok) {
           throw new Error(`Failed to fetch detection results: ${response.status}`);
         }
-        // Reset error count on success
         errorCountRef.current = 0;
         return response.json();
       })
       .then(data => {
-        // Update detections state if we have detections
-        if (data && data.detections) {
+        if (isMotionModel) {
+          motionSnapshotRef.current = data || null;
+          setMotionSnapshot(data || null);
+          setDetections([]);
+        } else if (data && data.detections) {
           setDetections(data.detections);
+          motionSnapshotRef.current = null;
+          setMotionSnapshot(null);
         }
       })
       .catch(error => {
         console.error(`Error fetching detection results for ${streamName}:`, error);
-        // Clear detections on error
         setDetections([]);
+        motionSnapshotRef.current = null;
+        setMotionSnapshot(null);
 
-        // Implement backoff strategy on errors
         errorCountRef.current++;
         if (errorCountRef.current > 3) {
-          // After 3 consecutive errors, slow down polling to avoid overwhelming the server
           clearInterval(intervalRef.current);
-          currentIntervalRef.current = Math.min(5000, currentIntervalRef.current * 2); // Max 5 seconds
+          currentIntervalRef.current = Math.min(5000, currentIntervalRef.current * 2);
           console.log(`Reducing detection polling frequency to ${currentIntervalRef.current}ms due to errors`);
-
-          // Create a new interval with the updated timing
           intervalRef.current = setInterval(pollDetections, currentIntervalRef.current);
         }
       });
-  }, [streamName, videoRef]);
+  }, [isMotionModel, streamName, videoRef]);
+
+  const resetMotionTrail = useCallback(() => {
+    motionTrailRef.current.gridSize = 0;
+    motionTrailRef.current.values = new Array(1024).fill(0);
+    motionTrailRef.current.lastUpdate = 0;
+  }, []);
 
   // Start/stop detection polling based on enabled prop
   useEffect(() => {
-    // Only start polling if detection is enabled and we have a model
+    currentIntervalRef.current = isMotionModel ? 150 : 1000;
+
     if (enabled && detectionModel && videoRef.current && canvasRef.current) {
       console.log(`Starting detection polling for stream ${streamName}`);
 
-      // Clear any existing interval
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
       }
 
-      // Start a new polling interval
+      pollDetections();
       intervalRef.current = setInterval(pollDetections, currentIntervalRef.current);
 
-      // Return cleanup function
       return () => {
         console.log(`Cleaning up detection polling for stream ${streamName}`);
         if (intervalRef.current) {
           clearInterval(intervalRef.current);
           intervalRef.current = null;
         }
+        if (animationFrameRef.current) {
+          cancelAnimationFrame(animationFrameRef.current);
+          animationFrameRef.current = null;
+        }
+        resetMotionTrail();
       };
     }
 
-    // If not enabled, clean up any existing interval
     if (intervalRef.current) {
       clearInterval(intervalRef.current);
       intervalRef.current = null;
     }
-  }, [enabled, detectionModel, streamName, pollDetections, videoRef]);
+    if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current);
+      animationFrameRef.current = null;
+    }
+    setDetections([]);
+    setMotionSnapshot(null);
+    resetMotionTrail();
+  }, [drawMotionGrid, enabled, detectionModel, isMotionModel, pollDetections, resetMotionTrail, streamName, videoRef]);
 
-  // Draw detections whenever they change
+  const redrawOverlay = useCallback(() => {
+    if (isMotionModel) {
+      drawMotionGrid();
+    } else {
+      drawDetectionBoxes();
+    }
+  }, [drawDetectionBoxes, drawMotionGrid, isMotionModel]);
+
+  // Draw overlay whenever the live data changes
   useEffect(() => {
-    drawDetectionBoxes();
-  }, [detections, drawDetectionBoxes]);
+    redrawOverlay();
+  }, [detections, motionSnapshot, redrawOverlay]);
 
-  // Handle resize events to redraw detections
+  useEffect(() => {
+    if (!isMotionModel || !enabled) return undefined;
+    const tick = () => {
+      redrawOverlay();
+      animationFrameRef.current = requestAnimationFrame(tick);
+    };
+    if (!animationFrameRef.current) {
+      animationFrameRef.current = requestAnimationFrame(tick);
+    }
+    return () => {
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+        animationFrameRef.current = null;
+      }
+    };
+  }, [enabled, isMotionModel, redrawOverlay]);
+
+  useEffect(() => {
+    if (!isMotionModel || !enabled) return undefined;
+    redrawOverlay();
+  }, [enabled, isMotionModel, motionSnapshot, redrawOverlay]);
+
+  // Handle resize events to redraw overlay
   useEffect(() => {
     const handleResize = () => {
-      drawDetectionBoxes();
+      redrawOverlay();
     };
 
-    window.addEventListener('resize', handleResize);
+    const observedTargets = [];
+    let resizeObserver = null;
+
+    if (typeof ResizeObserver === 'function') {
+      resizeObserver = new ResizeObserver(() => {
+        redrawOverlay();
+      });
+
+      if (videoRef.current) observedTargets.push(videoRef.current);
+      if (canvasRef.current && canvasRef.current.parentElement) observedTargets.push(canvasRef.current.parentElement);
+
+      observedTargets.forEach(target => resizeObserver.observe(target));
+    } else {
+      window.addEventListener('resize', handleResize);
+    }
 
     return () => {
-      window.removeEventListener('resize', handleResize);
+      if (resizeObserver) {
+        resizeObserver.disconnect();
+      } else {
+        window.removeEventListener('resize', handleResize);
+      }
     };
-  }, [drawDetectionBoxes]);
+  }, [redrawOverlay, videoRef]);
 
   // Handle fullscreen change events
   useEffect(() => {
     const handleFullscreenChange = () => {
-      // Small delay to allow fullscreen to complete
-      setTimeout(() => {
-        drawDetectionBoxes();
-      }, 100);
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          redrawOverlay();
+        });
+      });
     };
 
     document.addEventListener('fullscreenchange', handleFullscreenChange);
@@ -259,7 +592,7 @@ export const DetectionOverlay = forwardRef(({
     return () => {
       document.removeEventListener('fullscreenchange', handleFullscreenChange);
     };
-  }, [drawDetectionBoxes]);
+  }, [redrawOverlay]);
 
   return (
     <canvas

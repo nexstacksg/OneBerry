@@ -8,7 +8,8 @@
  * Key features:
  * - Single RTSP connection per stream
  * - Continuous circular buffer for pre-detection content
- * - Detection on keyframes only (configurable interval)
+ * - Interval-based detection for AI/API models
+ * - Realtime packet-by-packet motion evaluation for built-in motion
  * - Seamless pre-buffer flush when detection triggers
  * - Proper post-buffer countdown after last detection
  * - Self-healing with automatic reconnection
@@ -1341,9 +1342,11 @@ stats_done:
     }
 
     // Run detection based on time interval (in seconds)
-    // We check on keyframes as a convenient trigger point, but the decision is time-based
-    // This ensures detection_interval is interpreted as seconds, not keyframe count
-    if (is_keyframe && current_state != UDT_STATE_POST_BUFFER) {
+    // Built-in motion is evaluated on every video packet so the live grid
+    // state stays responsive. Other models continue to use the keyframe/time gate.
+    const bool motion_model = is_motion_detection_model(ctx->model_path);
+    bool should_consider_detection = motion_model ? is_video : is_keyframe;
+    if (should_consider_detection && current_state != UDT_STATE_POST_BUFFER) {
         time_t time_since_last_check = now - (time_t)atomic_load(&ctx->last_detection_check_time);
 
         // Log periodically to show detection is running
@@ -1353,12 +1356,21 @@ stats_done:
                      ctx->model_path, current_state);
         }
 
+        // Built-in motion detection is intentionally evaluated on every video packet.
+        // The generic interval is still respected for API/ONVIF/object models.
+        bool should_run_detection = motion_model || (time_since_last_check >= ctx->detection_interval);
+
         // Run detection if enough time has passed (detection_interval is in seconds)
-        if (time_since_last_check >= ctx->detection_interval) {
+        if (should_run_detection) {
             atomic_store(&ctx->last_detection_check_time, (long long)now);
 
-            log_info("[%s] Running detection (interval=%ds, elapsed=%lds, model=%s)",
-                    ctx->stream_name, ctx->detection_interval, (long)time_since_last_check, ctx->model_path);
+            if (motion_model) {
+                log_debug("[%s] Running realtime motion detection (model=%s, packet=%s)",
+                          ctx->stream_name, ctx->model_path, is_keyframe ? "keyframe" : "video");
+            } else {
+                log_info("[%s] Running detection (interval=%ds, elapsed=%lds, model=%s)",
+                        ctx->stream_name, ctx->detection_interval, (long)time_since_last_check, ctx->model_path);
+            }
 
             // Decode frame and run detection
             bool detection_triggered = run_detection_on_frame(ctx, pkt);
@@ -1631,6 +1643,7 @@ static bool run_detection_on_frame(unified_detection_ctx_t *ctx, AVPacket *pkt) 
 
     detection_result_t result;
     memset(&result, 0, sizeof(detection_result_t));
+    const bool motion_model = is_motion_detection_model(ctx->model_path);
 
     // Check if this is API-based detection
     if (is_api_detection(ctx->model_path)) {
@@ -1768,7 +1781,7 @@ static bool run_detection_on_frame(unified_detection_ctx_t *ctx, AVPacket *pkt) 
     }
 
     // Built-in motion detection - requires frame decoding but no external model file
-    if (is_motion_detection_model(ctx->model_path)) {
+    if (motion_model) {
         if (!pkt || !ctx->decoder_ctx) return false;
 
         // Decode the packet to get a frame
@@ -1843,32 +1856,18 @@ static bool run_detection_on_frame(unified_detection_ctx_t *ctx, AVPacket *pkt) 
             }
         }
 
-        // Filter out detections below the threshold so they are not stored
-        // or displayed on the overlay.  Keep only those that meet the
-        // configured detection_threshold.
-        bool mot_triggered = false;
-        {
-            int kept = 0;
+        // Built-in motion already uses the configured sensitivity inside
+        // detect_motion() to decide whether motion exists. Do not apply the
+        // generic detection_threshold again here, because that threshold is
+        // tuned for AI confidence scores and can suppress valid motion events.
+        bool mot_triggered = (result.count > 0);
+        if (mot_triggered) {
             for (int i = 0; i < result.count; i++) {
-                if (result.detections[i].confidence >= ctx->detection_threshold) {
-                    mot_triggered = true;
-                    log_info("[%s] Motion detected: %s (%.1f%%)",
-                             ctx->stream_name,
-                             result.detections[i].label,
-                             result.detections[i].confidence * 100.0f);
-                    if (kept != i) {
-                        result.detections[kept] = result.detections[i];
-                    }
-                    kept++;
-                } else {
-                    log_debug("[%s] Motion below threshold: %s (%.1f%% < %.1f%%)",
-                              ctx->stream_name,
-                              result.detections[i].label,
-                              result.detections[i].confidence * 100.0f,
-                              ctx->detection_threshold * 100.0f);
-                }
+                log_debug("[%s] Motion detected: %s (%.1f%%)",
+                          ctx->stream_name,
+                          result.detections[i].label,
+                          result.detections[i].confidence * 100.0f);
             }
-            result.count = kept;
         }
 
         // Store detections in database if any passed the threshold
