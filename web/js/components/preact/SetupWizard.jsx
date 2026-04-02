@@ -53,7 +53,7 @@ function WelcomeStep() {
   return (
     <div class="text-center">
       <div class="text-5xl mb-4">🎥</div>
-      <h2 class="text-2xl font-bold mb-3">Welcome to LightNVR</h2>
+      <h2 class="text-2xl font-bold mb-3">Welcome to Oneberry</h2>
       <p class="text-muted-foreground mb-6 max-w-sm mx-auto">
         Let's get your NVR configured in a few quick steps. You can always
         revisit these settings later from the <strong>Settings</strong> page.
@@ -132,7 +132,7 @@ function PerformanceStep({ form, onChange, cpuCores }) {
       </div>
       <div class="rounded-lg border border-yellow-400 bg-yellow-50 dark:bg-yellow-900/20 text-yellow-800 dark:text-yellow-200 p-3 text-sm mb-5">
         ⚠️ <strong>Important:</strong> if you change either setting, the new value is saved
-        now but will <strong>not</strong> be used until LightNVR restarts. For example, if the
+        now but will <strong>not</strong> be used until Oneberry restarts. For example, if the
         current stream limit is 1 and you raise it to 32, you must restart before adding more
         cameras beyond the old limit.
       </div>
@@ -152,7 +152,7 @@ function PerformanceStep({ form, onChange, cpuCores }) {
       </Field>
       <Field
         label="Maximum concurrent streams"
-        hint="How many cameras LightNVR can keep active at once. Default 32, max 256. If you expect 8 cameras, choose at least 8. Requires restart to take effect."
+        hint="How many cameras Oneberry can keep active at once. Default 32, max 256. If you expect 8 cameras, choose at least 8. Requires restart to take effect."
       >
         <input
           type="number"

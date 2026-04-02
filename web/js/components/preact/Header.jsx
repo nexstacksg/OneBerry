@@ -320,7 +320,7 @@ export function Header({ version = VERSION }) {
       <header className="app-header py-2 shadow-md mb-4 w-full" style={{ position: 'relative', zIndex: 20, backgroundColor: 'hsl(var(--card))', color: 'hsl(var(--card-foreground))' }}>
         <div className="container mx-auto px-4 flex justify-between items-center">
           <div className="logo flex items-center">
-            <h1 className="text-xl font-bold m-0">LightNVR</h1>
+            <h1 className="text-xl font-bold m-0">Oneberry</h1>
             <span className="version text-xs ml-2" style={{color: 'hsl(var(--muted-foreground))'}}>v{version}</span>
           </div>
 

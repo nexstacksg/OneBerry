@@ -55,7 +55,7 @@ export function LoginView() {
   const { t, locale } = useI18n();
 
   useEffect(() => {
-    document.title = `${t('login.signIn')} - LightNVR`;
+    document.title = `${t('login.signIn')} - Oneberry`;
   }, [locale, t]);
 
   // Fetch login config to determine if force MFA is enabled
@@ -271,7 +271,7 @@ export function LoginView() {
     <section id="login-page" className="page flex items-center justify-center min-h-screen">
       <div className="login-container w-full max-w-md p-6 bg-card text-card-foreground rounded-lg shadow-lg">
         <div className="text-center mb-8">
-          <h1 className="text-2xl font-bold">LightNVR</h1>
+          <h1 className="text-2xl font-bold">Oneberry</h1>
           <p className="text-muted-foreground">{t('login.subtitle')}</p>
         </div>
 
