@@ -59,6 +59,8 @@ export function StreamsView() {
   // Check if user can modify streams (admin or user role, not viewer)
   // While loading, default to enabled so admin/user doesn't see hidden buttons
   const canModifyStreams = roleLoading || userRole === 'admin' || userRole === 'user';
+  // Stream creation is restricted to administrators.
+  const canCreateStreams = roleLoading || userRole === 'admin';
   // Check if credentials should be hidden (demo mode or viewer role)
   const shouldHideCredentials = isDemoMode || userRole === 'viewer';
 
@@ -308,6 +310,9 @@ export function StreamsView() {
           retries: 1,
           retryDelay: 1000
         });
+      }
+      if (!canCreateStreams) {
+        throw new Error(t('streams.createStreamForbidden'));
       }
       // Create new stream via POST
       return await fetchJSON('/api/streams', {
@@ -736,6 +741,10 @@ export function StreamsView() {
 
   // Open add stream modal
   const openAddStreamModal = () => {
+    if (!canCreateStreams) {
+      showStatusMessage(t('streams.createStreamForbidden'), 'error', 5000);
+      return;
+    }
     setCurrentStream({
       name: '',
       url: '',
@@ -878,6 +887,10 @@ export function StreamsView() {
 
   // Open clone stream modal — pre-fills from an existing stream but treats as a new one
   const openCloneStreamModal = async (streamId) => {
+    if (!canCreateStreams) {
+      showStatusMessage(t('streams.createStreamForbidden'), 'error', 5000);
+      return;
+    }
     try {
       await queryClient.invalidateQueries({ queryKey: ['stream-full', streamId] });
       const data = await queryClient.fetchQuery({
@@ -964,6 +977,10 @@ export function StreamsView() {
 
   // Open ONVIF discovery modal
   const openOnvifModal = async () => {
+    if (!canCreateStreams) {
+      showStatusMessage(t('streams.createStreamForbidden'), 'error', 5000);
+      return;
+    }
     setDiscoveredDevices([]);
     setDeviceProfiles([]);
     setSelectedDevice(null);
@@ -1372,6 +1389,11 @@ export function StreamsView() {
               {t('streams.readOnlyInsufficientPermissions')}
             </span>
           )}
+          {canModifyStreams && !canCreateStreams && userRole === 'user' && (
+            <span className="text-sm text-muted-foreground italic mr-2">
+              {t('streams.createStreamRestricted')}
+            </span>
+          )}
           {canModifyStreams && (
             <>
               {!selectionMode && (
@@ -1387,20 +1409,24 @@ export function StreamsView() {
                   {t('streams.select')}
                 </button>
               )}
-              <button
-                  id="discover-onvif-btn"
-                  className="btn-secondary focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
-                  onClick={openOnvifModal}
-              >
-                {t('streams.discoverOnvifCameras')}
-              </button>
-              <button
-                  id="add-stream-btn"
-                  className="btn-primary focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
-                  onClick={openAddStreamModal}
-              >
-                {t('streams.addStream')}
-              </button>
+              {canCreateStreams && (
+                <>
+                  <button
+                      id="discover-onvif-btn"
+                      className="btn-secondary focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
+                      onClick={openOnvifModal}
+                  >
+                    {t('streams.discoverOnvifCameras')}
+                  </button>
+                  <button
+                      id="add-stream-btn"
+                      className="btn-primary focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
+                      onClick={openAddStreamModal}
+                  >
+                    {t('streams.addStream')}
+                  </button>
+                </>
+              )}
             </>
           )}
         </div>
@@ -1410,7 +1436,7 @@ export function StreamsView() {
           isLoading={isLoading}
           hasData={hasData}
           loadingMessage={t('streams.loadingStreams')}
-          emptyMessage={canModifyStreams ? t('streams.noStreamsConfiguredYetAdd') : t('streams.noStreamsConfiguredYet')}
+          emptyMessage={canCreateStreams ? t('streams.noStreamsConfiguredYetAdd') : t('streams.noStreamsConfiguredYet')}
       >
         <div className="streams-container bg-card text-card-foreground rounded-lg shadow overflow-hidden">
           {/* Bulk action toolbar — visible in selection mode */}
@@ -1635,8 +1661,8 @@ export function StreamsView() {
                               </svg>
                             </button>
                           )}
-                          {/* Clone button - only show if user can modify streams */}
-                          {canModifyStreams && (
+                          {/* Clone button - only show if user can create streams */}
+                          {canCreateStreams && (
                             <button
                                 className="p-1 rounded-full focus:outline-none"
                                 style={{color: 'hsl(var(--success))'}}

@@ -593,6 +593,8 @@
   "streams.editStream": "Editar stream",
   "streams.cloneStream": "Clonar stream",
   "streams.copyOf": "Cópia de",
+  "streams.createStreamRestricted": "A criação de streams é restrita a administradores.",
+  "streams.createStreamForbidden": "Você não tem permissão para adicionar streams.",
   "streams.loadingStreams": "Carregando streams...",
   "streams.noStreamsConfiguredYetAdd": "Nenhum stream configurado ainda. Clique em 'Adicionar stream' para criar um.",
   "streams.noStreamsConfiguredYet": "Nenhum stream configurado ainda.",
