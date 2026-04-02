@@ -10,6 +10,7 @@ import { TimelineSegments } from './TimelineSegments.jsx';
 import { TimelineCursor } from './TimelineCursor.jsx';
 import { TimelinePlayer } from './TimelinePlayer.jsx';
 import { CalendarPicker } from './CalendarPicker.jsx';
+import { TimelinePreviewStrip } from './TimelinePreviewStrip.jsx';
 import { BatchDownloadModal } from '../BatchDownloadModal.jsx';
 import { showStatusMessage } from '../ToastContainer.jsx';
 import { LoadingIndicator } from '../LoadingIndicator.jsx';
@@ -32,12 +33,13 @@ import {
   getClippedSegmentHourRange,
   getLocalDayBounds,
   getTimelineDayLengthHours,
+  getTimelineRangeHours,
+  MIN_TIMELINE_VIEW_HOURS,
   localClockTimeToTimestamp,
-  panTimelineRange,
   resolveActiveSegmentIndex,
   timelineOffsetToTimestamp,
   timestampToTimelineOffset,
-  zoomTimelineRange
+  scaleTimelineWindowHours
 } from './timelineUtils.js';
 
 const RECORDINGS_RETURN_URL_KEY = 'lightnvr_recordings_return_url';
@@ -77,6 +79,7 @@ const timelineState = {
   currentSegmentIndex: -1,
   timelineStartHour: 0,
   timelineEndHour: 24,
+  timelineWindowHours: 24,
   autoFitStartHour: 0,   // auto-fit range computed from segments
   autoFitEndHour: 24,
   currentTime: null,
@@ -103,14 +106,17 @@ const timelineState = {
   // Update state and notify listeners
   setState(newState) {
     const now = nowMilliseconds();
+    const isPlaying = newState.isPlaying === true ||
+      (newState.isPlaying === undefined && this.isPlaying === true);
     const isTimeOnlyUpdate = newState.currentTime !== undefined &&
       newState.currentSegmentIndex === undefined &&
-      // Playback updates need to propagate immediately to keep the cursor and
-      // currently playing segment synchronized with the video element.
-      newState.isPlaying !== true;
+      !isPlaying &&
+      newState.timelineStartHour === undefined &&
+      newState.timelineEndHour === undefined &&
+      newState.timelineWindowHours === undefined;
 
-    // Batch frequent time-only updates (≤250 ms apart)
-    if (isTimeOnlyUpdate && now - this.lastUpdateTime < 250) {
+    // Batch paused time-only updates, but never throttle active playback.
+    if (isTimeOnlyUpdate && now - this.lastUpdateTime < 80) {
       return;
     }
 
@@ -123,6 +129,29 @@ const timelineState = {
 
     if (newState.forceReload) {
       this.forceReload = false;
+    }
+
+    const selectedDate = this.selectedDate;
+    const dayLengthHours = getTimelineDayLengthHours(selectedDate);
+    const derivedRangeHours = Number.isFinite(this.timelineWindowHours) && this.timelineWindowHours > 0
+      ? this.timelineWindowHours
+      : getTimelineRangeHours(this.timelineStartHour, this.timelineEndHour);
+    const normalizedWindowHours = Math.min(
+      Math.max(derivedRangeHours || dayLengthHours, MIN_TIMELINE_VIEW_HOURS),
+      dayLengthHours
+    );
+    this.timelineWindowHours = normalizedWindowHours;
+
+    const currentHour = Number.isFinite(this.currentTime)
+      ? timestampToTimelineOffset(this.currentTime, selectedDate)
+      : null;
+
+    if (Number.isFinite(currentHour)) {
+      this.timelineEndHour = currentHour;
+      this.timelineStartHour = currentHour - normalizedWindowHours;
+    } else if (!Number.isFinite(this.timelineStartHour) || !Number.isFinite(this.timelineEndHour)) {
+      this.timelineStartHour = 0;
+      this.timelineEndHour = normalizedWindowHours;
     }
 
     this.lastUpdateTime = now;
@@ -480,9 +509,10 @@ export function TimelinePage() {
     }
 
     const handleWheel = (event) => {
-      const startHour = timelineState.timelineStartHour ?? 0;
-      const endHour = timelineState.timelineEndHour ?? getTimelineDayLengthHours(timelineState.selectedDate);
-      const currentRange = endHour - startHour;
+      const currentRange = timelineState.timelineWindowHours ?? getTimelineRangeHours(
+        timelineState.timelineStartHour ?? 0,
+        timelineState.timelineEndHour ?? getTimelineDayLengthHours(timelineState.selectedDate)
+      );
       if (currentRange <= 0) {
         return;
       }
@@ -494,14 +524,14 @@ export function TimelinePage() {
 
       if (event.ctrlKey || event.metaKey) {
         event.preventDefault();
-        const pointerRatio = Math.min(Math.max((event.clientX - rect.left) / rect.width, 0), 1);
-        const anchorHour = startHour + (pointerRatio * currentRange);
         const zoomFactor = event.deltaY < 0 ? 0.8 : 1.25;
-        const nextRange = zoomTimelineRange(startHour, endHour, zoomFactor, anchorHour, getTimelineDayLengthHours(timelineState.selectedDate));
-        timelineState.setState({
-          timelineStartHour: nextRange.startHour,
-          timelineEndHour: nextRange.endHour
-        });
+        const nextWindowHours = scaleTimelineWindowHours(
+          currentRange,
+          zoomFactor,
+          getTimelineDayLengthHours(timelineState.selectedDate),
+          MIN_TIMELINE_VIEW_HOURS
+        );
+        timelineState.setState({ timelineWindowHours: nextWindowHours });
         return;
       }
 
@@ -509,13 +539,27 @@ export function TimelinePage() {
         ? event.deltaX
         : (event.shiftKey ? event.deltaY : 0);
 
-      if (horizontalDelta !== 0) {
+      if (horizontalDelta !== 0 && timelineState.currentTime !== null) {
         event.preventDefault();
         const deltaHours = (horizontalDelta / rect.width) * currentRange;
-        const nextRange = panTimelineRange(startHour, endHour, deltaHours, getTimelineDayLengthHours(timelineState.selectedDate));
+        const bounds = getLocalDayBounds(timelineState.selectedDate);
+        if (!bounds) {
+          return;
+        }
+
+        const nextTimestamp = Math.max(
+          bounds.startTimestamp,
+          Math.min(timelineState.currentTime + (deltaHours * 3600), bounds.endTimestamp)
+        );
         timelineState.setState({
-          timelineStartHour: nextRange.startHour,
-          timelineEndHour: nextRange.endHour
+          currentTime: nextTimestamp,
+          currentSegmentIndex: resolveActiveSegmentIndex(
+            timelineState.timelineSegments,
+            timelineState.currentSegmentIndex,
+            nextTimestamp
+          ),
+          prevCurrentTime: timelineState.currentTime,
+          isPlaying: false
         });
       }
     };
@@ -560,6 +604,8 @@ export function TimelinePage() {
   const loadSegmentsIntoTimeline = useCallback((rawSegments, effectiveDate, options = {}) => {
     const { successMessage = null } = options;
     const segmentsCopy = JSON.parse(JSON.stringify(rawSegments || []));
+    const dayBounds = getLocalDayBounds(effectiveDate);
+    const dayLengthHours = getTimelineDayLengthHours(effectiveDate);
 
     if (segmentsCopy.length === 0) {
       setSegments([]);
@@ -569,15 +615,17 @@ export function TimelinePage() {
         currentTime: null,
         prevCurrentTime: null,
         isPlaying: false,
-        selectedDate: effectiveDate
+        selectedDate: effectiveDate,
+        timelineStartHour: 0,
+        timelineEndHour: dayLengthHours,
+        timelineWindowHours: dayLengthHours,
+        autoFitStartHour: 0,
+        autoFitEndHour: dayLengthHours
       });
       return false;
     }
 
     setSegments(segmentsCopy);
-
-    const dayBounds = getLocalDayBounds(effectiveDate);
-    const dayLengthHours = getTimelineDayLengthHours(effectiveDate);
     const visibleIndices = [];
 
     // Compute auto-fit range from segments for the selected day
@@ -601,6 +649,7 @@ export function TimelinePage() {
         selectedDate: effectiveDate,
         timelineStartHour: 0,
         timelineEndHour: dayLengthHours,
+        timelineWindowHours: dayLengthHours,
         autoFitStartHour: 0,
         autoFitEndHour: dayLengthHours
       });
@@ -689,19 +738,20 @@ export function TimelinePage() {
       }
     }
 
+    const fitWindowHours = Math.max(fitEnd - fitStart, MIN_TIMELINE_VIEW_HOURS);
+
     // Push to global state
     timelineState.timelineSegments = segmentsCopy;
     timelineState.currentSegmentIndex = initialSegmentIndex;
     timelineState.currentTime = initialTime;
     timelineState.prevCurrentTime = initialTime;
+    timelineState.timelineWindowHours = fitWindowHours;
     if (!preserveExistingPlayback) {
       timelineState.isPlaying = false;
     }
     timelineState.forceReload = !preserveExistingPlayback;
     timelineState.autoFitStartHour = fitStart;
     timelineState.autoFitEndHour = fitEnd;
-    timelineState.timelineStartHour = fitStart;
-    timelineState.timelineEndHour = fitEnd;
     timelineState.selectedDate = effectiveDate;
     timelineState.setState({});
 
@@ -1116,9 +1166,10 @@ export function TimelinePage() {
         <div
           id="timeline-container"
           data-keyboard-nav-preserve
-          className="relative w-full h-24 bg-secondary border border-input rounded-lg mb-2 overflow-hidden"
+          className="relative w-full bg-secondary border border-input rounded-lg mb-2 overflow-hidden shadow-sm"
           ref={timelineContainerRef}
         >
+          <TimelinePreviewStrip segments={segments} />
           <TimelineRuler />
           <TimelineSegments segments={segments} />
           <TimelineCursor />
