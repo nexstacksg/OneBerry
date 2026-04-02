@@ -16,6 +16,8 @@
 #include "core/config.h"
 #include "video/detection.h"
 #include "video/detection_result.h"
+#include "video/motion_detection.h"
+#include "video/detection_model.h"
 #include "video/stream_manager.h"
 #include "video/go2rtc/go2rtc_integration.h"
 #include "video/unified_detection_thread.h"
@@ -27,6 +29,19 @@
 // Without this, a 5-second window paired with a 5-second detection interval creates
 // a guaranteed gap where the API returns nothing (stale box disappears mid-motion).
 #define MIN_DETECTION_AGE 30
+
+static bool query_param_is_true(const char *value) {
+    if (!value || !value[0]) {
+        return false;
+    }
+    if (strcmp(value, "0") == 0) {
+        return false;
+    }
+    if (strcasecmp(value, "false") == 0 || strcasecmp(value, "no") == 0) {
+        return false;
+    }
+    return true;
+}
 
 /**
  * @brief Backend-agnostic handler for GET /api/detection/results/:stream
@@ -60,6 +75,126 @@ void handle_get_detection_results(const http_request_t *req, http_response_t *re
         log_info("Using end_time filter: %lld (str='%s')", (long long)end_time, end_str);
     }
 
+    char live_str[16] = {0};
+    bool live_mode = false;
+    if (http_request_get_query_param(req, "live", live_str, sizeof(live_str)) > 0 && live_str[0]) {
+        live_mode = query_param_is_true(live_str);
+        log_info("Using live mode: %s (str='%s')", live_mode ? "true" : "false", live_str);
+    }
+
+    stream_handle_t stream = get_stream_by_name(stream_name);
+    if (!stream) {
+        log_error("Stream not found: %s", stream_name);
+        http_response_set_json_error(res, 404, "Stream not found");
+        return;
+    }
+
+    stream_config_t stream_cfg;
+    memset(&stream_cfg, 0, sizeof(stream_cfg));
+    if (get_stream_config(stream, &stream_cfg) != 0) {
+        log_error("Failed to load stream config for %s", stream_name);
+        http_response_set_json_error(res, 500, "Failed to load stream config");
+        return;
+    }
+
+    // Live motion mode returns the detector's current grid state instead of
+    // the database-backed detection history. This is what keeps the overlay in
+    // sync with the camera in realtime and lets it clear immediately when
+    // motion stops.
+    if (live_mode && strcmp(stream_cfg.detection_model, MODEL_TYPE_MOTION) == 0) {
+        motion_detection_snapshot_t snapshot;
+        memset(&snapshot, 0, sizeof(snapshot));
+
+        if (get_motion_detection_snapshot(stream_name, &snapshot) != 0) {
+            log_error("Failed to get live motion snapshot for stream: %s", stream_name);
+            http_response_set_json_error(res, 500, "Failed to get live motion snapshot");
+            return;
+        }
+
+        cJSON *response = cJSON_CreateObject();
+        if (!response) {
+            http_response_set_json_error(res, 500, "Failed to create response JSON");
+            return;
+        }
+
+        cJSON *detections_array = cJSON_CreateArray();
+        if (!detections_array) {
+            cJSON_Delete(response);
+            http_response_set_json_error(res, 500, "Failed to create detections JSON");
+            return;
+        }
+        cJSON_AddItemToObject(response, "detections", detections_array);
+
+        cJSON_AddBoolToObject(response, "live", true);
+        cJSON_AddStringToObject(response, "mode", "motion-grid");
+        cJSON_AddBoolToObject(response, "available", snapshot.available);
+        cJSON_AddBoolToObject(response, "enabled", snapshot.enabled);
+        cJSON_AddBoolToObject(response, "motion_detected", snapshot.motion_detected);
+        cJSON_AddBoolToObject(response, "use_grid_detection", snapshot.use_grid_detection);
+        cJSON_AddNumberToObject(response, "grid_size", snapshot.grid_size);
+        cJSON_AddNumberToObject(response, "width", snapshot.width);
+        cJSON_AddNumberToObject(response, "height", snapshot.height);
+        cJSON_AddNumberToObject(response, "sensitivity", snapshot.sensitivity);
+        cJSON_AddNumberToObject(response, "min_motion_area", snapshot.min_motion_area);
+        cJSON_AddNumberToObject(response, "motion_score", snapshot.motion_score);
+        cJSON_AddNumberToObject(response, "motion_area", snapshot.motion_area);
+        cJSON_AddNumberToObject(response, "active_cells", snapshot.active_cells);
+        cJSON_AddNumberToObject(response, "last_update_time", (double)snapshot.last_update_time);
+
+        cJSON *cells_array = cJSON_CreateArray();
+        if (cells_array) {
+            int total_cells = snapshot.grid_size * snapshot.grid_size;
+            if (total_cells > MOTION_GRID_MAX_CELLS) {
+                total_cells = MOTION_GRID_MAX_CELLS;
+            }
+            for (int i = 0; i < total_cells; i++) {
+                cJSON_AddItemToArray(cells_array, cJSON_CreateNumber(snapshot.cell_scores[i]));
+            }
+        }
+        cJSON_AddItemToObject(response, "cell_scores", cells_array ? cells_array : cJSON_CreateArray());
+
+        char timestamp[32];
+        time_t now = time(NULL);
+        struct tm tm_buf;
+        const struct tm *tm_info = localtime_r(&now, &tm_buf);
+        strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", tm_info);
+        cJSON_AddStringToObject(response, "timestamp", timestamp);
+
+        {
+            const char *status_str = "Unknown";
+            stream_status_t ss = get_stream_status(stream);
+            if (ss == STREAM_STATUS_STOPPED && stream_cfg.enabled
+                    && go2rtc_integration_is_initialized()) {
+                stream_status_t udt = get_unified_detection_effective_status(stream_name);
+                ss = (udt != STREAM_STATUS_STOPPED) ? udt : STREAM_STATUS_RUNNING;
+            }
+            switch (ss) {
+                case STREAM_STATUS_STOPPED:      status_str = "Stopped";      break;
+                case STREAM_STATUS_STARTING:     status_str = "Starting";     break;
+                case STREAM_STATUS_RUNNING:      status_str = "Running";      break;
+                case STREAM_STATUS_STOPPING:     status_str = "Stopping";     break;
+                case STREAM_STATUS_ERROR:        status_str = "Error";        break;
+                case STREAM_STATUS_RECONNECTING: status_str = "Reconnecting"; break;
+                default:                         status_str = "Unknown";      break;
+            }
+            cJSON_AddStringToObject(response, "stream_status", status_str);
+        }
+
+        char *json_str = cJSON_PrintUnformatted(response);
+        if (!json_str) {
+            cJSON_Delete(response);
+            http_response_set_json_error(res, 500, "Failed to convert response JSON to string");
+            return;
+        }
+
+        http_response_set_json(res, 200, json_str);
+        free(json_str);
+        cJSON_Delete(response);
+
+        log_info("Successfully handled GET /api/detection/results/%s live motion request", stream_name);
+        return;
+    }
+
     // If no time range specified, compute a per-stream max_age so that a stored
     // detection is never aged out before the next one can arrive.  We use at
     // least MIN_DETECTION_AGE (30 s) or the stream's detection_interval * 2,
@@ -69,14 +204,6 @@ void handle_get_detection_results(const http_request_t *req, http_response_t *re
         // Custom time range specified — bypass max_age entirely
         max_age = 0;
     } else {
-        // For live detection queries (no time range), require stream to exist
-        stream_handle_t stream = get_stream_by_name(stream_name);
-        if (!stream) {
-            log_error("Stream not found: %s", stream_name);
-            http_response_set_json_error(res, 404, "Stream not found");
-            return;
-        }
-
         // Widen the window to cover at least two full detection intervals so
         // the bounding box stays visible between consecutive detection checks.
         stream_config_t stream_cfg;

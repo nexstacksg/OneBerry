@@ -499,6 +499,72 @@ bool is_motion_detection_enabled(const char *stream_name) {
 }
 
 /**
+ * Get a live snapshot of the current motion detector state
+ */
+int get_motion_detection_snapshot(const char *stream_name, motion_detection_snapshot_t *snapshot) {
+    if (!stream_name || !snapshot) {
+        log_error("Invalid parameters for get_motion_detection_snapshot");
+        return -1;
+    }
+
+    memset(snapshot, 0, sizeof(*snapshot));
+
+    motion_stream_t *stream = get_motion_stream(stream_name);
+    if (!stream) {
+        log_error("Failed to get motion stream for snapshot: %s", stream_name);
+        return -1;
+    }
+
+    pthread_mutex_lock(&stream->mutex);
+
+    snapshot->available = true;
+    snapshot->enabled = stream->enabled;
+    snapshot->use_grid_detection = stream->use_grid_detection;
+    snapshot->grid_size = stream->grid_size;
+    snapshot->width = stream->width;
+    snapshot->height = stream->height;
+    snapshot->sensitivity = stream->sensitivity;
+    snapshot->min_motion_area = stream->min_motion_area;
+    snapshot->last_update_time = stream->last_detection_time;
+
+    if (stream->grid_scores && stream->grid_size > 0) {
+        int total_cells = stream->grid_size * stream->grid_size;
+        if (total_cells > MOTION_GRID_MAX_CELLS) {
+            total_cells = MOTION_GRID_MAX_CELLS;
+        }
+
+        float motion_sum = 0.0f;
+        for (int i = 0; i < total_cells; i++) {
+            float score = stream->grid_scores[i];
+            snapshot->cell_scores[i] = score;
+            if (score > 0.01f) {
+                snapshot->active_cells++;
+                motion_sum += score;
+            }
+        }
+
+        snapshot->motion_detected = snapshot->active_cells > 0;
+        snapshot->motion_area = (total_cells > 0)
+                                ? (float)snapshot->active_cells / (float)total_cells
+                                : 0.0f;
+        snapshot->motion_score = (snapshot->active_cells > 0)
+                                 ? motion_sum / (float)snapshot->active_cells
+                                 : 0.0f;
+    } else {
+        snapshot->motion_detected = stream->last_detection_time > 0;
+        snapshot->motion_score = snapshot->motion_detected ? 1.0f : 0.0f;
+        snapshot->motion_area = snapshot->motion_detected ? 1.0f : 0.0f;
+        if (snapshot->motion_detected) {
+            snapshot->active_cells = 1;
+            snapshot->cell_scores[0] = 1.0f;
+        }
+    }
+
+    pthread_mutex_unlock(&stream->mutex);
+    return 0;
+}
+
+/**
  * Convert RGB frame to grayscale - optimized for embedded devices
  */
 static unsigned char *rgb_to_grayscale(const unsigned char *rgb_data, int width, int height) {
@@ -1023,13 +1089,6 @@ int detect_motion(const char *stream_name, const unsigned char *frame_data,
         return 0;
     }
 
-    // Check cooldown period
-    if (stream->last_detection_time > 0 &&
-        (frame_time - stream->last_detection_time) < stream->cooldown_time) {
-        pthread_mutex_unlock(&stream->mutex);
-        return 0;
-    }
-
     // Convert to grayscale if needed
     unsigned char *gray_frame = NULL;
     if (channels == 3) {
@@ -1411,7 +1470,7 @@ int detect_motion(const char *stream_name, const unsigned char *frame_data,
                 result->count++;
             }
 
-            log_info("Motion detected in stream %s: score=%.3f, area=%.2f%%, clusters=%d",
+            log_debug("Motion detected in stream %s: score=%.3f, area=%.2f%%, clusters=%d",
                     stream_name, motion_score, motion_area * 100.0f, result->count);
         } else {
             // Non-grid path: single full-frame detection
@@ -1424,7 +1483,7 @@ int detect_motion(const char *stream_name, const unsigned char *frame_data,
             result->detections[0].width = 1.0f;
             result->detections[0].height = 1.0f;
 
-            log_info("Motion detected in stream %s: score=%.3f, area=%.2f%%",
+            log_debug("Motion detected in stream %s: score=%.3f, area=%.2f%%",
                     stream_name, motion_score, motion_area * 100.0f);
         }
     } else {

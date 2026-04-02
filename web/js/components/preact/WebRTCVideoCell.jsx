@@ -1241,7 +1241,7 @@ export function WebRTCVideoCell({
       )}
 
       {/* Detection overlay component */}
-      {stream.detection_based_recording && stream.detection_model && showDetections && !isFullscreenCell && (
+      {stream.detection_based_recording && stream.detection_model && showDetections && (
         <DetectionOverlay
           ref={detectionOverlayRef}
           streamName={stream.name}
