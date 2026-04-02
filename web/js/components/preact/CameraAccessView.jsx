@@ -33,6 +33,7 @@ const addTag = (value, tag) => {
 const removeTag = (value, tag) => joinTagList(parseTagList(value).filter((item) => item !== tag));
 
 const normalizeGroupName = (value) => value.trim().replace(/\s+/g, ' ');
+const getGroupKey = (mode, tag) => `${mode}:${tag}`;
 
 const getGroupMembers = (items, field, tag) =>
   items.filter((item) => hasTag(item[field] || '', tag));
@@ -77,12 +78,14 @@ function AccessGroupModal({
   mode,
   initialGroupTag,
   initialSelectedIds,
+  cameraGroups,
   items,
   onClose,
   onSave,
 }) {
   const { t } = useI18n();
   const [groupTag, setGroupTag] = useState(initialGroupTag || '');
+  const [linkedCameraGroupTag, setLinkedCameraGroupTag] = useState('');
   const [search, setSearch] = useState('');
   const [selectedIds, setSelectedIds] = useState(() => new Set(initialSelectedIds || []));
   const [isSaving, setIsSaving] = useState(false);
@@ -90,10 +93,27 @@ function AccessGroupModal({
   useEffect(() => {
     if (!isOpen) return;
     setGroupTag(initialGroupTag || '');
+    setLinkedCameraGroupTag(mode === 'user' && initialGroupTag ? initialGroupTag : '');
     setSearch('');
     setSelectedIds(new Set(initialSelectedIds || []));
     setIsSaving(false);
-  }, [isOpen, initialGroupTag, initialSelectedIds]);
+  }, [isOpen, mode, initialGroupTag, initialSelectedIds]);
+
+  useEffect(() => {
+    if (mode !== 'user') return;
+    if (!linkedCameraGroupTag) return;
+    const hasSelection = cameraGroups?.some((group) => group.tag === linkedCameraGroupTag);
+    if (!hasSelection) {
+      setLinkedCameraGroupTag('');
+    }
+  }, [cameraGroups, linkedCameraGroupTag, mode]);
+
+  const handleCameraGroupSelect = (value) => {
+    setLinkedCameraGroupTag(value);
+    if (value) {
+      setGroupTag(value);
+    }
+  };
 
   const filteredItems = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -194,6 +214,29 @@ function AccessGroupModal({
         <form onSubmit={handleSubmit} className="p-6">
           <div className="grid gap-4 md:grid-cols-[1fr_280px]">
             <div>
+              {mode === 'user' && (
+                <div className="mb-4 rounded-xl border border-border bg-muted/15 p-4">
+                  <label className="block text-sm font-semibold mb-2" htmlFor="linked-camera-group">
+                    {t('cameraAccess.linkCameraGroup')}
+                  </label>
+                  <select
+                    id="linked-camera-group"
+                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                    value={linkedCameraGroupTag}
+                    onChange={(e) => handleCameraGroupSelect(e.currentTarget.value)}
+                  >
+                    <option value="">{t('cameraAccess.customUserGroup')}</option>
+                    {cameraGroups?.map((group) => (
+                      <option key={group.tag} value={group.tag}>
+                        {group.tag}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    {t('cameraAccess.linkCameraGroupHelp')}
+                  </p>
+                </div>
+              )}
               <label className="block text-sm font-semibold mb-2" htmlFor="group-tag">
                 {t('cameraAccess.groupName')}
               </label>
@@ -202,11 +245,22 @@ function AccessGroupModal({
                 className="w-full rounded-md border border-input bg-background px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
                 type="text"
                 value={groupTag}
-                onInput={(e) => setGroupTag(e.currentTarget.value)}
+                onInput={(e) => {
+                  const value = e.currentTarget.value;
+                  setGroupTag(value);
+                  if (mode === 'user' && linkedCameraGroupTag && value !== linkedCameraGroupTag) {
+                    setLinkedCameraGroupTag('');
+                  }
+                }}
                 placeholder={mode === 'camera' ? t('cameraAccess.cameraGroupPlaceholder') : t('cameraAccess.userGroupPlaceholder')}
                 maxLength={64}
                 autoComplete="off"
               />
+              {mode === 'user' && (
+                <p className="mt-2 text-xs text-muted-foreground">
+                  {t('cameraAccess.userGroupTagHelp')}
+                </p>
+              )}
             </div>
             <div className="rounded-xl border border-border bg-muted/20 p-4">
               <div className="text-xs uppercase tracking-wide text-muted-foreground">{t('cameraAccess.selectedMembers')}</div>
@@ -329,6 +383,7 @@ export function CameraAccessView() {
   const [activeTab, setActiveTab] = useState('camera');
   const [searchTerm, setSearchTerm] = useState('');
   const [editorState, setEditorState] = useState(null);
+  const [selectedGroupKey, setSelectedGroupKey] = useState(null);
 
   const getAuthHeaders = useCallback(() => {
     const auth = localStorage.getItem('auth');
@@ -402,6 +457,28 @@ export function CameraAccessView() {
     () => filterVisibleGroups(userGroups, searchTerm, (item) => item.username || ''),
     [userGroups, searchTerm]
   );
+
+  const activeGroups = activeTab === 'camera' ? cameraGroups : userGroups;
+  const visibleGroups = activeTab === 'camera' ? filteredCameraGroups : filteredUserGroups;
+
+  useEffect(() => {
+    if (activeGroups.length === 0) {
+      setSelectedGroupKey(null);
+      return;
+    }
+
+    const selectedStillExists = selectedGroupKey
+      && activeGroups.some((group) => getGroupKey(activeTab, group.tag) === selectedGroupKey);
+
+    if (!selectedStillExists) {
+      setSelectedGroupKey(getGroupKey(activeTab, activeGroups[0].tag));
+    }
+  }, [activeTab, activeGroups, selectedGroupKey]);
+
+  const selectedGroup = useMemo(() => {
+    if (!selectedGroupKey) return null;
+    return activeGroups.find((group) => getGroupKey(activeTab, group.tag) === selectedGroupKey) || null;
+  }, [activeGroups, activeTab, selectedGroupKey]);
 
   const cameraGroupStats = useMemo(() => {
     const linkedUsers = new Set();
@@ -512,6 +589,7 @@ export function CameraAccessView() {
   });
 
   const handleOpenCreate = useCallback((mode) => {
+    setActiveTab(mode);
     setEditorState({
       mode,
       initialGroupTag: '',
@@ -520,6 +598,8 @@ export function CameraAccessView() {
   }, []);
 
   const handleOpenEdit = useCallback((mode, tag) => {
+    setActiveTab(mode);
+    setSelectedGroupKey(getGroupKey(mode, tag));
     if (mode === 'camera') {
       const groupMembers = getGroupMembers(streams, 'tags', tag).map((stream) => String(stream.name));
       setEditorState({
@@ -581,6 +661,9 @@ export function CameraAccessView() {
         );
         showStatusMessage(t('cameraAccess.userGroupDeleted'), 'success', 4000);
       }
+      if (selectedGroupKey === getGroupKey(mode, tag)) {
+        setSelectedGroupKey(null);
+      }
       await refetchStreams();
       await refetchUsers();
     } catch (error) {
@@ -592,7 +675,7 @@ export function CameraAccessView() {
         8000
       );
     }
-  }, [getAuthHeaders, refetchStreams, refetchUsers, streams, users, t]);
+  }, [getAuthHeaders, refetchStreams, refetchUsers, selectedGroupKey, streams, users, t]);
 
   const handleSaveGroup = useCallback(async ({ groupTag, selectedIds }) => {
     if (!editorState) return;
@@ -603,9 +686,6 @@ export function CameraAccessView() {
       selectedIds,
     });
   }, [editorState, updateCameraGroupMutation, updateUserGroupMutation]);
-
-  const selectedCameraGroups = filteredCameraGroups;
-  const selectedUserGroups = filteredUserGroups;
 
   const isLoading = streamsLoading || usersLoading || roleLoading;
   const isAuthError = (streamsError || usersError) && (streamsError?.status === 401 || streamsError?.status === 403 || usersError?.status === 401 || usersError?.status === 403);
@@ -646,97 +726,56 @@ export function CameraAccessView() {
     );
   }
 
-  const renderGroupTable = (mode, groups) => (
-    <div className="overflow-hidden rounded-2xl border border-border bg-card shadow">
-      <table className="w-full border-collapse">
-        <thead className="bg-muted/30">
-          <tr className="text-left text-sm">
-            <th className="px-4 py-3 font-semibold">{t('cameraAccess.groupName')}</th>
-            <th className="px-4 py-3 font-semibold">{mode === 'camera' ? t('cameraAccess.cameraCount') : t('cameraAccess.userCount')}</th>
-            <th className="px-4 py-3 font-semibold">{mode === 'camera' ? t('cameraAccess.accessUsers') : t('cameraAccess.accessCameras')}</th>
-            <th className="px-4 py-3 font-semibold">{t('common.actions')}</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-border">
-          {groups.map((group) => {
-            const accessCount = mode === 'camera'
-              ? users.filter((user) => hasTag(user.allowed_tags, group.tag)).length
-              : streams.filter((stream) => hasTag(stream.tags, group.tag)).length;
-            return (
-              <tr key={`${mode}-${group.tag}`} className="hover:bg-muted/30">
-                <td className="px-4 py-3">
-                  <div className="font-medium">{group.tag}</div>
-                  <div className="mt-1 text-xs text-muted-foreground">
-                    {mode === 'camera'
-                      ? t('cameraAccess.cameraGroupDescription')
-                      : t('cameraAccess.userGroupDescription')}
-                  </div>
-                </td>
-                <td className="px-4 py-3 tabular-nums">{group.members.length}</td>
-                <td className="px-4 py-3 tabular-nums">{accessCount}</td>
-                <td className="px-4 py-3">
-                  <div className="flex flex-wrap gap-2">
-                    <button type="button" className="btn-secondary" onClick={() => handleOpenEdit(mode, group.tag)}>
-                      {t('cameraAccess.editGroup')}
-                    </button>
-                    <button type="button" className="btn-secondary text-red-600 hover:text-red-700" onClick={() => handleDeleteGroup(mode, group.tag)}>
-                      {t('cameraAccess.deleteGroup')}
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            );
-          })}
-          {groups.length === 0 && (
-            <tr>
-              <td className="px-4 py-6 text-center text-muted-foreground" colSpan={4}>
-                {t('cameraAccess.noGroupsFound')}
-              </td>
-            </tr>
-          )}
-        </tbody>
-      </table>
-    </div>
-  );
-
   return (
     <div id="camera-access-page" className="space-y-6">
-      <div className="page-header flex flex-col gap-4 rounded-2xl bg-card p-4 shadow md:flex-row md:items-center md:justify-between">
-        <div>
-          <h2 className="text-xl font-semibold">{t('cameraAccess.title')}</h2>
-          <p className="mt-1 text-sm text-muted-foreground">{t('cameraAccess.subtitle')}</p>
+      <div className="overflow-hidden rounded-3xl border border-border bg-card shadow">
+        <div className="border-b border-border bg-gradient-to-r from-primary/10 via-transparent to-transparent px-6 py-6">
+          <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+            <div className="max-w-2xl">
+              <div className="inline-flex items-center gap-2 rounded-full bg-primary/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-primary">
+                <span className="h-2 w-2 rounded-full bg-primary"></span>
+                {t('cameraAccess.title')}
+              </div>
+              <h2 className="mt-3 text-2xl font-semibold tracking-tight">{t('cameraAccess.subtitle')}</h2>
+              <p className="mt-2 text-sm text-muted-foreground">
+                {t('cameraAccess.panelHint')}
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button className="btn-secondary" onClick={() => { refetchStreams(); refetchUsers(); }}>
+                {t('common.refresh')}
+              </button>
+              <button className="btn-primary" onClick={() => handleOpenCreate(activeTab)}>
+                {activeTab === 'camera' ? t('cameraAccess.newCameraGroup') : t('cameraAccess.newUserGroup')}
+              </button>
+            </div>
+          </div>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <button className="btn-secondary" onClick={() => refetchStreams()}>{t('common.refresh')}</button>
-          <button className="btn-primary" onClick={() => handleOpenCreate(activeTab)}>{activeTab === 'camera' ? t('cameraAccess.newCameraGroup') : t('cameraAccess.newUserGroup')}</button>
-        </div>
-      </div>
 
-      <div className="grid gap-4 md:grid-cols-4">
-        <div className="rounded-2xl border border-border bg-card p-4 shadow">
-          <div className="text-xs uppercase tracking-wide text-muted-foreground">{t('cameraAccess.cameraGroups')}</div>
-          <div className="mt-2 text-3xl font-semibold tabular-nums">{cameraGroups.length}</div>
+        <div className="grid gap-4 border-b border-border px-6 py-5 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="rounded-2xl bg-muted/20 p-4">
+            <div className="text-xs uppercase tracking-wide text-muted-foreground">{t('cameraAccess.cameraGroups')}</div>
+            <div className="mt-2 text-3xl font-semibold tabular-nums">{cameraGroups.length}</div>
+          </div>
+          <div className="rounded-2xl bg-muted/20 p-4">
+            <div className="text-xs uppercase tracking-wide text-muted-foreground">{t('cameraAccess.userGroups')}</div>
+            <div className="mt-2 text-3xl font-semibold tabular-nums">{userGroups.length}</div>
+          </div>
+          <div className="rounded-2xl bg-muted/20 p-4">
+            <div className="text-xs uppercase tracking-wide text-muted-foreground">{t('cameraAccess.linkedUsers')}</div>
+            <div className="mt-2 text-3xl font-semibold tabular-nums">{cameraGroupStats}</div>
+          </div>
+          <div className="rounded-2xl bg-muted/20 p-4">
+            <div className="text-xs uppercase tracking-wide text-muted-foreground">{t('cameraAccess.linkedCameras')}</div>
+            <div className="mt-2 text-3xl font-semibold tabular-nums">{userGroupStats}</div>
+          </div>
         </div>
-        <div className="rounded-2xl border border-border bg-card p-4 shadow">
-          <div className="text-xs uppercase tracking-wide text-muted-foreground">{t('cameraAccess.userGroups')}</div>
-          <div className="mt-2 text-3xl font-semibold tabular-nums">{userGroups.length}</div>
-        </div>
-        <div className="rounded-2xl border border-border bg-card p-4 shadow">
-          <div className="text-xs uppercase tracking-wide text-muted-foreground">{t('cameraAccess.linkedUsers')}</div>
-          <div className="mt-2 text-3xl font-semibold tabular-nums">{cameraGroupStats}</div>
-        </div>
-        <div className="rounded-2xl border border-border bg-card p-4 shadow">
-          <div className="text-xs uppercase tracking-wide text-muted-foreground">{t('cameraAccess.linkedCameras')}</div>
-          <div className="mt-2 text-3xl font-semibold tabular-nums">{userGroupStats}</div>
-        </div>
-      </div>
 
-      <div className="rounded-2xl border border-border bg-card p-4 shadow">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <div className="inline-flex rounded-lg bg-muted/40 p-1">
+        <div className="flex flex-col gap-4 px-6 py-5 xl:flex-row xl:items-center xl:justify-between">
+          <div className="inline-flex rounded-xl bg-muted/40 p-1">
             <button
               type="button"
-              className={`rounded-md px-4 py-2 text-sm font-medium transition-colors ${activeTab === 'camera' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+              className={`rounded-lg px-4 py-2 text-sm font-medium transition-colors ${activeTab === 'camera' ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
               onClick={() => setActiveTab('camera')}
             >
               {t('cameraAccess.cameraGroups')}
@@ -744,7 +783,7 @@ export function CameraAccessView() {
             </button>
             <button
               type="button"
-              className={`rounded-md px-4 py-2 text-sm font-medium transition-colors ${activeTab === 'user' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+              className={`rounded-lg px-4 py-2 text-sm font-medium transition-colors ${activeTab === 'user' ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
               onClick={() => setActiveTab('user')}
             >
               {t('cameraAccess.userGroups')}
@@ -753,44 +792,232 @@ export function CameraAccessView() {
           </div>
 
           <div className="flex flex-col gap-3 md:flex-row md:items-center">
-            <div className="relative w-full md:w-96">
+            <div className="relative w-full md:w-[28rem]">
               <input
-                className="w-full rounded-md border border-input bg-background pl-10 pr-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                className="w-full rounded-xl border border-input bg-background pl-10 pr-3 py-2.5 text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
                 type="search"
                 value={searchTerm}
                 onInput={(e) => setSearchTerm(e.currentTarget.value)}
                 placeholder={t('cameraAccess.searchGroups')}
               />
-              <svg className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <svg className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <circle cx="11" cy="11" r="7" />
                 <path d="m20 20-3.5-3.5" strokeLinecap="round" />
               </svg>
             </div>
-            {activeTab === 'camera' ? (
-              <button className="btn-primary whitespace-nowrap" onClick={() => handleOpenCreate('camera')}>
-                {t('cameraAccess.newCameraGroup')}
-              </button>
-            ) : (
-              <button className="btn-primary whitespace-nowrap" onClick={() => handleOpenCreate('user')}>
-                {t('cameraAccess.newUserGroup')}
-              </button>
-            )}
+            <button className="btn-primary whitespace-nowrap" onClick={() => handleOpenCreate(activeTab)}>
+              {activeTab === 'camera' ? t('cameraAccess.newCameraGroup') : t('cameraAccess.newUserGroup')}
+            </button>
           </div>
         </div>
 
-        <div className="mt-6">
-          {activeTab === 'camera'
-            ? renderGroupTable('camera', selectedCameraGroups)
-            : renderGroupTable('user', selectedUserGroups)}
+        <div className="grid gap-0 xl:grid-cols-[minmax(0,1.55fr)_24rem]">
+          <div className="border-b border-border xl:border-b-0 xl:border-r">
+            <div className="max-h-[72vh] overflow-y-auto px-6 py-5">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-lg font-semibold">
+                    {activeTab === 'camera' ? t('cameraAccess.cameraGroups') : t('cameraAccess.userGroups')}
+                  </h3>
+                  <p className="text-sm text-muted-foreground">
+                    {activeTab === 'camera'
+                      ? t('cameraAccess.cameraGroupListHelp')
+                      : t('cameraAccess.userGroupListHelp')}
+                  </p>
+                </div>
+                <span className="rounded-full bg-muted px-3 py-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  {visibleGroups.length} {visibleGroups.length === 1 ? t('cameraAccess.groupSingular') : t('cameraAccess.groupPlural')}
+                </span>
+              </div>
+
+              <div className="mt-5">
+                <div className="space-y-3">
+                  {visibleGroups.map((group) => {
+                    const accessCount = activeTab === 'camera'
+                      ? users.filter((user) => hasTag(user.allowed_tags, group.tag)).length
+                      : streams.filter((stream) => hasTag(stream.tags, group.tag)).length;
+                    const isSelected = selectedGroupKey === getGroupKey(activeTab, group.tag);
+                    const previewMembers = group.members.slice(0, 4).map((member) => activeTab === 'camera' ? member.name : member.username);
+                    return (
+                      <button
+                        key={`${activeTab}-${group.tag}`}
+                        type="button"
+                        onClick={() => setSelectedGroupKey(getGroupKey(activeTab, group.tag))}
+                        className={`w-full rounded-2xl border p-4 text-left transition-all ${
+                          isSelected
+                            ? 'border-primary bg-primary/5 shadow-sm'
+                            : 'border-border bg-card hover:border-primary/30 hover:bg-muted/20'
+                        }`}
+                      >
+                        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2">
+                              <span className="truncate text-base font-semibold">{group.tag}</span>
+                              <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide ${activeTab === 'camera' ? 'badge-info' : 'badge-success'}`}>
+                                {activeTab === 'camera' ? t('cameraAccess.cameraGroups') : t('cameraAccess.userGroups')}
+                              </span>
+                            </div>
+                            <p className="mt-1 text-sm text-muted-foreground">
+                              {activeTab === 'camera'
+                                ? t('cameraAccess.cameraGroupDescription')
+                                : t('cameraAccess.userGroupDescription')}
+                            </p>
+                            <div className="mt-3 flex flex-wrap gap-2">
+                              <span className="rounded-full bg-muted px-2.5 py-1 text-xs text-foreground">
+                                {group.members.length} {activeTab === 'camera' ? t('cameraAccess.cameraCount').toLowerCase() : t('cameraAccess.userCount').toLowerCase()}
+                              </span>
+                              <span className="rounded-full bg-muted px-2.5 py-1 text-xs text-foreground">
+                                {accessCount} {activeTab === 'camera' ? t('cameraAccess.accessUsers').toLowerCase() : t('cameraAccess.accessCameras').toLowerCase()}
+                              </span>
+                            </div>
+                            <div className="mt-3 flex flex-wrap gap-1.5">
+                              {previewMembers.map((name) => (
+                                <span key={`${activeTab}-${group.tag}-${name}`} className="badge-info">
+                                  {name}
+                                </span>
+                              ))}
+                              {group.members.length > previewMembers.length && (
+                                <span className="badge-info">+{group.members.length - previewMembers.length}</span>
+                              )}
+                            </div>
+                          </div>
+                          <div className="flex shrink-0 flex-wrap gap-2 lg:justify-end">
+                            <button
+                              type="button"
+                              className="btn-secondary"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleOpenEdit(activeTab, group.tag);
+                              }}
+                            >
+                              {t('cameraAccess.editGroup')}
+                            </button>
+                            <button
+                              type="button"
+                              className="btn-secondary text-red-600 hover:text-red-700"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeleteGroup(activeTab, group.tag);
+                              }}
+                            >
+                              {t('cameraAccess.deleteGroup')}
+                            </button>
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })}
+
+                  {visibleGroups.length === 0 && (
+                    <div className="rounded-2xl border border-dashed border-border bg-muted/20 p-8 text-center">
+                      <p className="text-sm text-muted-foreground">{t('cameraAccess.noGroupsFound')}</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <aside className="bg-muted/15 px-6 py-5">
+            <div className="sticky top-5">
+              <div className="rounded-3xl border border-border bg-card p-5 shadow-sm">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="text-xs uppercase tracking-wide text-muted-foreground">
+                      {t('cameraAccess.groupDetails')}
+                    </div>
+                    <h3 className="mt-1 text-xl font-semibold">
+                      {selectedGroup ? selectedGroup.tag : t('cameraAccess.selectGroupTitle')}
+                    </h3>
+                  </div>
+                  {selectedGroup && (
+                    <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide ${activeTab === 'camera' ? 'badge-info' : 'badge-success'}`}>
+                      {activeTab === 'camera' ? t('cameraAccess.cameraGroups') : t('cameraAccess.userGroups')}
+                    </span>
+                  )}
+                </div>
+
+                {selectedGroup ? (
+                  <div className="mt-5 space-y-5">
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="rounded-2xl bg-muted/25 p-4">
+                        <div className="text-xs uppercase tracking-wide text-muted-foreground">{activeTab === 'camera' ? t('cameraAccess.cameraCount') : t('cameraAccess.userCount')}</div>
+                        <div className="mt-2 text-3xl font-semibold tabular-nums">{selectedGroup.members.length}</div>
+                      </div>
+                      <div className="rounded-2xl bg-muted/25 p-4">
+                        <div className="text-xs uppercase tracking-wide text-muted-foreground">{activeTab === 'camera' ? t('cameraAccess.accessUsers') : t('cameraAccess.accessCameras')}</div>
+                        <div className="mt-2 text-3xl font-semibold tabular-nums">
+                          {activeTab === 'camera'
+                            ? users.filter((user) => hasTag(user.allowed_tags, selectedGroup.tag)).length
+                            : streams.filter((stream) => hasTag(stream.tags, selectedGroup.tag)).length}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="rounded-2xl border border-border bg-muted/20 p-4">
+                      <div className="text-xs uppercase tracking-wide text-muted-foreground">
+                        {t('cameraAccess.groupMembers')}
+                      </div>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {selectedGroup.members.slice(0, 10).map((member) => (
+                          <span key={`${activeTab}-${selectedGroup.tag}-${activeTab === 'camera' ? member.name : member.username}`} className="badge-info">
+                            {activeTab === 'camera' ? member.name : member.username}
+                          </span>
+                        ))}
+                        {selectedGroup.members.length === 0 && (
+                          <span className="text-sm text-muted-foreground">{t('cameraAccess.noMembers')}</span>
+                        )}
+                        {selectedGroup.members.length > 10 && (
+                          <span className="badge-info">+{selectedGroup.members.length - 10}</span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="rounded-2xl border border-border bg-muted/20 p-4">
+                      <div className="text-xs uppercase tracking-wide text-muted-foreground">
+                        {t('cameraAccess.groupLinkHint')}
+                      </div>
+                      <p className="mt-2 text-sm text-muted-foreground">
+                        {activeTab === 'camera'
+                          ? t('cameraAccess.cameraGroupHelp')
+                          : t('cameraAccess.userGroupHelp')}
+                      </p>
+                    </div>
+
+                    <div className="flex flex-col gap-2">
+                      <button type="button" className="btn-primary" onClick={() => handleOpenEdit(activeTab, selectedGroup.tag)}>
+                        {t('cameraAccess.editGroup')}
+                      </button>
+                      <button type="button" className="btn-secondary text-red-600 hover:text-red-700" onClick={() => handleDeleteGroup(activeTab, selectedGroup.tag)}>
+                        {t('cameraAccess.deleteGroup')}
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="mt-6 rounded-2xl border border-dashed border-border bg-muted/20 p-6 text-center">
+                    <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-primary/10 text-primary">
+                      <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M12 5v14" strokeLinecap="round" />
+                        <path d="M5 12h14" strokeLinecap="round" />
+                      </svg>
+                    </div>
+                    <h4 className="mt-4 text-sm font-semibold">{t('cameraAccess.selectGroupTitle')}</h4>
+                    <p className="mt-2 text-sm text-muted-foreground">{t('cameraAccess.selectGroupHelp')}</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </aside>
         </div>
       </div>
 
       {editorState && (
-        <AccessGroupModal
+      <AccessGroupModal
           isOpen
           mode={editorState.mode}
           initialGroupTag={editorState.initialGroupTag}
           initialSelectedIds={editorState.initialSelectedIds}
+          cameraGroups={cameraGroups}
           items={editorState.mode === 'camera' ? streams.map((stream) => ({ ...stream, __group_key: stream.name })) : users.map((user) => ({ ...user, __group_key: String(user.id) }))}
           onClose={() => setEditorState(null)}
           onSave={handleSaveGroup}
