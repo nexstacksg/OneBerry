@@ -4,7 +4,7 @@
 
 import dayjs from 'dayjs';
 
-export const MIN_TIMELINE_VIEW_HOURS = 0.5;
+export const MIN_TIMELINE_VIEW_HOURS = 1 / 3600;
 export const MAX_TIMELINE_VIEW_HOURS = 24;
 
 function clamp(value, min, max) {
@@ -42,6 +42,35 @@ export function normalizeTimelineRange(startHour, endHour, maxHours = MAX_TIMELI
   };
 }
 
+export function getTimelineRangeHours(startHour, endHour) {
+  const safeStart = Number.isFinite(startHour) ? startHour : 0;
+  const safeEnd = Number.isFinite(endHour) ? endHour : safeStart;
+  return Math.max(safeEnd - safeStart, 0);
+}
+
+export function scaleTimelineWindowHours(
+  windowHours,
+  zoomFactor,
+  maxHours = MAX_TIMELINE_VIEW_HOURS,
+  minHours = MIN_TIMELINE_VIEW_HOURS
+) {
+  const safeWindow = Number.isFinite(windowHours) && windowHours > 0
+    ? windowHours
+    : maxHours;
+  const cappedMaxHours = Number.isFinite(maxHours) && maxHours > 0
+    ? maxHours
+    : MAX_TIMELINE_VIEW_HOURS;
+  const safeMinHours = Number.isFinite(minHours) && minHours > 0
+    ? minHours
+    : MIN_TIMELINE_VIEW_HOURS;
+
+  if (!Number.isFinite(zoomFactor) || zoomFactor <= 0 || zoomFactor === 1) {
+    return clamp(safeWindow, safeMinHours, cappedMaxHours);
+  }
+
+  return clamp(safeWindow * zoomFactor, safeMinHours, cappedMaxHours);
+}
+
 export function panTimelineRange(startHour, endHour, deltaHours, maxHours = MAX_TIMELINE_VIEW_HOURS) {
   const normalized = normalizeTimelineRange(startHour, endHour, maxHours);
   if (!Number.isFinite(deltaHours) || deltaHours === 0) {
@@ -61,7 +90,14 @@ export function panTimelineRange(startHour, endHour, deltaHours, maxHours = MAX_
   };
 }
 
-export function zoomTimelineRange(startHour, endHour, zoomFactor, anchorHour = null, maxHours = MAX_TIMELINE_VIEW_HOURS) {
+export function zoomTimelineRange(
+  startHour,
+  endHour,
+  zoomFactor,
+  anchorHour = null,
+  maxHours = MAX_TIMELINE_VIEW_HOURS,
+  minHours = MIN_TIMELINE_VIEW_HOURS
+) {
   const normalized = normalizeTimelineRange(startHour, endHour, maxHours);
   if (!Number.isFinite(zoomFactor) || zoomFactor <= 0 || zoomFactor === 1) {
     return normalized;
@@ -71,7 +107,10 @@ export function zoomTimelineRange(startHour, endHour, zoomFactor, anchorHour = n
     ? maxHours
     : MAX_TIMELINE_VIEW_HOURS;
   const currentRange = normalized.endHour - normalized.startHour;
-  const nextRange = clamp(currentRange * zoomFactor, MIN_TIMELINE_VIEW_HOURS, cappedMaxHours);
+  const safeMinHours = Number.isFinite(minHours) && minHours > 0
+    ? minHours
+    : MIN_TIMELINE_VIEW_HOURS;
+  const nextRange = clamp(currentRange * zoomFactor, safeMinHours, cappedMaxHours);
   const resolvedAnchorHour = clamp(
     Number.isFinite(anchorHour) ? anchorHour : ((normalized.startHour + normalized.endHour) / 2),
     normalized.startHour,
@@ -253,6 +292,31 @@ export function formatTimelineOffsetLabel(offsetHours, selectedDate) {
   return dayjs.unix(displayTimestamp).format('H:mm');
 }
 
+export function formatTimelineWindowLabel(windowHours) {
+  if (!Number.isFinite(windowHours) || windowHours <= 0) {
+    return '';
+  }
+
+  const totalSeconds = Math.max(Math.round(windowHours * 3600), 0);
+  if (totalSeconds < 60) {
+    return `${totalSeconds}s view`;
+  }
+
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  if (hours > 0) {
+    return seconds > 0
+      ? `${hours}h ${minutes}m ${seconds}s view`
+      : `${hours}h ${minutes}m view`;
+  }
+
+  return seconds > 0
+    ? `${minutes}m ${seconds}s view`
+    : `${minutes}m view`;
+}
+
 export function findFirstVisibleSegmentIndex(segments, selectedDate) {
   if (!Array.isArray(segments) || segments.length === 0) {
     return -1;
@@ -376,4 +440,3 @@ export function getClippedSegmentHourRange(segment, selectedDate) {
     endHour: (visibleEnd - bounds.startTimestamp) / 3600
   };
 }
-

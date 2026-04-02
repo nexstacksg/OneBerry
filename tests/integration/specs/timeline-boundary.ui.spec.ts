@@ -116,6 +116,40 @@ test.describe('Timeline boundary flows @ui @timeline', () => {
     expect((await segmentBar.boundingBox())?.width ?? 0).toBeGreaterThan(0);
   });
 
+  test('keeps the live edge anchored when zooming the timeline', async ({ page }) => {
+    const stream = 'front_door';
+    const date = '2026-03-08';
+    const segments: Segment[] = [
+      { id: 211, stream, start_timestamp: localTimestamp(date, '09:00:00'), end_timestamp: localTimestamp(date, '09:05:00') },
+      { id: 212, stream, start_timestamp: localTimestamp(date, '09:10:00'), end_timestamp: localTimestamp(date, '09:15:00') }
+    ];
+
+    await mockTimelineApis(page, stream, segments);
+    await page.goto(`/timeline.html?stream=${stream}&date=${date}&time=09:10:00`, { waitUntil: 'domcontentloaded' });
+
+    const timelinePage = new TimelinePage(page);
+    await expect(timelinePage.timelineContainer).toBeVisible();
+    await expect(timelinePage.previewStrip).toBeVisible();
+
+    const beforeContainer = await timelinePage.timelineContainer.boundingBox();
+    const beforePlayhead = await timelinePage.playhead.boundingBox();
+    if (!beforeContainer || !beforePlayhead) {
+      throw new Error('Expected timeline container and playhead to have bounding boxes');
+    }
+
+    expect(beforePlayhead.x + beforePlayhead.width).toBeGreaterThan(beforeContainer.x + beforeContainer.width - 24);
+
+    await timelinePage.zoomInButton.click();
+
+    const afterContainer = await timelinePage.timelineContainer.boundingBox();
+    const afterPlayhead = await timelinePage.playhead.boundingBox();
+    if (!afterContainer || !afterPlayhead) {
+      throw new Error('Expected timeline container and playhead to have bounding boxes after zoom');
+    }
+
+    expect(afterPlayhead.x + afterPlayhead.width).toBeGreaterThan(afterContainer.x + afterContainer.width - 24);
+  });
+
   test('falls back to the nearest recording when the requested time is in a gap', async ({ page }) => {
     const stream = 'garage';
     const date = '2026-03-08';

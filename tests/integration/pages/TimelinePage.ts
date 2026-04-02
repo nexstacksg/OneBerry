@@ -50,6 +50,18 @@ export class TimelinePage extends BasePage {
     return this.page.locator('#timeline-container .timeline-cursor, .playhead, [data-testid="playhead"]').first();
   }
 
+  get previewStrip(): Locator {
+    return this.page.locator('[data-testid="timeline-preview-strip"]').first();
+  }
+
+  get zoomInButton(): Locator {
+    return this.page.locator('#zoom-in-button').first();
+  }
+
+  get zoomOutButton(): Locator {
+    return this.page.locator('#zoom-out-button').first();
+  }
+
   get timeDisplay(): Locator {
     return this.page.locator('#time-display, .time-display, [data-testid="time-display"]').first();
   }
@@ -242,4 +254,3 @@ export class TimelinePage extends BasePage {
     }
   }
 }
-

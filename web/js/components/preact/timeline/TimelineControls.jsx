@@ -12,11 +12,11 @@ import {
   findNearestSegmentIndex,
   formatPlaybackTimeLabel,
   getTimelineDayLengthHours,
+  getTimelineRangeHours,
   MIN_TIMELINE_VIEW_HOURS,
   resolveActiveSegmentIndex,
   resolvePlaybackStreamName,
-  timestampToTimelineOffset,
-  zoomTimelineRange
+  scaleTimelineWindowHours
 } from './timelineUtils.js';
 import { useI18n } from '../../../i18n.js';
 
@@ -50,7 +50,10 @@ export function TimelineControls() {
       setIsProtected(!!state.currentRecordingProtected);
       setRecordingTags(Array.isArray(state.currentRecordingTags) ? state.currentRecordingTags : []);
       const dayLengthHours = getTimelineDayLengthHours(state.selectedDate);
-      const range = (state.timelineEndHour ?? dayLengthHours) - (state.timelineStartHour ?? 0);
+      const range = state.timelineWindowHours ?? getTimelineRangeHours(
+        state.timelineStartHour ?? 0,
+        state.timelineEndHour ?? dayLengthHours
+      );
       setCanZoomIn(range > MIN_TIMELINE_VIEW_HOURS);
       setCanZoomOut(range < dayLengthHours);
 
@@ -152,54 +155,37 @@ export function TimelineControls() {
     });
   };
 
-  // ── Helper: get the center hour for zoom (cursor position or range midpoint) ──
-  const getCenter = () => {
-    const s = timelineState.timelineStartHour ?? 0;
-    const dayLengthHours = getTimelineDayLengthHours(timelineState.selectedDate);
-    const e = timelineState.timelineEndHour ?? dayLengthHours;
-    if (timelineState.currentTime !== null) {
-      const h = timestampToTimelineOffset(timelineState.currentTime, timelineState.selectedDate);
-      // Only use cursor if it's inside the current view
-      if (h !== null && h >= s && h <= e) return h;
-    }
-    return (s + e) / 2;
-  };
-
-  // Zoom in — halve the visible range, centered on cursor
+  // Zoom in — halve the visible window while keeping the right edge anchored.
   const zoomIn = () => {
-    const s = timelineState.timelineStartHour ?? 0;
     const dayLengthHours = getTimelineDayLengthHours(timelineState.selectedDate);
-    const e = timelineState.timelineEndHour ?? dayLengthHours;
-    const range = e - s;
+    const range = timelineState.timelineWindowHours ?? getTimelineRangeHours(
+      timelineState.timelineStartHour ?? 0,
+      timelineState.timelineEndHour ?? dayLengthHours
+    );
     if (range <= MIN_TIMELINE_VIEW_HOURS) return;
-    const center = getCenter();
-    const nextRange = zoomTimelineRange(s, e, 0.5, center, dayLengthHours);
-    timelineState.setState({
-      timelineStartHour: nextRange.startHour,
-      timelineEndHour: nextRange.endHour
-    });
+    const nextRange = scaleTimelineWindowHours(range, 0.5, dayLengthHours, MIN_TIMELINE_VIEW_HOURS);
+    timelineState.setState({ timelineWindowHours: nextRange });
   };
 
-  // Zoom out — double the visible range, centered on cursor, capped at 0-24
+  // Zoom out — double the visible window while keeping the right edge anchored.
   const zoomOut = () => {
-    const s = timelineState.timelineStartHour ?? 0;
     const dayLengthHours = getTimelineDayLengthHours(timelineState.selectedDate);
-    const e = timelineState.timelineEndHour ?? dayLengthHours;
-    const range = e - s;
+    const range = timelineState.timelineWindowHours ?? getTimelineRangeHours(
+      timelineState.timelineStartHour ?? 0,
+      timelineState.timelineEndHour ?? dayLengthHours
+    );
     if (range >= dayLengthHours) return;
-    const center = getCenter();
-    const nextRange = zoomTimelineRange(s, e, 2, center, dayLengthHours);
-    timelineState.setState({
-      timelineStartHour: nextRange.startHour,
-      timelineEndHour: nextRange.endHour
-    });
+    const nextRange = scaleTimelineWindowHours(range, 2, dayLengthHours, MIN_TIMELINE_VIEW_HOURS);
+    timelineState.setState({ timelineWindowHours: nextRange });
   };
 
   // Fit — reset to the auto-fit range computed on data load
   const fitToSegments = () => {
     const fs = timelineState.autoFitStartHour ?? 0;
     const fe = timelineState.autoFitEndHour ?? getTimelineDayLengthHours(timelineState.selectedDate);
-    timelineState.setState({ timelineStartHour: fs, timelineEndHour: fe });
+    timelineState.setState({
+      timelineWindowHours: Math.max(fe - fs, MIN_TIMELINE_VIEW_HOURS)
+    });
   };
 
   const jumpToAdjacentSegment = (direction) => {
