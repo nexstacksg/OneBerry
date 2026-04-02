@@ -28,7 +28,6 @@
 #include "core/logger.h"
 #include "core/config.h"
 #include "core/url_utils.h"
-#include "core/path_utils.h"
 #include "core/shutdown_coordinator.h"
 #include "video/stream_manager.h"
 #include "video/streams.h"
@@ -575,6 +574,8 @@ int start_mp4_recording(const char *stream_name) {
 
     // Check if already running — also verify the recording is actually healthy.
     // Extract a dead context (if any) under the mutex, then join it outside.
+    // FIX: treat writer==NULL + ctx->running==1 as "initializing" to prevent
+    // duplicate instances during the RTSP-connect window (see start_mp4_recording_with_trigger).
     mp4_recording_ctx_t *dead_ctx = NULL;
     pthread_mutex_lock(&recording_contexts_mutex);
     for (int i = 0; i < g_config.max_streams; i++) {
@@ -585,7 +586,12 @@ int start_mp4_recording(const char *stream_name) {
                 log_info("MP4 recording for stream %s already running and healthy", stream_name);
                 return 0;  // Already running and healthy
             }
-
+            if (!writer && recording_contexts[i]->running) {
+                // Still initializing — mp4_writer not yet assigned by the thread.  // <-- bug fix
+                pthread_mutex_unlock(&recording_contexts_mutex);
+                log_info("MP4 recording for stream %s is initializing, skipping duplicate start", stream_name);
+                return 0;
+            }
             // Dead — extract from slot under the lock, join outside
             log_warn("MP4 recording for stream %s exists but is dead, cleaning up before restart", stream_name);
             dead_ctx = recording_contexts[i];
@@ -645,20 +651,16 @@ int start_mp4_recording(const char *stream_name) {
     const struct tm *tm_info = localtime_r(&now, &tm_buf);
     strftime(timestamp_str, sizeof(timestamp_str), "%Y%m%d_%H%M%S", tm_info);
 
-    // Sanitize the stream name so that names with spaces work correctly.
-    char encoded_name[MAX_STREAM_NAME];
-    sanitize_stream_name(stream_name, encoded_name, MAX_STREAM_NAME);
-
     // Create MP4 directory path
     char mp4_dir[MAX_PATH_LENGTH];
     if (global_config->record_mp4_directly && global_config->mp4_storage_path[0] != '\0') {
         // Use configured MP4 storage path if available
         snprintf(mp4_dir, MAX_PATH_LENGTH, "%s/%s",
-                global_config->mp4_storage_path, encoded_name);
+                global_config->mp4_storage_path, stream_name);
     } else {
         // Use mp4 directory parallel to hls, NOT inside it
         snprintf(mp4_dir, MAX_PATH_LENGTH, "%s/mp4/%s",
-                global_config->storage_path, encoded_name);
+                global_config->storage_path, stream_name);
     }
 
     // Create MP4 directory if it doesn't exist
@@ -748,7 +750,12 @@ int start_mp4_recording_with_url(const char *stream_name, const char *url) {
                 log_info("MP4 recording for stream %s already running and healthy", stream_name);
                 return 0;  // Already running and healthy
             }
-
+            if (!writer && recording_contexts[i]->running) {
+                // Still initializing — mp4_writer not yet assigned by the thread.  // <-- bug fix
+                pthread_mutex_unlock(&recording_contexts_mutex);
+                log_info("MP4 recording for stream %s is initializing, skipping duplicate start", stream_name);
+                return 0;
+            }
             // Dead — extract from slot under the lock, join outside
             log_warn("MP4 recording for stream %s exists but is dead, cleaning up before restart", stream_name);
             dead_ctx = recording_contexts[i];
@@ -811,20 +818,16 @@ int start_mp4_recording_with_url(const char *stream_name, const char *url) {
     const struct tm *tm_info = localtime_r(&now, &tm_buf);
     strftime(timestamp_str, sizeof(timestamp_str), "%Y%m%d_%H%M%S", tm_info);
 
-    // Sanitize the stream name so that names with spaces work correctly.
-    char encoded_name[MAX_STREAM_NAME];
-    sanitize_stream_name(stream_name, encoded_name, MAX_STREAM_NAME);
-
     // Create MP4 directory path
     char mp4_dir[MAX_PATH_LENGTH];
     if (global_config->record_mp4_directly && global_config->mp4_storage_path[0] != '\0') {
         // Use configured MP4 storage path if available
         snprintf(mp4_dir, MAX_PATH_LENGTH, "%s/%s",
-                global_config->mp4_storage_path, encoded_name);
+                global_config->mp4_storage_path, stream_name);
     } else {
         // Use mp4 directory parallel to hls, NOT inside it
         snprintf(mp4_dir, MAX_PATH_LENGTH, "%s/mp4/%s",
-                global_config->storage_path, encoded_name);
+                global_config->storage_path, stream_name);
     }
 
     // Create MP4 directory if it doesn't exist
@@ -969,18 +972,61 @@ int start_mp4_recording_with_trigger(const char *stream_name, const char *trigge
     }
 
     // Check if already running — also verify the recording is actually healthy.
+    //
+    // OLD CODE (kept for reference):
+    //
+    // mp4_recording_ctx_t *dead_ctx = NULL;
+    // pthread_mutex_lock(&recording_contexts_mutex);
+    // for (int i = 0; i < g_config.max_streams; i++) {
+    //     if (recording_contexts[i] && strcmp(recording_contexts[i]->config.name, stream_name) == 0) {
+    //         mp4_writer_t *writer = recording_contexts[i]->mp4_writer;
+    //         if (writer && mp4_writer_is_recording(writer)) {
+    //             pthread_mutex_unlock(&recording_contexts_mutex);
+    //             return 0;  // Already running and healthy
+    //         }
+    //         // <-- bug: writer==NULL was treated as dead and the slot was cleared,
+    //         // allowing a second recording instance to start for the same stream.
+    //         // writer is set asynchronously inside mp4_recording_thread (after
+    //         // RTSP connect + avformat_find_stream_info, which can take several
+    //         // seconds).  During that window every call here saw writer==NULL,
+    //         // concluded the recording was dead, and spawned a new thread —
+    //         // producing multiple parallel recordings with overlapping timestamps.
+    //         dead_ctx = recording_contexts[i];
+    //         dead_ctx->running = 0;
+    //         recording_contexts[i] = NULL;
+    //         break;
+    //     }
+    // }
+    // pthread_mutex_unlock(&recording_contexts_mutex);
+    //
+    // FIX: distinguish three states for an existing slot:
+    //   1. writer != NULL && mp4_writer_is_recording() → healthy, return early
+    //   2. writer == NULL && ctx->running == 1          → initializing, return early
+    //   3. everything else                              → dead, clean up and restart
     mp4_recording_ctx_t *dead_ctx = NULL;
     pthread_mutex_lock(&recording_contexts_mutex);
     for (int i = 0; i < g_config.max_streams; i++) {
         if (recording_contexts[i] && strcmp(recording_contexts[i]->config.name, stream_name) == 0) {
             mp4_writer_t *writer = recording_contexts[i]->mp4_writer;
+
             if (writer && mp4_writer_is_recording(writer)) {
+                // State 1: fully up and healthy
                 pthread_mutex_unlock(&recording_contexts_mutex);
                 log_info("MP4 recording for stream %s already running and healthy", stream_name);
-                return 0;  // Already running and healthy
+                return 0;
             }
 
-            // Dead — extract from slot under the lock, join outside
+            if (!writer && recording_contexts[i]->running) {
+                // State 2: thread started but mp4_writer not yet assigned —
+                // RTSP connect / avformat_find_stream_info still in progress.
+                // This is the race window; do NOT spawn a second instance.
+                pthread_mutex_unlock(&recording_contexts_mutex);
+                log_info("MP4 recording for stream %s is initializing (writer not yet ready), skipping duplicate start",
+                         stream_name);
+                return 0;
+            }
+
+            // State 3: dead — extract under the lock, join outside
             log_warn("MP4 recording for stream %s exists but is dead, cleaning up before restart", stream_name);
             dead_ctx = recording_contexts[i];
             dead_ctx->running = 0;
@@ -989,13 +1035,6 @@ int start_mp4_recording_with_trigger(const char *stream_name, const char *trigge
         }
     }
     pthread_mutex_unlock(&recording_contexts_mutex);
-
-    // Join the dead thread outside the mutex (can block up to 15 s)
-    if (dead_ctx) {
-        cleanup_dead_recording(dead_ctx, stream_name);
-    }
-
-    log_info("Using standalone recording thread for stream %s with trigger_type: %s", stream_name, trigger_type);
 
     // Find empty slot (under lock)
     pthread_mutex_lock(&recording_contexts_mutex);
@@ -1044,18 +1083,14 @@ int start_mp4_recording_with_trigger(const char *stream_name, const char *trigge
     const struct tm *tm_info = localtime_r(&now, &tm_buf);
     strftime(timestamp_str, sizeof(timestamp_str), "%Y%m%d_%H%M%S", tm_info);
 
-    // Sanitize the stream name so that names with spaces work correctly.
-    char encoded_name[MAX_STREAM_NAME];
-    sanitize_stream_name(stream_name, encoded_name, MAX_STREAM_NAME);
-
     // Create MP4 directory path
     char mp4_dir[MAX_PATH_LENGTH];
     if (global_config->record_mp4_directly && global_config->mp4_storage_path[0] != '\0') {
         snprintf(mp4_dir, MAX_PATH_LENGTH, "%s/%s",
-                global_config->mp4_storage_path, encoded_name);
+                global_config->mp4_storage_path, stream_name);
     } else {
         snprintf(mp4_dir, MAX_PATH_LENGTH, "%s/mp4/%s",
-                global_config->storage_path, encoded_name);
+                global_config->storage_path, stream_name);
     }
 
     // Create MP4 directory if it doesn't exist
@@ -1118,6 +1153,8 @@ int start_mp4_recording_with_url_and_trigger(const char *stream_name, const char
     config.url[sizeof(config.url) - 1] = '\0';
 
     // Check if already running — also verify the recording is actually healthy.
+    // FIX: treat writer==NULL + ctx->running==1 as "initializing" to prevent
+    // duplicate instances during the RTSP-connect window (see start_mp4_recording_with_trigger).
     mp4_recording_ctx_t *dead_ctx = NULL;
     pthread_mutex_lock(&recording_contexts_mutex);
     for (int i = 0; i < g_config.max_streams; i++) {
@@ -1128,7 +1165,12 @@ int start_mp4_recording_with_url_and_trigger(const char *stream_name, const char
                 log_info("MP4 recording for stream %s already running and healthy", stream_name);
                 return 0;  // Already running and healthy
             }
-
+            if (!writer && recording_contexts[i]->running) {
+                // Still initializing — mp4_writer not yet assigned by the thread.  // <-- bug fix
+                pthread_mutex_unlock(&recording_contexts_mutex);
+                log_info("MP4 recording for stream %s is initializing, skipping duplicate start", stream_name);
+                return 0;
+            }
             // Dead — extract from slot under the lock, join outside
             log_warn("MP4 recording for stream %s exists but is dead, cleaning up before restart", stream_name);
             dead_ctx = recording_contexts[i];
@@ -1194,18 +1236,14 @@ int start_mp4_recording_with_url_and_trigger(const char *stream_name, const char
     const struct tm *tm_info = localtime_r(&now, &tm_buf);
     strftime(timestamp_str, sizeof(timestamp_str), "%Y%m%d_%H%M%S", tm_info);
 
-    // Sanitize the stream name so that names with spaces work correctly.
-    char encoded_name[MAX_STREAM_NAME];
-    sanitize_stream_name(stream_name, encoded_name, MAX_STREAM_NAME);
-
     // Create MP4 directory path
     char mp4_dir[MAX_PATH_LENGTH];
     if (global_config->record_mp4_directly && global_config->mp4_storage_path[0] != '\0') {
         snprintf(mp4_dir, MAX_PATH_LENGTH, "%s/%s",
-                global_config->mp4_storage_path, encoded_name);
+                global_config->mp4_storage_path, stream_name);
     } else {
         snprintf(mp4_dir, MAX_PATH_LENGTH, "%s/mp4/%s",
-                global_config->storage_path, encoded_name);
+                global_config->storage_path, stream_name);
     }
 
     // Create MP4 directory if it doesn't exist
