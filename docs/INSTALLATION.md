@@ -330,7 +330,7 @@ scp -r web/* root@ingenic-device:/var/lib/lightnvr/www/
 
 ### Raspberry Pi
 
-Raspberry Pi installation is similar to Debian/Ubuntu, with some optimizations.
+Raspberry Pi installation is similar to Debian/Ubuntu. Pre-built `.deb` packages for `arm64` and `armhf` are available on the [Releases](https://github.com/opensensor/lightNVR/releases) page for both Debian trixie (stable) and sid. To build from source instead:
 
 #### 1. Install Dependencies
 
@@ -365,8 +365,8 @@ cd lightnvr
 # Initialize submodules (required for go2rtc)
 git submodule update --init --recursive
 
-# Build with Raspberry Pi optimizations
-./scripts/build.sh --release --platform=raspberry-pi
+# Build (ARM architecture is detected automatically)
+./scripts/build.sh --release
 
 # Install
 sudo ./scripts/install.sh
