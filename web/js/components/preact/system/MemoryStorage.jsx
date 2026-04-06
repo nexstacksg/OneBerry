@@ -49,7 +49,7 @@ export function MemoryStorage({ systemInfo, formatBytes }) {
             <span className="font-medium">{t('system.processMemory')}:</span>
             <div className="flex flex-wrap justify-end gap-1">
               <span className="inline-block px-2 py-0.5 text-xs rounded" style={{backgroundColor: 'hsl(var(--primary-muted))', color: 'hsl(var(--primary))'}}>
-                LightNVR: {formatBytes(lightNvrMemoryUsed)}
+                Oneberry: {formatBytes(lightNvrMemoryUsed)}
               </span>
               <span className="inline-block px-2 py-0.5 text-xs rounded badge-success">
                 go2rtc: {formatBytes(go2rtcMemoryUsed)}

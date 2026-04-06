@@ -402,6 +402,12 @@ static void put_stream_worker(put_stream_task_t *task) {
 void handle_post_stream(const http_request_t *req, http_response_t *res) {
     log_info("Handling POST /api/streams request");
 
+    // Stream creation is an admin-only action. Non-admin users can view and
+    // manage existing streams they are allowed to edit, but they cannot add new ones.
+    if (!httpd_check_admin_privileges(req, res)) {
+        return;
+    }
+
     // Parse JSON from request body
     cJSON *stream_json = httpd_parse_json_body(req);
     if (!stream_json) {

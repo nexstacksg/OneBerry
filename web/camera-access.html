@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Settings - Oneberry</title>
+    <title>Camera Access - Oneberry</title>
     <!-- Theme initialization script - injected by vite-plugin-theme-inject -->
     <!-- THEME_INIT_SCRIPT -->
     <link rel="stylesheet" href="./css/main.css">
@@ -13,12 +13,12 @@
 </head>
 <body class="flex flex-col min-h-screen bg-background text-foreground">
 <div class="container mx-auto px-4 flex flex-col min-h-screen">
-    <div id="header-container" data-active-nav="nav-settings">
+    <div id="header-container" data-active-nav="nav-camera-access">
         <!-- Header content will be loaded by JavaScript -->
     </div>
 
     <main id="main-content" class="flex-grow">
-        <!-- SettingsView component will be rendered here -->
+        <!-- CameraAccessView component will be rendered here -->
     </main>
 
     <div id="footer-container" class="mt-auto">
@@ -26,12 +26,8 @@
     </div>
 </div>
 
-<!-- UI components will be rendered here -->
 <div id="status-message-container"></div>
-<div id="snapshot-modal-container"></div>
-<div id="video-modal-container"></div>
 
-<!-- Scripts -->
-<script type="module" src="./js/pages/settings-page.jsx"></script>
+<script type="module" src="./js/pages/camera-access-page.jsx"></script>
 </body>
 </html>

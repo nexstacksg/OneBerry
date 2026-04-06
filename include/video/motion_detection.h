@@ -6,6 +6,29 @@
 #include <time.h>
 #include "../video/detection_result.h"
 
+#define MOTION_GRID_MAX_CELLS 1024
+
+/**
+ * Live snapshot of the current motion detector state.
+ * This is used by the live view overlay to render realtime grid activity.
+ */
+typedef struct {
+    bool available;                 // Whether the snapshot could be retrieved
+    bool enabled;                   // Whether motion detection is enabled
+    bool use_grid_detection;        // Whether grid mode is active
+    bool motion_detected;           // Whether the last processed frame detected motion
+    int grid_size;                  // Grid dimension (grid_size x grid_size)
+    int width;                      // Processed frame width
+    int height;                     // Processed frame height
+    float sensitivity;             // Sensitivity threshold
+    float min_motion_area;         // Minimum area threshold
+    float motion_score;            // Last computed motion score
+    float motion_area;             // Last computed motion area
+    int active_cells;              // Number of currently active grid cells
+    time_t last_update_time;       // Last time motion was processed
+    float cell_scores[MOTION_GRID_MAX_CELLS]; // Grid cell scores in row-major order
+} motion_detection_snapshot_t;
+
 /**
  * Initialize the motion detection system
  * 
@@ -87,5 +110,14 @@ int set_motion_detection_enabled(const char *stream_name, bool enabled);
  * @return true if enabled, false otherwise
  */
 bool is_motion_detection_enabled(const char *stream_name);
+
+/**
+ * Get a live snapshot of the current motion detector state.
+ *
+ * @param stream_name The name of the stream
+ * @param snapshot Output snapshot structure
+ * @return 0 on success, non-zero on failure
+ */
+int get_motion_detection_snapshot(const char *stream_name, motion_detection_snapshot_t *snapshot);
 
 #endif /* MOTION_DETECTION_H */

@@ -60,6 +60,8 @@ export function StreamsView() {
   // Check if user can modify streams (admin or user role, not viewer)
   // While loading, default to enabled so admin/user doesn't see hidden buttons
   const canModifyStreams = roleLoading || userRole === 'admin' || userRole === 'user';
+  // Stream creation is restricted to administrators.
+  const canCreateStreams = roleLoading || userRole === 'admin';
   // Check if credentials should be hidden (demo mode or viewer role)
   const shouldHideCredentials = isDemoMode || userRole === 'viewer';
 
@@ -310,6 +312,9 @@ export function StreamsView() {
           retries: 1,
           retryDelay: 1000
         });
+      }
+      if (!canCreateStreams) {
+        throw new Error(t('streams.createStreamForbidden'));
       }
       // Create new stream via POST
       return await fetchJSON('/api/streams', {
@@ -738,6 +743,10 @@ export function StreamsView() {
 
   // Open add stream modal
   const openAddStreamModal = () => {
+    if (!canCreateStreams) {
+      showStatusMessage(t('streams.createStreamForbidden'), 'error', 5000);
+      return;
+    }
     setCurrentStream({
       name: '',
       url: '',
@@ -880,6 +889,10 @@ export function StreamsView() {
 
   // Open clone stream modal — pre-fills from an existing stream but treats as a new one
   const openCloneStreamModal = async (streamId) => {
+    if (!canCreateStreams) {
+      showStatusMessage(t('streams.createStreamForbidden'), 'error', 5000);
+      return;
+    }
     try {
       await queryClient.invalidateQueries({ queryKey: ['stream-full', streamId] });
       const data = await queryClient.fetchQuery({
@@ -966,6 +979,10 @@ export function StreamsView() {
 
   // Open ONVIF discovery modal
   const openOnvifModal = async () => {
+    if (!canCreateStreams) {
+      showStatusMessage(t('streams.createStreamForbidden'), 'error', 5000);
+      return;
+    }
     setDiscoveredDevices([]);
     setDeviceProfiles([]);
     setSelectedDevice(null);
@@ -997,6 +1014,21 @@ export function StreamsView() {
         setCurrentStream(prev => ({
           ...prev,
           detectionModel: ''
+        }));
+        return;
+      }
+
+      if (value === 'motion') {
+        // Built-in motion is a direct frame-difference detector, not an AI
+        // model. Give it a motion-friendly default sensitivity instead of the
+        // generic AI threshold so users get immediate motion-triggered clips.
+        setCurrentStream(prev => ({
+          ...prev,
+          detectionModel: value,
+          detectionThreshold:
+            Number.isFinite(Number(prev.detectionThreshold)) && Number(prev.detectionThreshold) !== 50
+              ? prev.detectionThreshold
+              : 15
         }));
         return;
       }
@@ -1359,6 +1391,11 @@ export function StreamsView() {
               {t('streams.readOnlyInsufficientPermissions')}
             </span>
           )}
+          {canModifyStreams && !canCreateStreams && userRole === 'user' && (
+            <span className="text-sm text-muted-foreground italic mr-2">
+              {t('streams.createStreamRestricted')}
+            </span>
+          )}
           {canModifyStreams && (
             <>
               {!selectionMode && (
@@ -1374,25 +1411,28 @@ export function StreamsView() {
                   {t('streams.select')}
                 </button>
               )}
-              <button
-                  id="discover-onvif-btn"
-                  className="btn-secondary focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
-                  onClick={openOnvifModal}
-              >
-                {t('streams.discoverOnvifCameras')}
-              </button>
-              <button
-                  id="add-stream-btn"
-                  className="btn-primary focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
-                  onClick={openAddStreamModal}
-              >
-                {t('streams.addStream')}
-              </button>
+              {canCreateStreams && (
+                <>
+                  <button
+                      id="discover-onvif-btn"
+                      className="btn-secondary focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
+                      onClick={openOnvifModal}
+                  >
+                    {t('streams.discoverOnvifCameras')}
+                  </button>
+                  <button
+                      id="add-stream-btn"
+                      className="btn-primary focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
+                      onClick={openAddStreamModal}
+                  >
+                    {t('streams.addStream')}
+                  </button>
+                </>
+              )}
             </>
           )}
         </div>
       </div>
-
       <div className="mb-4 border-b border-border" role="tablist" aria-label={t('nav.streams')}>
         <div className="flex gap-2">
           <button
@@ -1622,7 +1662,11 @@ export function StreamsView() {
                       <td className="px-6 py-4 whitespace-nowrap">
                         {stream.record ? t('common.enabled') : t('common.disabled')}
                         {stream.record && stream.record_on_schedule ? ` (${t('streams.schedule')})` : ''}
-                        {stream.detection_based_recording ? ` (${t('streams.detection')})` : ''}
+                        {stream.detection_based_recording
+                          ? (stream.record
+                            ? ` (${t('streams.detection')} + ${t('streams.continuous', 'Continuous')})`
+                            : ` (${t('streams.detection')})`)
+                          : ''}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                         <div className="flex space-x-2">
@@ -1659,8 +1703,8 @@ export function StreamsView() {
                               </svg>
                             </button>
                           )}
-                          {/* Clone button - only show if user can modify streams */}
-                          {canModifyStreams && (
+                          {/* Clone button - only show if user can create streams */}
+                          {canCreateStreams && (
                             <button
                                 className="p-1 rounded-full focus:outline-none"
                                 style={{color: 'hsl(var(--success))'}}
@@ -1745,7 +1789,9 @@ export function StreamsView() {
                               <span className="font-medium text-muted-foreground">{t('streams.detection')}:</span>
                               <span style={{color: stream.detection_based_recording ? 'hsl(var(--success))' : 'hsl(var(--muted-foreground))'}}>
                                 {stream.detection_based_recording
-                                  ? (stream.detection_model ? stream.detection_model.split('/').pop() : t('common.enabled'))
+                                  ? (stream.record
+                                    ? `${stream.detection_model ? stream.detection_model.split('/').pop() : t('common.enabled')} (${t('streams.continuous', 'continuous recording active')})`
+                                    : (stream.detection_model ? stream.detection_model.split('/').pop() : t('common.enabled')))
                                   : t('streams.off')}
                               </span>
                             </div>

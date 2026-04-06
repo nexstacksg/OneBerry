@@ -9,7 +9,7 @@ import { formatPlaybackTimeLabel, resolvePlaybackStreamName } from './timelineUt
 import { SpeedControls } from './SpeedControls.jsx';
 import { showStatusMessage } from '../ToastContainer.jsx';
 import { ConfirmDialog } from '../UI.jsx';
-import { formatFilenameTimestamp, formatLocalDateTime, toUnixSeconds } from '../../../utils/date-utils.js';
+import { formatFilenameTimestamp, toUnixSeconds } from '../../../utils/date-utils.js';
 import { useI18n } from '../../../i18n.js';
 
 // Timeout for cleaning up preloaded temporary video elements (in milliseconds).
@@ -46,8 +46,6 @@ export function TimelinePlayer({ videoElementRef = null, autoFullscreen = false 
   const lastSegmentIdRef = useRef(null);
   const lastDetectionSegmentIdRef = useRef(null);
   const preloadedVideoCleanupRef = useRef(null);
-  const initialPausedSyncEventLoggedRef = useRef(false);
-  const lastInitialPausedSegmentIdRef = useRef(null);
 
   const setVideoRefs = useCallback((node) => {
     videoRef.current = node;
@@ -113,15 +111,12 @@ export function TimelinePlayer({ videoElementRef = null, autoFullscreen = false 
       if (state.currentTime >= segment.start_timestamp && state.currentTime <= segment.end_timestamp) {
         // If current time is within this segment, calculate the relative position
         relativeTime = state.currentTime - segment.start_timestamp;
-        console.log(`Current time ${state.currentTime} is within segment ${segment.id}, relative time: ${relativeTime}s`);
       } else if (state.currentTime < segment.start_timestamp) {
         // If current time is before this segment, start at the beginning
         relativeTime = 0;
-        console.log(`Current time ${state.currentTime} is before segment ${segment.id}, starting at beginning`);
       } else {
         // If current time is after this segment, start at the end
         relativeTime = segment.end_timestamp - segment.start_timestamp;
-        console.log(`Current time ${state.currentTime} is after segment ${segment.id}, starting at end`);
       }
     }
 
@@ -133,25 +128,21 @@ export function TimelinePlayer({ videoElementRef = null, autoFullscreen = false 
 
     // Update last segment ID
     if (segmentChanged) {
-      console.log(`Segment changed from ${lastSegmentIdRef.current} to ${segment.id}`);
       lastSegmentIdRef.current = segment.id;
     }
 
     // Handle playback
     if (needsReload) {
       // Load new segment
-      console.log(`Loading new segment ${segment.id} (segmentChanged: ${segmentChanged})`);
       loadSegment(segment, relativeTime, state.isPlaying);
     } else if (timeChanged) {
       // User is dragging the cursor, just update the current time
-      console.log(`Seeking to ${relativeTime}s within current segment`);
       video.currentTime = relativeTime;
     } else if (state.isPlaying && video.paused) {
       // Resume playback if needed
       video.play().catch(error => {
         if (error.name === 'AbortError') {
           // play() was interrupted by a new load or pause — expected when clicking around the timeline
-          console.log('Video play() interrupted, ignoring AbortError');
           return;
         }
         console.error('Error playing video:', error);
@@ -198,8 +189,6 @@ export function TimelinePlayer({ videoElementRef = null, autoFullscreen = false 
     const video = videoRef.current;
     if (!video) return;
 
-    console.log(`Loading segment ${segment.id} at time ${seekTime}s, autoplay: ${autoplay}`);
-
     // Pause current playback
     video.pause();
 
@@ -209,8 +198,6 @@ export function TimelinePlayer({ videoElementRef = null, autoFullscreen = false 
 
     // Set up event listeners for the new video
     const onLoadedMetadata = () => {
-      console.log('Video metadata loaded');
-
       // Check if the current time is within this segment
       // If so, use the relative position from the cursor
       let timeToSet = seekTime;
@@ -222,7 +209,6 @@ export function TimelinePlayer({ videoElementRef = null, autoFullscreen = false 
             timelineState.currentTime <= segment.end_timestamp) {
           // If the cursor is within this segment, use its position
           timeToSet = timelineState.currentTime - segment.start_timestamp;
-          console.log(`TimelinePlayer: Using locked cursor position for playback: ${timeToSet}s`);
         } else {
           // If the cursor is outside this segment but we want to preserve its position,
           // use the beginning or end of the segment based on which is closer
@@ -231,10 +217,8 @@ export function TimelinePlayer({ videoElementRef = null, autoFullscreen = false 
 
           if (distanceToStart <= distanceToEnd) {
             timeToSet = 0; // Use start of segment
-            console.log(`TimelinePlayer: Cursor outside segment, using start of segment`);
           } else {
             timeToSet = segment.end_timestamp - segment.start_timestamp; // Use end of segment
-            console.log(`TimelinePlayer: Cursor outside segment, using end of segment`);
           }
         }
       } else if (timelineState.currentTime !== null &&
@@ -243,7 +227,6 @@ export function TimelinePlayer({ videoElementRef = null, autoFullscreen = false 
         // If not preserving cursor position but the current time is within this segment,
         // still use the relative position from the cursor
         timeToSet = timelineState.currentTime - segment.start_timestamp;
-        console.log(`TimelinePlayer: Using cursor position for playback: ${timeToSet}s`);
       }
 
       // Set current time, ensuring it's within valid bounds
@@ -258,10 +241,8 @@ export function TimelinePlayer({ videoElementRef = null, autoFullscreen = false 
       if (validSeekTime > 0 && validSeekTime < 0.1) {
         // Ensure we're at least 0.1 seconds into the segment
         validSeekTime = 0.1;
-        console.log(`TimelinePlayer: Adjusting seek time to ${validSeekTime}s to prevent snapping to segment start`);
       }
 
-      console.log(`TimelinePlayer: Setting video time to ${validSeekTime}s (requested: ${timeToSet}s, segment duration: ${segmentDuration}s)`);
       video.currentTime = validSeekTime;
 
       // Set playback speed
@@ -271,7 +252,6 @@ export function TimelinePlayer({ videoElementRef = null, autoFullscreen = false 
       if (autoplay) {
         video.play().catch(error => {
           if (error.name === 'AbortError') {
-            console.log('Video play() interrupted during segment load, ignoring AbortError');
             return;
           }
           console.error('Error playing video:', error);
@@ -396,33 +376,12 @@ export function TimelinePlayer({ videoElementRef = null, autoFullscreen = false 
       desiredTime > segment.start_timestamp &&
       desiredTime <= segment.end_timestamp;
 
-    if (lastInitialPausedSegmentIdRef.current !== segment.id) {
-      lastInitialPausedSegmentIdRef.current = segment.id;
-      initialPausedSyncEventLoggedRef.current = false;
-    }
-
     if (isInitialPausedSyncEvent) {
-      if (!initialPausedSyncEventLoggedRef.current) {
-        initialPausedSyncEventLoggedRef.current = true;
-        console.log(
-          'TimelinePlayer: Ignoring initial 0s timeupdate before seek position is applied ' +
-          `(segmentId=${segment.id}, segmentStart=${segment.start_timestamp}, ` +
-          `desiredTime=${desiredTime}, videoTime=${video.currentTime})`
-        );
-      }
       return;
     }
 
     // Calculate current timestamp, handling timezone correctly
     const currentTime = segment.start_timestamp + video.currentTime;
-
-    // Log the current time for debugging
-    console.log('TimelinePlayer: Current time', {
-      videoTime: video.currentTime,
-      segmentStart: segment.start_timestamp,
-      calculatedTime: currentTime,
-      localTime: formatLocalDateTime(currentTime)
-    });
 
     // Directly update the time display as well
     updateTimeDisplay(currentTime, segment);
@@ -430,21 +389,18 @@ export function TimelinePlayer({ videoElementRef = null, autoFullscreen = false 
     // Check if the user is controlling the cursor
     // If so, don't update the timeline state to avoid overriding the user's position
     if (timelineState.userControllingCursor) {
-      console.log('TimelinePlayer: User is controlling cursor, not updating timeline state');
       return;
     }
 
     // Check if cursor position is locked
     // If so, don't update the timeline state to preserve the cursor position
     if (timelineState.cursorPositionLocked) {
-      console.log('TimelinePlayer: Cursor position is locked, not updating timeline state');
       return;
     }
 
     // Check if directVideoControl flag is set
     // If so, don't update the timeline state to avoid conflicts with TimelineControls
     if (timelineState.directVideoControl) {
-      console.log('TimelinePlayer: Direct video control active, not updating timeline state');
       return;
     }
 
@@ -467,13 +423,6 @@ export function TimelinePlayer({ videoElementRef = null, autoFullscreen = false 
       || resolvePlaybackStreamName(segments, currentSegmentIndex, time);
     const formatted = formatPlaybackTimeLabel(time, streamName);
     timeDisplay.textContent = formatted || '00:00:00';
-
-    console.log('TimelinePlayer: Updated time display', {
-      timestamp: time,
-      formatted,
-      stream: streamName || null,
-      localTime: formatLocalDateTime(time)
-    });
   };
 
   // Fetch recording data and detections when segment changes

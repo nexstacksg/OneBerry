@@ -246,6 +246,7 @@ export function Header({ version = VERSION }) {
     { id: 'nav-recordings', href: 'recordings.html', label: t('nav.recordings') },
     { id: 'nav-streams', href: 'streams.html', label: t('nav.streams') },
     { id: 'nav-settings', href: 'settings.html', label: t('nav.settings') },
+    ...(isAdmin ? [{ id: 'nav-camera-access', href: 'camera-access.html', label: t('nav.cameraAccess') }] : []),
     ...(isAdmin ? [{ id: 'nav-users', href: 'users.html', label: t('nav.users') }] : []),
     ...(isAdmin ? [{ id: 'nav-system', href: 'system.html', label: t('nav.system') }] : []),
   ];
@@ -319,7 +320,7 @@ export function Header({ version = VERSION }) {
       <header className="app-header py-2 shadow-md mb-4 w-full" style={{ position: 'relative', zIndex: 20, backgroundColor: 'hsl(var(--card))', color: 'hsl(var(--card-foreground))' }}>
         <div className="container mx-auto px-4 flex justify-between items-center">
           <div className="logo flex items-center">
-            <h1 className="text-xl font-bold m-0">LightNVR</h1>
+            <h1 className="text-xl font-bold m-0">Oneberry</h1>
             <span className="version text-xs ml-2" style={{color: 'hsl(var(--muted-foreground))'}}>v{version}</span>
           </div>
 

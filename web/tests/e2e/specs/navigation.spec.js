@@ -126,6 +126,19 @@ describe('Navigation', () => {
     const currentUrl = await navMenu.getCurrentUrl();
     expect(currentUrl).toContain('settings.html');
   });
+
+  test('should navigate to camera access page from index page', async () => {
+    await navMenu.navigateToCameraAccess();
+
+    await takeScreenshot(driver, 'screenshots/after-navigation-to-camera-access.png');
+
+    const currentUrl = await navMenu.getCurrentUrl();
+    expect(currentUrl).toContain('camera-access.html');
+
+    const pageTitle = await driver.findElement(By.css('.page-header h2'));
+    const titleText = await pageTitle.getText();
+    expect(titleText).toBe('Camera Access');
+  });
   
   test('should navigate back to index page from streams page', async () => {
     // First navigate to streams page with retry

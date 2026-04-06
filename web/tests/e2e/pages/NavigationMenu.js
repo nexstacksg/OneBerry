@@ -14,6 +14,7 @@ class NavigationMenu {
   get recordingsLink() { return 'a[href="recordings.html"]'; }
   get timelineLink() { return 'a[href="timeline.html"]'; }
   get settingsLink() { return 'a[href="settings.html"]'; }
+  get cameraAccessLink() { return 'a[href="camera-access.html"]'; }
   get usersLink() { return 'a[href="users.html"]'; }
   get systemLink() { return 'a[href="system.html"]'; }
   get logoutLink() { return 'a.logout-link'; }
@@ -55,6 +56,13 @@ class NavigationMenu {
    */
   async navigateToSettings() {
     return await this.navigateWithRetry(this.settingsLink, 'h2');
+  }
+
+  /**
+   * Navigate to the camera access page
+   */
+  async navigateToCameraAccess() {
+    return await this.navigateWithRetry(this.cameraAccessLink, '#camera-access-page');
   }
 
   /**
