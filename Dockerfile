@@ -1,11 +1,13 @@
 # Stage 1: Build image
+ARG DEBIAN_SUITE=sid
 ARG SQLITE_YEAR=2026
 ARG SQLITE_AUTOCONF_VERSION=3520000
 ARG LIBUV_VERSION=1.52.1
 ARG LLHTTP_VERSION=9.3.1
 
-FROM debian:sid-slim AS builder
+FROM debian:${DEBIAN_SUITE}-slim AS builder
 
+ARG DEBIAN_SUITE
 ARG SQLITE_YEAR
 ARG SQLITE_AUTOCONF_VERSION
 ARG LIBUV_VERSION
@@ -15,14 +17,14 @@ ARG LLHTTP_VERSION
 ENV DEBIAN_FRONTEND=noninteractive
 
 # Install build dependencies including Node.js and FFmpeg dev libraries
-# Debian sid ships Go 1.26, Node.js 22.x, npm, and FFmpeg 8.0.1 natively
+# sid ships Go 1.26+/Node 22.x/FFmpeg 8.x; trixie ships Go 1.24+/Node 20.x/FFmpeg 7.x
 RUN apt-get update && apt-get install -y \
     git cmake build-essential pkg-config file \
     libavcodec-dev libavformat-dev libavutil-dev libswscale-dev \
     libcurl4-openssl-dev \
     libmbedtls-dev curl wget ca-certificates gpg libcjson-dev \
     libmosquitto-dev \
-    nodejs npm libsimdjson30 \
+    nodejs npm \
     golang-go && \
     # Verify installation
     node --version && \
@@ -107,8 +109,8 @@ RUN mkdir -p /usr/lib/pkgconfig && \
 RUN mkdir -p /bin /etc/lightnvr/go2rtc && \
     # Build go2rtc from local submodule (already copied by COPY . .)
     cd /opt/go2rtc && \
-    go mod tidy && \
-    CGO_ENABLED=0 go build -ldflags "-s -w" -trimpath -o /bin/go2rtc . && \
+    GOTOOLCHAIN=auto go mod tidy && \
+    GOTOOLCHAIN=auto CGO_ENABLED=0 go build -ldflags "-s -w" -trimpath -o /bin/go2rtc . && \
     chmod +x /bin/go2rtc && \
     # Create basic configuration file
     echo "# go2rtc configuration file" > /etc/lightnvr/go2rtc/go2rtc.yaml && \
@@ -168,19 +170,19 @@ RUN mkdir -p /etc/lightnvr /var/lib/lightnvr/data /var/log/lightnvr /var/run/lig
     ./scripts/install.sh --prefix=/ --with-go2rtc --go2rtc-config-dir=/etc/lightnvr/go2rtc --without-systemd
 
 # Stage 2: Minimal runtime image
-FROM debian:sid-slim AS runtime
+FROM debian:${DEBIAN_SUITE}-slim AS runtime
 
+ARG DEBIAN_SUITE
 ARG SQLITE_YEAR
 ARG SQLITE_AUTOCONF_VERSION
 
 ENV DEBIAN_FRONTEND=noninteractive
 
 # Install only necessary runtime dependencies
-# Debian sid ships FFmpeg 8.0.1: libavcodec62, libavformat62, libavutil60, libswscale9
-# ffmpeg CLI is needed by go2rtc for audio transcoding (AAC→OPUS for WebRTC)
+# ffmpeg pulls the correct versioned libavcodec/libavformat/libavutil/libswscale
+# for the target suite (e.g. libavcodec62 on sid, libavcodec61 on trixie)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
-    libavcodec62 libavformat62 libavutil60 libswscale9 \
     libcurl4t64 libmbedtls21 libmbedcrypto16 procps curl ca-certificates \
     libmosquitto1 && \
     rm -rf /var/lib/apt/lists/*

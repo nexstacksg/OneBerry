@@ -18,6 +18,7 @@ import { forceNavigation } from '../../utils/navigation-utils.js';
 import { formatUtils } from './recordings/formatUtils.js';
 import { useI18n } from '../../i18n.js';
 import { useQueryClient } from '../../query-client.js';
+import { createPlayerTelemetry } from '../../utils/player-telemetry.js';
 import 'webrtc-adapter';
 
 // Retry configuration for sending WebRTC offers to go2rtc.
@@ -1166,22 +1167,42 @@ export function WebRTCVideoCell({
     }
   }, [talkMode, isTalking, startTalking, stopTalking]);
 
-  const handleFullscreenPreviewSelect = useCallback((sample) => {
-    if (!sample || !sample.playbackUrl) {
-      return;
-    }
+  // Player telemetry (TTFF, rebuffer, WebRTC RTT tracking)
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !stream?.name) return;
 
-    setFullscreenPlayback({
-      playbackUrl: sample.playbackUrl,
-      offsetSeconds: sample.offsetSeconds || 0,
-      timestamp: sample.timestamp || null,
-      segmentId: sample.segmentId || null
-    });
-  }, []);
+    const telemetry = createPlayerTelemetry(stream.name, 'webrtc');
 
-  const handleReturnToLive = useCallback(() => {
-    setFullscreenPlayback(null);
-  }, []);
+    const onPlaying = () => telemetry.recordFirstFrame();
+    const onWaiting = () => telemetry.recordRebufferStart();
+    const onCanPlay = () => telemetry.recordRebufferEnd();
+
+    video.addEventListener('playing', onPlaying);
+    video.addEventListener('waiting', onWaiting);
+    video.addEventListener('canplay', onCanPlay);
+
+    // Poll WebRTC stats for RTT
+    const rttInterval = setInterval(() => {
+      const pc = peerConnectionRef.current;
+      if (!pc) return;
+      pc.getStats().then(stats => {
+        stats.forEach(report => {
+          if (report.type === 'candidate-pair' && report.state === 'succeeded' && report.currentRoundTripTime) {
+            telemetry.updateRtt(report.currentRoundTripTime * 1000); // Convert to ms
+          }
+        });
+      }).catch(() => {});
+    }, 5000);
+
+    return () => {
+      video.removeEventListener('playing', onPlaying);
+      video.removeEventListener('waiting', onWaiting);
+      video.removeEventListener('canplay', onCanPlay);
+      clearInterval(rttInterval);
+      telemetry.destroy();
+    };
+  }, [stream?.name]);
 
   return (
     <div

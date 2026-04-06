@@ -18,6 +18,7 @@
 #include "video/stream_manager.h"
 #include "core/logger.h"
 #include "core/config.h"
+#include "core/path_utils.h"
 #include "core/shutdown_coordinator.h"
 #include "database/database_manager.h"
 #include "database/db_recordings.h"
@@ -121,18 +122,41 @@ static int push_event(const motion_event_t *event) {
 /**
  * Pop an event from the queue
  */
+// Return codes for pop_event:
+//   0  = event successfully dequeued
+//  -1  = shutting down (no event)
+//  -2  = timeout (no event within 1 s), caller should tick the state machine
 static int pop_event(motion_event_t *event) {
     if (!event) {
         return -1;
     }
-    
+
     pthread_mutex_lock(&event_queue.mutex);
-    
-    // Wait for events if queue is empty
+
+    // Wait for events if queue is empty, but wake up every second so the
+    // event processor can tick the state machine (needed to transition
+    // RECORDING -> FINALIZING -> stop after a "no motion" event).
     while (event_queue.count == 0 && event_processor_running) {
-        pthread_cond_wait(&event_queue.cond, &event_queue.mutex);
+        struct timespec ts;
+        if (clock_gettime(CLOCK_REALTIME, &ts) != 0) {
+            // clock_gettime failed — fall back to a short sleep
+            pthread_mutex_unlock(&event_queue.mutex);
+            return -2;
+        }
+        ts.tv_sec += 1;
+        int rc = pthread_cond_timedwait(&event_queue.cond, &event_queue.mutex, &ts);
+        if (rc == ETIMEDOUT) {
+            pthread_mutex_unlock(&event_queue.mutex);
+            return -2; // periodic tick
+        }
+        if (rc != 0 && rc != ETIMEDOUT) {
+            // Unexpected error (e.g. EINVAL) — treat as a tick to avoid tight loop
+            log_warn("pthread_cond_timedwait unexpected error: %d", rc);
+            pthread_mutex_unlock(&event_queue.mutex);
+            return -2;
+        }
     }
-    
+
     if (event_queue.count == 0) {
         pthread_mutex_unlock(&event_queue.mutex);
         return -1;
@@ -236,31 +260,35 @@ static int generate_recording_path(const char *stream_name, char *path, size_t p
     char timestamp[32];
     strftime(timestamp, sizeof(timestamp), "%Y%m%d_%H%M%S", tm_info);
     
+    // Sanitize the stream name to prevent path traversal and handle spaces.
+    char sanitized_name[MAX_STREAM_NAME];
+    sanitize_stream_name(stream_name, sanitized_name, MAX_STREAM_NAME);
+
     // Create directory structure: /recordings/camera_name/YYYY/MM/DD/
     char year[8], month[4], day[4];
     strftime(year, sizeof(year), "%Y", tm_info);
     strftime(month, sizeof(month), "%m", tm_info);
     strftime(day, sizeof(day), "%d", tm_info);
-    
+
     char dir_path[MAX_PATH_LENGTH];
     snprintf(dir_path, sizeof(dir_path), "%s/%s/%s/%s/%s",
-             config->storage_path, stream_name, year, month, day);
-    
+             config->storage_path, sanitized_name, year, month, day);
+
     // Create directories if they don't exist
     char temp_path[MAX_PATH_LENGTH];
-    snprintf(temp_path, sizeof(temp_path), "%s/%s", config->storage_path, stream_name);
+    snprintf(temp_path, sizeof(temp_path), "%s/%s", config->storage_path, sanitized_name);
     mkdir(temp_path, 0755);
-    
-    snprintf(temp_path, sizeof(temp_path), "%s/%s/%s", config->storage_path, stream_name, year);
+
+    snprintf(temp_path, sizeof(temp_path), "%s/%s/%s", config->storage_path, sanitized_name, year);
     mkdir(temp_path, 0755);
-    
-    snprintf(temp_path, sizeof(temp_path), "%s/%s/%s/%s", config->storage_path, stream_name, year, month);
+
+    snprintf(temp_path, sizeof(temp_path), "%s/%s/%s/%s", config->storage_path, sanitized_name, year, month);
     mkdir(temp_path, 0755);
-    
+
     mkdir(dir_path, 0755);
-    
+
     // Generate full file path
-    snprintf(path, path_size, "%s/%s_%s_motion.mp4", dir_path, stream_name, timestamp);
+    snprintf(path, path_size, "%s/%s_%s_motion.mp4", dir_path, sanitized_name, timestamp);
     
     log_info("Generated recording path: %s", path);
     return 0;
@@ -458,11 +486,32 @@ static void* event_processor_thread_func(void *arg) {
         motion_event_t event;
 
         // Get next event from queue
-        if (pop_event(&event) != 0) {
-            // Queue is empty or we're shutting down
-            if (!event_processor_running) {
-                break;
+        //
+        // FIX: recording stop bug - old code treated every non-zero return
+        // as "shutting down" and continued/broke without ever ticking the
+        // state machine for already-active recordings.
+        //
+        int pop_ret = pop_event(&event);
+        if (pop_ret == -1) {
+            // Shutting down
+            break;
+        }
+        if (pop_ret == -2) {
+            // Periodic 1-second tick: advance the state machine for every
+            // active recording context.  This is what actually drives the
+            // RECORDING -> FINALIZING -> stop transition after the grace
+            // period and the post-buffer timeout expire.
+            time_t now = time(NULL);
+            pthread_mutex_lock(&contexts_mutex);
+            for (int i = 0; i < g_config.max_streams; i++) {
+                if (recording_contexts[i].active) {
+                    pthread_mutex_unlock(&contexts_mutex);
+                    // update_recording_state() checks ctx->enabled under ctx->mutex
+                    update_recording_state(&recording_contexts[i], now);
+                    pthread_mutex_lock(&contexts_mutex);
+                }
             }
+            pthread_mutex_unlock(&contexts_mutex);
             continue;
         }
 
