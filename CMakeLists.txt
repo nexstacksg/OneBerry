@@ -16,8 +16,10 @@ set(GO2RTC_BINARY_PATH "/usr/local/bin/go2rtc" CACHE STRING "Path to go2rtc bina
 set(GO2RTC_CONFIG_DIR "/etc/lightnvr/go2rtc" CACHE STRING "Directory for go2rtc configuration files")
 set(GO2RTC_API_PORT 1984 CACHE STRING "Port for go2rtc HTTP API")
 
-# llhttp download configuration
 set(LLHTTP_VERSION "release/v9.2.1" CACHE STRING "llhttp version to download from GitHub")
+if ("${LLHTTP_VERSION}" STREQUAL "")
+    set(LLHTTP_VERSION "release/v9.2.1" CACHE STRING "llhttp version to download from GitHub" FORCE)
+endif()
 
 # SSL/TLS options
 option(ENABLE_SSL "Enable SSL/TLS support" OFF)
@@ -255,9 +257,25 @@ if(NOT LLHTTP_FOUND)
         file(MAKE_DIRECTORY "${LLHTTP_DIR}/src")
         file(MAKE_DIRECTORY "${LLHTTP_DIR}/include")
 
-        # Download the pinned llhttp release
-        # LLHTTP_VERSION is defined as a cache variable earlier; use it here without overriding it
-        set(LLHTTP_BASE_URL "https://raw.githubusercontent.com/nodejs/llhttp/refs/tags/${LLHTTP_VERSION}")
+        # Ensure LLHTTP_VERSION is not empty
+        if("${LLHTTP_VERSION}" STREQUAL "")
+            set(LLHTTP_VERSION "release/v9.2.1")
+            message(WARNING "LLHTTP_VERSION was empty, using default: ${LLHTTP_VERSION}")
+        endif()
+
+        # Determine the correct base URL based on the version format
+        if(LLHTTP_VERSION MATCHES "^v[0-9]")
+            # Direct tag name starting with 'v'
+            set(LLHTTP_BASE_URL "https://raw.githubusercontent.com/nodejs/llhttp/${LLHTTP_VERSION}")
+        elseif(LLHTTP_VERSION MATCHES "^release/v[0-9]")
+            # Release branch
+            set(LLHTTP_BASE_URL "https://raw.githubusercontent.com/nodejs/llhttp/${LLHTTP_VERSION}")
+        else()
+            # Default fallback (e.g. branch or commit)
+            set(LLHTTP_BASE_URL "https://raw.githubusercontent.com/nodejs/llhttp/${LLHTTP_VERSION}")
+        endif()
+
+        message(STATUS "Downloading llhttp from: ${LLHTTP_BASE_URL}")
 
         file(DOWNLOAD
             "${LLHTTP_BASE_URL}/src/llhttp.c"
