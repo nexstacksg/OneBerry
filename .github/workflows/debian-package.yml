@@ -12,21 +12,38 @@ permissions:
 
 jobs:
   build-deb:
-    name: Build .deb (${{ matrix.deb_arch }})
+    name: Build .deb (${{ matrix.debian_suite }}/${{ matrix.deb_arch }})
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
         include:
+          # Debian sid (unstable) builds
           - runner: ubuntu-latest
             platform: linux/amd64
             deb_arch: amd64
+            debian_suite: sid
           - runner: ubuntu-24.04-arm
             platform: linux/arm64
             deb_arch: arm64
+            debian_suite: sid
           - runner: ubuntu-latest
             platform: linux/arm/v7
             deb_arch: armhf
+            debian_suite: sid
+          # Debian trixie (13/stable) builds
+          - runner: ubuntu-latest
+            platform: linux/amd64
+            deb_arch: amd64
+            debian_suite: trixie
+          - runner: ubuntu-24.04-arm
+            platform: linux/arm64
+            deb_arch: arm64
+            debian_suite: trixie
+          - runner: ubuntu-latest
+            platform: linux/arm/v7
+            deb_arch: armhf
+            debian_suite: trixie
 
     steps:
       - name: Checkout
@@ -56,12 +73,15 @@ jobs:
           push: false
           load: true
           tags: lightnvr-pkg:local
+          build-args: |
+            DEBIAN_SUITE=${{ matrix.debian_suite }}
 
       - name: Extract files and create .deb package
         run: |
           VERSION="${{ steps.version.outputs.version }}"
           DEB_ARCH="${{ matrix.deb_arch }}"
-          PKG_NAME="lightnvr_${VERSION}_${DEB_ARCH}"
+          DEBIAN_SUITE="${{ matrix.debian_suite }}"
+          PKG_NAME="lightnvr_${VERSION}_${DEBIAN_SUITE}_${DEB_ARCH}"
           PKG_DIR="$(pwd)/pkg/${PKG_NAME}"
 
           # ── Directory structure ──────────────────────────────────────────────
@@ -186,6 +206,22 @@ jobs:
           # Un-indent the service file (heredoc indented for readability)
           sed -i 's/^          //' "${PKG_DIR}/lib/systemd/system/lightnvr.service"
 
+          # ── Suite-specific FFmpeg dependency names ─────────────────────────
+          case "${DEBIAN_SUITE}" in
+            sid)
+              FFMPEG_DEPS="libavcodec62 | libavcodec-extra, libavformat62, libavutil60, libswscale9"
+              SUITE_NOTE="Note: This package targets Debian sid (unstable)."
+              ;;
+            trixie)
+              FFMPEG_DEPS="libavcodec61 | libavcodec-extra, libavformat61, libavutil59, libswscale8"
+              SUITE_NOTE="Note: This package targets Debian 13 trixie (stable)."
+              ;;
+            *)
+              echo "ERROR: Unknown Debian suite: ${DEBIAN_SUITE}"
+              exit 1
+              ;;
+          esac
+
           # ── DEBIAN/control ──────────────────────────────────────────────────
           INSTALLED_SIZE=$(du -sk "${PKG_DIR}" | cut -f1)
           cat > "${PKG_DIR}/DEBIAN/control" << CONTROL_EOF
@@ -194,7 +230,7 @@ jobs:
           Architecture: ${DEB_ARCH}
           Maintainer: OpenSensor <support@opensensor.io>
           Installed-Size: ${INSTALLED_SIZE}
-          Depends: ffmpeg, libavcodec62 | libavcodec-extra, libavformat62, libavutil60, libswscale9, libcurl4t64 | libcurl4, libmbedtls21, libmosquitto1, libcjson1, procps
+          Depends: ffmpeg, ${FFMPEG_DEPS}, libcurl4t64 | libcurl4, libmbedtls21, libmosquitto1, libcjson1, procps
           Section: net
           Priority: optional
           Homepage: https://github.com/opensensor/lightNVR
@@ -205,7 +241,7 @@ jobs:
            Features: RTSP recording, WebRTC streaming (go2rtc), object detection
            (SOD), ONVIF discovery, MQTT integration, and a web-based UI.
            .
-           Note: This package targets Debian sid. Ubuntu users are encouraged to
+           ${SUITE_NOTE} Ubuntu users are encouraged to
            use the official Docker image (ghcr.io/opensensor/lightnvr).
           CONTROL_EOF
           sed -i 's/^          //' "${PKG_DIR}/DEBIAN/control"
@@ -267,7 +303,7 @@ jobs:
       - name: Upload .deb artifact
         uses: actions/upload-artifact@v6
         with:
-          name: deb-${{ matrix.deb_arch }}
+          name: deb-${{ matrix.debian_suite }}-${{ matrix.deb_arch }}
           path: pkg/*.deb
           retention-days: 7
 
