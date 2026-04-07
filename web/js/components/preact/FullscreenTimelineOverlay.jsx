@@ -444,11 +444,18 @@ export function FullscreenTimelineOverlay({ streamName, isVisible, onPreviewSele
 
   return (
     <div
-      className="w-full shrink-0 border-t border-white/10 bg-[#05070d] text-white"
+      className="border-t border-white/10 bg-[#05070d] text-white"
       style={{
         pointerEvents: 'auto',
-        position: 'relative',
-        zIndex: 30
+        position: 'fixed',
+        left: 0,
+        right: 0,
+        bottom: 0,
+        zIndex: 1000,
+        width: '100vw',
+        maxWidth: '100vw',
+        backdropFilter: 'blur(10px)',
+        WebkitBackdropFilter: 'blur(10px)'
       }}
     >
       <div className="flex items-center justify-center border-b border-white/10 py-1">
