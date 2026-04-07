@@ -10,21 +10,53 @@ import { useI18n } from '../../i18n.js';
 // Streams beyond this limit are handled via pagination.
 export const MAX_GRID_CELLS = 36;
 
-// Minimum picker dimensions when no stream count is known
-const DEFAULT_COLS = 6;
-const DEFAULT_ROWS = 6;
+const MAX_GRID_SIDE = Math.ceil(Math.sqrt(MAX_GRID_CELLS));
 
 /**
- * Return the best [cols, rows] to display N streams in a square grid.
- * Always returns [s, s] where s = ceil(sqrt(n)), so the layout is never a
- * landscape or portrait rectangle that would force a particular screen orientation.
+ * Return the best [cols, rows] to display N streams.
+ * The heuristic prefers layouts that fit the stream count with minimal waste
+ * while staying reasonably close to the current viewport aspect ratio.
  * @param {number} n
  * @returns {[number, number]}
  */
 export function computeOptimalGrid(n) {
-  if (n <= 1) return [1, 1];
-  const s = Math.ceil(Math.sqrt(n));
-  return [s, s];
+  const count = Math.max(1, Math.min(MAX_GRID_CELLS, Math.floor(n || 1)));
+  const viewportAspect = (typeof window !== 'undefined' && window.innerWidth > 0 && window.innerHeight > 0)
+    ? (window.innerWidth / window.innerHeight)
+    : 1;
+
+  let bestCols = 1;
+  let bestRows = 1;
+  let bestScore = Number.POSITIVE_INFINITY;
+  let bestCells = Number.POSITIVE_INFINITY;
+
+  for (let rows = 1; rows <= MAX_GRID_SIDE; rows++) {
+    for (let cols = 1; cols <= MAX_GRID_SIDE; cols++) {
+      const cells = cols * rows;
+      if (cells < count) continue;
+
+      const waste = cells - count;
+      const layoutAspect = cols / rows;
+      const aspectPenalty = Math.abs(Math.log(layoutAspect / viewportAspect));
+      const stripPenalty = count > 2 && (cols === 1 || rows === 1) ? 2.75 : 0;
+      const balancePenalty = Math.abs(cols - rows) * 0.08;
+      const sizePenalty = cells * 0.01;
+      const score = (waste * 5) + (aspectPenalty * 3) + stripPenalty + balancePenalty + sizePenalty;
+
+      if (
+        score < bestScore ||
+        (Math.abs(score - bestScore) < 0.0001 && cells < bestCells) ||
+        (Math.abs(score - bestScore) < 0.0001 && cells === bestCells && rows < bestRows)
+      ) {
+        bestScore = score;
+        bestCells = cells;
+        bestCols = cols;
+        bestRows = rows;
+      }
+    }
+  }
+
+  return [bestCols, bestRows];
 }
 
 /**
@@ -34,22 +66,20 @@ export function computeOptimalGrid(n) {
  * @param {number}   props.cols      Current column count
  * @param {number}   props.rows      Current row count
  * @param {Function} props.onSelect  Called with (cols, rows) on cell click
- * @param {number}   [props.maxCells]  Maximum selectable cells (= stream count).
- *                                    Cells whose cols×rows would exceed this are
- *                                    greyed out and unclickable.
+ * @param {number}   [props.maxCells]  Stream count used to recommend a layout.
  */
 export function GridPicker({ cols, rows, onSelect, maxCells }) {
   const { t } = useI18n();
   const [hover, setHover] = useState({ c: cols, r: rows });
   const [open, setOpen]   = useState(false);
   const containerRef      = useRef(null);
+  const streamCount = Number.isFinite(maxCells) && maxCells > 0 ? maxCells : 0;
 
-  // Scale the picker grid to fit the stream count, always as a square.
-  // e.g. 3 streams → 2×2, 5 → 3×3, 9 → 3×3, 10 → 4×4
-  const effectiveMax = Math.min(maxCells > 0 ? maxCells : DEFAULT_COLS * DEFAULT_ROWS, MAX_GRID_CELLS);
-  const gridSide = Math.max(2, Math.ceil(Math.sqrt(effectiveMax)));
-  const gridCols = gridSide;
-  const gridRows = gridSide;
+  // Always expose the full supported layout range so the picker can reach
+  // rectangular presets such as 4×2, 5×3, or 6×4.
+  const gridCols = MAX_GRID_SIDE;
+  const gridRows = MAX_GRID_SIDE;
+  const recommendedLayout = computeOptimalGrid(streamCount || cols * rows || 1);
 
   // Keep hover in sync when external selection changes (e.g. auto-grid on load)
   useEffect(() => { setHover({ c: cols, r: rows }); }, [cols, rows]);
@@ -100,6 +130,11 @@ export function GridPicker({ cols, rows, onSelect, maxCells }) {
           <p className="text-xs font-semibold text-center text-foreground mb-2 tabular-nums">
             {hover.c} × {hover.r}
           </p>
+          {streamCount > 0 && (
+            <p className="text-[10px] text-center text-muted-foreground mb-2">
+              Recommended: {recommendedLayout[0]} × {recommendedLayout[1]}
+            </p>
+          )}
           <div
             style={{
               display: 'grid',
@@ -113,6 +148,7 @@ export function GridPicker({ cols, rows, onSelect, maxCells }) {
                 const overLimit   = cellCount > MAX_GRID_CELLS;
                 const highlighted = !overLimit && r < hover.r && c < hover.c;
                 const isCurrent   = !overLimit && r < rows   && c < cols;
+                const isRecommended = !overLimit && (c + 1) === recommendedLayout[0] && (r + 1) === recommendedLayout[1];
                 return (
                   <div
                     key={`${r}-${c}`}
@@ -128,7 +164,7 @@ export function GridPicker({ cols, rows, onSelect, maxCells }) {
                           : isCurrent
                             ? 'bg-primary/25 border-primary/40 cursor-pointer'
                             : 'bg-muted border-border hover:border-primary/50 hover:bg-muted/80 cursor-pointer'
-                    }`}
+                    } ${isRecommended ? 'ring-1 ring-primary/60 shadow-sm' : ''}`}
                     onMouseEnter={() => { if (!overLimit) setHover({ c: c + 1, r: r + 1 }); }}
                     onClick={() => { if (!overLimit) { onSelect(c + 1, r + 1); setOpen(false); } }}
                   />
@@ -144,4 +180,3 @@ export function GridPicker({ cols, rows, onSelect, maxCells }) {
     </div>
   );
 }
-

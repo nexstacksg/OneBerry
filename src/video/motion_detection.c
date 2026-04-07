@@ -29,7 +29,7 @@
 #define DEFAULT_BLUR_RADIUS 1            // Radius for simple box blur
 #define DEFAULT_NOISE_THRESHOLD 10       // Noise filtering threshold
 #define DEFAULT_USE_GRID_DETECTION true  // Use grid-based detection
-#define DEFAULT_GRID_SIZE 6              // Reduced from 8 to 6 for performance
+#define DEFAULT_GRID_SIZE 32             // Maximum grid density for NX Witness-style motion masking
 #define DEFAULT_DOWNSCALE_ENABLED true   // Enable downscaling for embedded devices
 #define DEFAULT_DOWNSCALE_FACTOR 2       // Downscale factor (2 = half size)
 #define MOTION_LABEL "motion"
@@ -881,12 +881,11 @@ static float calculate_grid_motion(const unsigned char *curr_frame, const unsign
                 for (int x = cell_start_x; x < cell_end_x; x += 2) {
                     int idx = y * width + x;
 
-                    // Calculate differences from previous frame and background
+                    // Calculate the frame-to-frame difference.
+                    // This keeps motion tied to actual movement instead of
+                    // static background drift or gradual scene adaptation.
                     int frame_diff = abs((int)curr_frame[idx] - (int)prev_frame[idx]);
-                    int bg_diff = abs((int)curr_frame[idx] - (int)background[idx]);
-
-                    // Use the larger of the two differences
-                    int diff = (frame_diff > bg_diff) ? frame_diff : bg_diff;
+                    int diff = frame_diff;
 
                     // Apply noise threshold
                     if (diff > noise_threshold) {
@@ -949,12 +948,11 @@ static float calculate_grid_motion(const unsigned char *curr_frame, const unsign
                 for (int x = cell_start_x; x < cell_end_x; x++) {
                     int idx = y * width + x;
 
-                    // Calculate differences from previous frame and background
+                    // Calculate the frame-to-frame difference.
+                    // This keeps motion tied to actual movement instead of
+                    // static background drift or gradual scene adaptation.
                     int frame_diff = abs((int)curr_frame[idx] - (int)prev_frame[idx]);
-                    int bg_diff = abs((int)curr_frame[idx] - (int)background[idx]);
-
-                    // Use the larger of the two differences
-                    int diff = (frame_diff > bg_diff) ? frame_diff : bg_diff;
+                    int diff = frame_diff;
 
                     // Apply noise threshold
                     if (diff > noise_threshold) {

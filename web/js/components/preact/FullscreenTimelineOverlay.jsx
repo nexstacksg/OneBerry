@@ -445,7 +445,11 @@ export function FullscreenTimelineOverlay({ streamName, isVisible, onPreviewSele
   return (
     <div
       className="w-full shrink-0 border-t border-white/10 bg-[#05070d] text-white"
-      style={{ pointerEvents: 'auto' }}
+      style={{
+        pointerEvents: 'auto',
+        position: 'relative',
+        zIndex: 30
+      }}
     >
       <div className="flex items-center justify-center border-b border-white/10 py-1">
         <button

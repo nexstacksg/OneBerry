@@ -295,6 +295,9 @@ export function StreamConfigModal({
   const { t } = useI18n();
   const [showZoneEditor, setShowZoneEditor] = useState(false);
   const [detectionZones, setDetectionZones] = useState(currentStream.detectionZones || []);
+  const isMotionModel = currentStream.detectionModel === 'motion';
+  const isPersonOnlyPreset = currentStream.detectionObjectFilter === 'include'
+    && String(currentStream.detectionObjectFilterList || '').trim().toLowerCase() === 'person';
 
   // Keep a ref to onInputChange so the zones-load effect never needs it as a
   // dependency. If we put onInputChange in the dependency array, calling it
@@ -378,6 +381,15 @@ export function StreamConfigModal({
     // Update currentStream with new zones
     onInputChange({ target: { name: 'detectionZones', value: zones } });
   };
+
+  const applyPersonOnlyPreset = useCallback(() => {
+    if (isMotionModel) {
+      return;
+    }
+
+    onInputChange({ target: { name: 'detectionObjectFilter', value: 'include' } });
+    onInputChange({ target: { name: 'detectionObjectFilterList', value: 'person' } });
+  }, [isMotionModel, onInputChange]);
 
   return (
     <>
@@ -950,7 +962,7 @@ export function StreamConfigModal({
                         />
                         <p className="mt-1 text-xs text-muted-foreground">
                           {currentStream.detectionModel === 'motion'
-                            ? t('streamsConfig.motionSensitivityHelp', 'Lower values are more sensitive. Built-in motion uses this value directly.')
+                            ? t('streamsConfig.motionSensitivityHelp', 'Lower values are more sensitive. Built-in motion tracks frame-to-frame movement directly.')
                             : t('streamsConfig.detectionThresholdHelp')}
                         </p>
                       </div>
@@ -1017,9 +1029,33 @@ export function StreamConfigModal({
 
                       {/* Detection Object Filter */}
                       <div>
-                        <label htmlFor="stream-detection-object-filter" className="block text-sm font-medium mb-2">
-                          {t('streamsConfig.objectFilterMode')}
-                        </label>
+                        {isMotionModel && (
+                          <div className="p-3 rounded-md bg-muted border border-border mb-3">
+                            <p className="text-sm text-muted-foreground">
+                              Built-in motion is pixel-based. For human-only alerts, choose an AI model and then use the Person only preset below.
+                            </p>
+                          </div>
+                        )}
+                        <div className="flex items-center justify-between gap-2 mb-2">
+                          <label htmlFor="stream-detection-object-filter" className="block text-sm font-medium">
+                            {t('streamsConfig.objectFilterMode')}
+                          </label>
+                          <button
+                            type="button"
+                            onClick={applyPersonOnlyPreset}
+                            disabled={isMotionModel}
+                            className={`px-2.5 py-1 text-xs font-semibold rounded-full border transition-colors ${
+                              isMotionModel
+                                ? 'border-border/60 bg-muted text-muted-foreground cursor-not-allowed'
+                                : isPersonOnlyPreset
+                                  ? 'border-primary bg-primary text-primary-foreground'
+                                  : 'border-border bg-background text-foreground hover:border-primary/40 hover:text-primary hover:bg-primary/10'
+                            }`}
+                            title={isMotionModel ? 'Select an AI detection model to use this preset' : 'Filter detections to people only'}
+                          >
+                            Person only
+                          </button>
+                        </div>
                         <select
                           id="stream-detection-object-filter"
                           name="detectionObjectFilter"
