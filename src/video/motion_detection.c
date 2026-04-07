@@ -29,7 +29,7 @@
 #define DEFAULT_BLUR_RADIUS 1            // Radius for simple box blur
 #define DEFAULT_NOISE_THRESHOLD 10       // Noise filtering threshold
 #define DEFAULT_USE_GRID_DETECTION true  // Use grid-based detection
-#define DEFAULT_GRID_SIZE 6              // Reduced from 8 to 6 for performance
+#define DEFAULT_GRID_SIZE 32             // Maximum grid density for NX Witness-style motion masking
 #define DEFAULT_DOWNSCALE_ENABLED true   // Enable downscaling for embedded devices
 #define DEFAULT_DOWNSCALE_FACTOR 2       // Downscale factor (2 = half size)
 #define MOTION_LABEL "motion"

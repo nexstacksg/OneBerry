@@ -151,8 +151,10 @@ export const DetectionOverlay = forwardRef(({
 
     const { ctx, drawWidth, drawHeight, offsetX, offsetY } = layout;
     const snapshot = motionSnapshotRef.current;
-    const sourceGridSize = Math.max(2, snapshot && snapshot.grid_size ? snapshot.grid_size : 6);
-    const gridSize = Math.max(12, Math.min(32, sourceGridSize * 2));
+    const sourceGridSize = Math.max(2, snapshot && snapshot.grid_size ? snapshot.grid_size : 32);
+    // Render at least a 16x16 visible mesh so the motion pattern stays legible
+    // even when the backend grid is configured more coarsely.
+    const gridSize = Math.max(16, Math.min(32, sourceGridSize));
     const totalCells = Math.min(
       gridSize * gridSize,
       motionTrailRef.current.values.length
@@ -217,8 +219,14 @@ export const DetectionOverlay = forwardRef(({
       for (let gx = 0; gx < gridSize; gx++) {
         const idx = gy * gridSize + gx;
         if (idx >= totalCells) break;
-        const sourceX = Math.min(sourceGridSize - 1, Math.floor(gx / 2));
-        const sourceY = Math.min(sourceGridSize - 1, Math.floor(gy / 2));
+        const sourceX = Math.min(
+          sourceGridSize - 1,
+          Math.floor((gx / Math.max(1, gridSize)) * sourceGridSize)
+        );
+        const sourceY = Math.min(
+          sourceGridSize - 1,
+          Math.floor((gy / Math.max(1, gridSize)) * sourceGridSize)
+        );
         const sourceIdx = sourceY * sourceGridSize + sourceX;
         const score = snapshot && snapshot.cell_scores ? (snapshot.cell_scores[sourceIdx] || 0) : 0;
         const rawIntensity = trailState.values[idx] || 0;
@@ -232,14 +240,14 @@ export const DetectionOverlay = forwardRef(({
         const incoming = clamp(score + (matchedZone ? 0.18 : 0), 0, 1);
         trailState.values[idx] = Math.max(rawIntensity * decay, incoming);
         const intensity = trailState.values[idx];
-        const baseAlpha = 0.010 + (0.014 * edgeFactor);
+        const baseAlpha = 0.012 + (0.015 * edgeFactor);
         const heat = clamp(intensity * 1.25, 0, 1);
-        const pulseBoost = intensity > 0.02 ? (0.11 + (activePulse * 0.20)) : 0;
-        const alpha = clamp(baseAlpha + (heat * 0.54) + pulseBoost, 0.02, 0.88);
-        const warm = clamp((heat * 1.08) + glowPulse * 0.16 + (matchedZone ? 0.12 : 0), 0, 1);
-        const red = mix(78, 255, warm);
-        const green = mix(136, 176, warm);
-        const blue = mix(186, 26, warm);
+        const pulseBoost = intensity > 0.02 ? (0.12 + (activePulse * 0.24)) : 0;
+        const alpha = clamp(baseAlpha + (heat * 0.60) + pulseBoost, 0.02, 0.92);
+        const warm = clamp((heat * 1.14) + glowPulse * 0.18 + (matchedZone ? 0.16 : 0), 0, 1);
+        const red = mix(72, 255, warm);
+        const green = mix(130, 182, warm);
+        const blue = mix(180, 22, warm);
 
         ctx.fillStyle = `rgba(${red | 0}, ${green | 0}, ${blue | 0}, ${alpha})`;
         ctx.fillRect(x, y, Math.ceil(cellWidth) + 1, Math.ceil(cellHeight) + 1);
@@ -257,7 +265,7 @@ export const DetectionOverlay = forwardRef(({
         }
 
         ctx.strokeStyle = intensity > 0.02
-          ? `rgba(255, 238, 176, ${0.20 + (activePulse * 0.20)})`
+          ? `rgba(255, 238, 176, ${0.24 + (activePulse * 0.22)})`
           : 'rgba(148, 163, 184, 0.08)';
         ctx.lineWidth = intensity > 0.02 ? 1.15 : 1;
         ctx.strokeRect(x, y, cellWidth, cellHeight);
@@ -267,7 +275,7 @@ export const DetectionOverlay = forwardRef(({
           ctx.save();
           ctx.shadowColor = 'rgba(255, 210, 120, 0.50)';
           ctx.shadowBlur = 8 + (activePulse * 6);
-          ctx.strokeStyle = `rgba(255, 231, 165, ${0.34 + (activePulse * 0.18)})`;
+          ctx.strokeStyle = `rgba(255, 231, 165, ${0.40 + (activePulse * 0.20)})`;
           ctx.lineWidth = 1.25;
           ctx.strokeRect(
             x + innerInset,
@@ -298,13 +306,13 @@ export const DetectionOverlay = forwardRef(({
     }
 
     if (snapshot && snapshot.motion_detected) {
-      ctx.strokeStyle = `rgba(255, 194, 72, ${0.42 + (activePulse * 0.24)})`;
-      ctx.lineWidth = 1.8;
+      ctx.strokeStyle = `rgba(255, 194, 72, ${0.52 + (activePulse * 0.24)})`;
+      ctx.lineWidth = 2;
       ctx.strokeRect(offsetX + 0.5, offsetY + 0.5, drawWidth - 1, drawHeight - 1);
 
-      ctx.fillStyle = 'rgba(255, 194, 72, 0.15)';
-      ctx.fillRect(offsetX, offsetY, drawWidth, 3);
-      ctx.fillRect(offsetX, offsetY + drawHeight - 3, drawWidth, 3);
+      ctx.fillStyle = 'rgba(255, 194, 72, 0.22)';
+      ctx.fillRect(offsetX, offsetY, drawWidth, 4);
+      ctx.fillRect(offsetX, offsetY + drawHeight - 4, drawWidth, 4);
     }
 
     if (activeCount > 0 && activeMaxX >= activeMinX && activeMaxY >= activeMinY) {
