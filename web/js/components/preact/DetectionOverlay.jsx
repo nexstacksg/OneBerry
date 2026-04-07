@@ -80,7 +80,9 @@ export const DetectionOverlay = forwardRef(({
   const motionTrailRef = useRef({ gridSize: 0, values: new Array(1024).fill(0), lastUpdate: 0 });
   const errorCountRef = useRef(0);
   const isMotionModel = detectionModel === 'motion';
-  const currentIntervalRef = useRef(isMotionModel ? 150 : 1000);
+  // Motion mode is a live motion mask, so we poll much faster to keep the
+  // overlay in sync with movement instead of letting it lag behind.
+  const currentIntervalRef = useRef(isMotionModel ? 50 : 1000);
 
   // Expose the canvas ref to parent components
   useImperativeHandle(ref, () => ({
@@ -480,7 +482,7 @@ export const DetectionOverlay = forwardRef(({
 
   // Start/stop detection polling based on enabled prop
   useEffect(() => {
-    currentIntervalRef.current = isMotionModel ? 150 : 1000;
+    currentIntervalRef.current = isMotionModel ? 50 : 1000;
 
     if (enabled && detectionModel && videoRef.current && canvasRef.current) {
       console.log(`Starting detection polling for stream ${streamName}`);

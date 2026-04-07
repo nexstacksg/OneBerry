@@ -881,12 +881,11 @@ static float calculate_grid_motion(const unsigned char *curr_frame, const unsign
                 for (int x = cell_start_x; x < cell_end_x; x += 2) {
                     int idx = y * width + x;
 
-                    // Calculate differences from previous frame and background
+                    // Calculate the frame-to-frame difference.
+                    // This keeps motion tied to actual movement instead of
+                    // static background drift or gradual scene adaptation.
                     int frame_diff = abs((int)curr_frame[idx] - (int)prev_frame[idx]);
-                    int bg_diff = abs((int)curr_frame[idx] - (int)background[idx]);
-
-                    // Use the larger of the two differences
-                    int diff = (frame_diff > bg_diff) ? frame_diff : bg_diff;
+                    int diff = frame_diff;
 
                     // Apply noise threshold
                     if (diff > noise_threshold) {
@@ -949,12 +948,11 @@ static float calculate_grid_motion(const unsigned char *curr_frame, const unsign
                 for (int x = cell_start_x; x < cell_end_x; x++) {
                     int idx = y * width + x;
 
-                    // Calculate differences from previous frame and background
+                    // Calculate the frame-to-frame difference.
+                    // This keeps motion tied to actual movement instead of
+                    // static background drift or gradual scene adaptation.
                     int frame_diff = abs((int)curr_frame[idx] - (int)prev_frame[idx]);
-                    int bg_diff = abs((int)curr_frame[idx] - (int)background[idx]);
-
-                    // Use the larger of the two differences
-                    int diff = (frame_diff > bg_diff) ? frame_diff : bg_diff;
+                    int diff = frame_diff;
 
                     // Apply noise threshold
                     if (diff > noise_threshold) {

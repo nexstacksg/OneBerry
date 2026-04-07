@@ -962,7 +962,7 @@ export function StreamConfigModal({
                         />
                         <p className="mt-1 text-xs text-muted-foreground">
                           {currentStream.detectionModel === 'motion'
-                            ? t('streamsConfig.motionSensitivityHelp', 'Lower values are more sensitive. Built-in motion uses this value directly.')
+                            ? t('streamsConfig.motionSensitivityHelp', 'Lower values are more sensitive. Built-in motion tracks frame-to-frame movement directly.')
                             : t('streamsConfig.detectionThresholdHelp')}
                         </p>
                       </div>
