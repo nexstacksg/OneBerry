@@ -67,7 +67,8 @@ export function WebRTCVideoCell({
   initDelay = 0,
   showLabels = true,
   showControls = true,
-  globalShowDetections = true
+  globalShowDetections = true,
+  isPageFullscreen = false
 }) {
   const { t } = useI18n();
   const queryClient = useQueryClient();
@@ -140,6 +141,10 @@ export function WebRTCVideoCell({
   // Detection overlay visibility state (per-camera toggle, constrained by global toggle)
   const [localShowDetections, setLocalShowDetections] = useState(true);
   const showDetections = globalShowDetections && localShowDetections;
+
+  const handleFullscreenPreviewSelect = (sample) => setFullscreenPlayback(sample);
+  const handleReturnToLive = () => setFullscreenPlayback(null);
+
 
   // Refs
   const videoRef = useRef(null);
@@ -1216,6 +1221,7 @@ export function WebRTCVideoCell({
         zIndex: 1,
         display: isFullscreenCell ? 'flex' : 'block',
         flexDirection: isFullscreenCell ? 'column' : 'row',
+        minHeight: isFullscreenCell ? 0 : undefined,
         overflow: 'hidden'
       }}
     >
@@ -1230,10 +1236,10 @@ export function WebRTCVideoCell({
         playsInline
         style={{
           width: '100%',
-          height: '100%',
+          height: isFullscreenCell ? 'auto' : '100%',
           objectFit: 'contain',
           position: isFullscreenCell ? 'relative' : 'absolute',
-          flex: isFullscreenCell ? '1 1 auto' : undefined,
+          flex: isFullscreenCell ? '1 1 0%' : undefined,
           minHeight: isFullscreenCell ? 0 : undefined,
           display: isFullscreenCell && fullscreenPlayback ? 'none' : undefined
         }}
@@ -1251,10 +1257,10 @@ export function WebRTCVideoCell({
           onEnded={handleReturnToLive}
           style={{
             width: '100%',
-            height: '100%',
+            height: 'auto',
             objectFit: 'contain',
             position: 'relative',
-            flex: '1 1 auto',
+            flex: '1 1 0%',
             minHeight: 0,
             backgroundColor: 'black'
           }}
@@ -1694,10 +1700,10 @@ export function WebRTCVideoCell({
       )}
 
       {/* Fullscreen-only timeline dock */}
-      {isFullscreenCell && isPlaying && !error && (
+      {isFullscreenCell && !error && (
         <FullscreenTimelineOverlay
           streamName={stream.name}
-          isVisible={true}
+          isVisible={isFullscreenCell}
           onPreviewSelect={handleFullscreenPreviewSelect}
           onReturnToLive={handleReturnToLive}
         />

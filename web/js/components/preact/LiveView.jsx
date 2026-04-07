@@ -10,6 +10,7 @@ import { useQuery, useQueryClient } from '../../query-client.js';
 import { SnapshotManager, useSnapshotManager } from './SnapshotManager.jsx';
 import { HLSVideoCell } from './HLSVideoCell.jsx';
 import { MSEVideoCell } from './MSEVideoCell.jsx';
+import { FullscreenTimelineOverlay } from './FullscreenTimelineOverlay.jsx';
 import { isGo2rtcEnabled } from '../../utils/settings-utils.js';
 import { useCameraOrder } from './useCameraOrder.js';
 import { GridPicker, computeOptimalGrid, MAX_GRID_CELLS } from './GridPicker.jsx';
@@ -779,12 +780,20 @@ export function LiveView({isWebRTCDisabled}) {
                     showLabels={showLabels}
                     showControls={showControls}
                     globalShowDetections={showDetections}
+                    isPageFullscreen={isFullscreen}
                   />
                 </div>
               );
             })
           )}
         </div>
+
+        {isFullscreen && isSingleStream && selectedStream && (
+          <FullscreenTimelineOverlay
+            streamName={selectedStream}
+            isVisible={true}
+          />
+        )}
 
         {!isSingleStream && orderedStreams.length > maxStreams ? (
           <div className="pagination-controls flex justify-center items-center space-x-4 mt-4">

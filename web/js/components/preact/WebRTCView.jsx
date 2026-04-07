@@ -747,6 +747,7 @@ export function WebRTCView() {
                     showLabels={showLabels}
                     showControls={showControls}
                     globalShowDetections={showDetections}
+                    isPageFullscreen={isFullscreen}
                   />
                 </div>
               );

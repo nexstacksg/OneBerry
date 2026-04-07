@@ -34,7 +34,8 @@ export function MSEVideoCell({
   initDelay = 0,
   showLabels = true,
   showControls = true,
-  globalShowDetections = true
+  globalShowDetections = true,
+  isPageFullscreen = false
 }) {
   const { t } = useI18n();
   const queryClient = useQueryClient();
@@ -972,4 +973,3 @@ export function MSEVideoCell({
     </div>
   );
 }
-
