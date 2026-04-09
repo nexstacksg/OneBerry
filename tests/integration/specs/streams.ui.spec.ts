@@ -119,6 +119,8 @@ test.describe('Streams Page @ui @streams', () => {
       await expect(streamsPage.addStreamModal).toBeVisible();
       await expect(streamsPage.streamNameInput).toBeVisible();
       await expect(streamsPage.streamUrlInput).toBeVisible();
+      await expect(streamsPage.streamResolutionSelect).toBeVisible();
+      await expect(streamsPage.streamFpsSelect).toBeVisible();
       
       await page.screenshot({ path: 'test-results/streams-add-modal.png' });
     });
@@ -152,7 +154,9 @@ test.describe('Streams Page @ui @streams', () => {
       await streamsPage.addStream({
         name: testStreamName,
         url: 'rtsp://localhost:18554/test_pattern',
-        enabled: false
+        enabled: false,
+        resolution: '1280x720',
+        fps: 15
       });
 
       // Track this stream for cleanup
@@ -163,6 +167,10 @@ test.describe('Streams Page @ui @streams', () => {
       // Verify stream appears in list
       const streamExists = await streamsPage.streamExists(testStreamName);
       expect(streamExists).toBeTruthy();
+
+      const createdRow = streamsPage.getStreamByName(testStreamName);
+      await expect(createdRow).toContainText('1280x720');
+      await expect(createdRow).toContainText('15');
 
       await page.screenshot({ path: 'test-results/streams-add-new.png' });
     });
@@ -380,4 +388,3 @@ test.describe('Streams Page @ui @streams', () => {
     });
   });
 });
-

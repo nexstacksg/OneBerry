@@ -48,6 +48,14 @@ export class StreamsPage extends BasePage {
     return this.addStreamModal.locator('#stream-url');
   }
 
+  get streamResolutionSelect(): Locator {
+    return this.addStreamModal.locator('#stream-resolution');
+  }
+
+  get streamFpsSelect(): Locator {
+    return this.addStreamModal.locator('#stream-fps');
+  }
+
   get saveButton(): Locator {
     // The save button has btn-primary class and text "Add Stream" or "Update Stream"
     // It's in the modal footer alongside the Cancel button
@@ -145,7 +153,13 @@ export class StreamsPage extends BasePage {
   /**
    * Add a new stream via the UI
    */
-  async addStream(config: { name: string; url: string; enabled?: boolean }): Promise<void> {
+  async addStream(config: {
+    name: string;
+    url: string;
+    enabled?: boolean;
+    resolution?: string;
+    fps?: string | number;
+  }): Promise<void> {
     await this.clickAddStream();
 
     // Clear and fill the form fields
@@ -184,6 +198,16 @@ export class StreamsPage extends BasePage {
         await enabledCheckbox.uncheck({ force: true });
       }
     }
+
+    if (config.resolution !== undefined) {
+      await this.streamResolutionSelect.selectOption(config.resolution);
+    }
+
+    if (config.fps !== undefined) {
+      await this.streamFpsSelect.selectOption(String(config.fps));
+    }
+
+    await sleep(250);
 
     // Wait for the save button to be enabled and visible
     await this.saveButton.waitFor({ state: 'visible', timeout: 5000 });
@@ -310,4 +334,3 @@ export class StreamsPage extends BasePage {
     return await statusBadge.textContent();
   }
 }
-

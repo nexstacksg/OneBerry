@@ -14,6 +14,14 @@ import { HealthView } from './HealthView.jsx';
 import { validateSession } from '../../utils/auth-utils.js';
 import { obfuscateUrlCredentials, urlHasCredentials } from '../../utils/url-utils.js';
 import {
+  VIDEO_FPS_PRESETS,
+  VIDEO_RESOLUTION_PRESETS,
+  formatFpsValue,
+  formatResolutionValue,
+  parseFpsValue,
+  parseResolutionValue
+} from './videoOptions.js';
+import {
   useQuery,
   useMutation,
   useQueryClient,
@@ -80,6 +88,8 @@ export function StreamsView() {
   const [isDiscovering, setIsDiscovering] = useState(false);
   const [isLoadingProfiles, setIsLoadingProfiles] = useState(false);
   const [onvifNetworkOverride, setOnvifNetworkOverride] = useState('auto');
+  const [onvifResolution, setOnvifResolution] = useState('');
+  const [onvifFps, setOnvifFps] = useState('');
 
   // Track which stream rows are expanded to show health/status details
   const [expandedStreams, setExpandedStreams] = useState({});
@@ -144,6 +154,30 @@ export function StreamsView() {
     ptz: false,
     advanced: false
   });
+
+  const onvifResolutionOptions = [
+    { value: '', label: t('streamsConfig.autoDetected') },
+    ...(onvifResolution && !VIDEO_RESOLUTION_PRESETS.some(option =>
+      formatResolutionValue(option.width, option.height) === onvifResolution
+    )
+      ? [{ value: onvifResolution, label: onvifResolution }]
+      : []),
+    ...VIDEO_RESOLUTION_PRESETS.map(option => ({
+      value: formatResolutionValue(option.width, option.height),
+      label: formatResolutionValue(option.width, option.height)
+    }))
+  ];
+
+  const onvifFpsOptions = [
+    { value: '', label: t('streamsConfig.autoDetected') },
+    ...(onvifFps && !VIDEO_FPS_PRESETS.includes(Number(onvifFps))
+      ? [{ value: onvifFps, label: `${onvifFps} fps` }]
+      : []),
+    ...VIDEO_FPS_PRESETS.map(fps => ({
+      value: String(fps),
+      label: `${fps} fps`
+    }))
+  ];
 
   const toggleSection = (section) => {
     setExpandedSections(prev => ({
@@ -234,7 +268,7 @@ export function StreamsView() {
     priority: '5',
     segment: 30,
     record: true,
-    recordAudio: true,
+    recordAudio: false,
     backchannelEnabled: false,
     // ONVIF capability flag
     isOnvif: false,
@@ -579,7 +613,9 @@ export function StreamsView() {
       admin_url: currentStream.adminUrl || '',
       enabled: currentStream.enabled,
       streaming_enabled: currentStream.streamingEnabled,
-      // Note: width, height, fps, and codec are auto-detected and not sent from the frontend
+      width: parseInt(currentStream.width, 10) || 0,
+      height: parseInt(currentStream.height, 10) || 0,
+      fps: parseInt(currentStream.fps, 10) || 0,
       protocol: parseInt(currentStream.protocol, 10),
       priority: parseInt(currentStream.priority, 10),
       segment_duration: parseInt(currentStream.segment, 10),
@@ -761,7 +797,7 @@ export function StreamsView() {
       priority: '5',
       segment: 30,
       record: true,
-      recordAudio: true,
+      recordAudio: false,
       backchannelEnabled: false,
       isOnvif: false,
       onvifUsername: '',
@@ -822,7 +858,7 @@ export function StreamsView() {
 
       setCurrentStream({
         ...stream,
-        // These are read-only auto-detected values (0/empty means not yet detected)
+        // Preserve the stored video parameters so the user can review or change them
         width: stream.width || 0,
         height: stream.height || 0,
         fps: stream.fps || 0,
@@ -913,7 +949,7 @@ export function StreamsView() {
         ...stream,
         // Clear the name so the user must provide a unique one
         name: `${t('streams.copyOf')} ${stream.name || streamId}`,
-        // Reset auto-detected fields — the cloned stream may be a different camera
+        // Reset stored video parameters — the cloned stream may point to a different camera
         width: 0,
         height: 0,
         fps: 0,
@@ -988,6 +1024,9 @@ export function StreamsView() {
     setSelectedDevice(null);
     setSelectedProfile(null);
     setCustomStreamName('');
+    setShowCustomNameInput(false);
+    setOnvifResolution('');
+    setOnvifFps('');
     // Fetch the configured default network from settings
     try {
       const settings = await fetchJSON('/api/settings', { timeout: 5000 });
@@ -1256,6 +1295,8 @@ export function StreamsView() {
     }
 
     setIsAddingStream(true);
+    const { width, height } = parseResolutionValue(onvifResolution);
+    const fps = parseFpsValue(onvifFps);
 
     // Prepare stream data
     const streamData = {
@@ -1267,13 +1308,14 @@ export function StreamsView() {
       url: selectedProfile.stream_uri,
       enabled: true,
       streaming_enabled: true,
-      // Note: width, height, fps, and codec are auto-detected from the stream
-      // (ONVIF discovery on the backend will also populate these from the camera profile)
+      width,
+      height,
+      fps,
       protocol: '0', // TCP
       priority: '5', // Medium
       segment_duration: 30,
       record: true,
-      record_audio: true,
+      record_audio: false,
       backchannel_enabled: false,
       // Backend expects camelCase key 'isOnvif'
       isOnvif: true
@@ -1285,6 +1327,11 @@ export function StreamsView() {
         setIsAddingStream(false);
         setShowCustomNameInput(false);
         setOnvifModalVisible(false);
+        setSelectedProfile(null);
+        setSelectedDevice(null);
+        setCustomStreamName('');
+        setOnvifResolution('');
+        setOnvifFps('');
       },
       onError: () => {
         setIsAddingStream(false);
@@ -1311,6 +1358,8 @@ export function StreamsView() {
   const addOnvifDeviceAsStream = (profile) => {
     setSelectedProfile(profile);
     setCustomStreamName(`${selectedDevice.name || t('streams.onvifDefaultName')}_${profile.name || t('streams.defaultStreamName')}`);
+    setOnvifResolution(formatResolutionValue(profile.width, profile.height));
+    setOnvifFps(formatFpsValue(profile.fps));
     setShowCustomNameInput(true);
   };
 
@@ -2070,7 +2119,10 @@ export function StreamsView() {
               <button
                   id="onvif-close-btn"
                   className="px-4 py-2 bg-secondary text-secondary-foreground rounded hover:bg-secondary/80 transition-colors"
-                  onClick={() => setOnvifModalVisible(false)}
+                  onClick={() => {
+                    setOnvifModalVisible(false);
+                    setShowCustomNameInput(false);
+                  }}
                   type="button"
               >
                 {t('common.close')}
@@ -2101,11 +2153,48 @@ export function StreamsView() {
                   {t('streams.streamNameHelp')}
                 </p>
               </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label htmlFor="onvif-stream-resolution" className="block text-sm font-medium mb-1">{t('streams.resolution')}</label>
+                  <select
+                    id="onvif-stream-resolution"
+                    className="w-full px-3 py-2 border border-input rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-primary bg-background text-foreground"
+                    value={onvifResolution}
+                    onChange={(e) => setOnvifResolution(e.target.value)}
+                  >
+                    {onvifResolutionOptions.map(option => (
+                      <option key={option.value || 'auto'} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="mt-1 text-xs text-muted-foreground">Leave Auto to keep the camera profile resolution.</p>
+                </div>
+                <div>
+                  <label htmlFor="onvif-stream-fps" className="block text-sm font-medium mb-1">{t('streams.fps')}</label>
+                  <select
+                    id="onvif-stream-fps"
+                    className="w-full px-3 py-2 border border-input rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-primary bg-background text-foreground"
+                    value={onvifFps}
+                    onChange={(e) => setOnvifFps(e.target.value)}
+                  >
+                    {onvifFpsOptions.map(option => (
+                      <option key={option.value || 'auto'} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="mt-1 text-xs text-muted-foreground">Leave Auto to keep the camera profile frame rate.</p>
+                </div>
+              </div>
             </div>
             <div className="flex justify-end p-4 border-t border-border space-x-2">
               <button
                   className="px-4 py-2 bg-secondary text-secondary-foreground rounded hover:bg-secondary/80 transition-colors"
-                  onClick={() => setShowCustomNameInput(false)}
+                  onClick={() => {
+                    setShowCustomNameInput(false);
+                    setSelectedProfile(null);
+                  }}
                   type="button"
               >
                 {t('common.cancel')}

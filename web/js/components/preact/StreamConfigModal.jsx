@@ -8,6 +8,15 @@ import { ZoneEditor } from './ZoneEditor.jsx';
 import { obfuscateUrlCredentials } from '../../utils/url-utils.js';
 import { useI18n } from '../../i18n.js';
 import { showStatusMessage } from './ToastContainer.jsx';
+import {
+  VIDEO_FPS_PRESETS,
+  VIDEO_RESOLUTION_PRESETS,
+  formatFpsValue,
+  formatResolutionLabel,
+  formatResolutionValue,
+  parseFpsValue,
+  parseResolutionValue
+} from './videoOptions.js';
 
 const primaryAccentStyle = { accentColor: 'hsl(var(--primary))' };
 const HOURS_PER_DAY = 24;
@@ -298,6 +307,30 @@ export function StreamConfigModal({
   const isMotionModel = currentStream.detectionModel === 'motion';
   const isPersonOnlyPreset = currentStream.detectionObjectFilter === 'include'
     && String(currentStream.detectionObjectFilterList || '').trim().toLowerCase() === 'person';
+  const currentResolutionValue = formatResolutionValue(currentStream.width, currentStream.height);
+  const currentFpsValue = formatFpsValue(currentStream.fps);
+  const resolutionOptions = [
+    { value: '', label: t('streamsConfig.autoDetected') },
+    ...(currentResolutionValue && !VIDEO_RESOLUTION_PRESETS.some(option =>
+      formatResolutionLabel(option.width, option.height) === currentResolutionValue
+    )
+      ? [{ value: currentResolutionValue, label: currentResolutionValue }]
+      : []),
+    ...VIDEO_RESOLUTION_PRESETS.map(option => ({
+      value: formatResolutionLabel(option.width, option.height),
+      label: formatResolutionLabel(option.width, option.height)
+    }))
+  ];
+  const fpsOptions = [
+    { value: '', label: t('streamsConfig.autoDetected') },
+    ...(currentFpsValue && !VIDEO_FPS_PRESETS.includes(Number(currentFpsValue))
+      ? [{ value: currentFpsValue, label: `${currentFpsValue} fps` }]
+      : []),
+    ...VIDEO_FPS_PRESETS.map(fps => ({
+      value: String(fps),
+      label: `${fps} fps`
+    }))
+  ];
 
   // Keep a ref to onInputChange so the zones-load effect never needs it as a
   // dependency. If we put onInputChange in the dependency array, calling it
@@ -380,6 +413,16 @@ export function StreamConfigModal({
     setDetectionZones(zones);
     // Update currentStream with new zones
     onInputChange({ target: { name: 'detectionZones', value: zones } });
+  };
+
+  const handleResolutionChange = (e) => {
+    const { width, height } = parseResolutionValue(e.target.value);
+    onInputChange({ target: { name: 'width', value: width } });
+    onInputChange({ target: { name: 'height', value: height } });
+  };
+
+  const handleFpsChange = (e) => {
+    onInputChange({ target: { name: 'fps', value: parseFpsValue(e.target.value) } });
   };
 
   const applyPersonOnlyPreset = useCallback(() => {
@@ -631,21 +674,43 @@ export function StreamConfigModal({
                 )}
 
                 <div>
-                  <label className="block text-sm font-medium mb-2">{t('streams.resolution')}</label>
-                  <span className="block w-full px-3 py-2 border border-input rounded-md bg-muted/30 text-muted-foreground">
-                    {currentStream.width > 0 && currentStream.height > 0
-                      ? `${currentStream.width}×${currentStream.height}`
-                      : t('streamsConfig.autoDetected')}
+                  <label htmlFor="stream-resolution" className="block text-sm font-medium mb-2">{t('streams.resolution')}</label>
+                  <select
+                    id="stream-resolution"
+                    name="width"
+                    className="w-full px-3 py-2 border border-input rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-primary bg-background text-foreground"
+                    value={currentResolutionValue}
+                    onChange={handleResolutionChange}
+                  >
+                    {resolutionOptions.map(option => (
+                      <option key={option.value || 'auto'} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="text-xs text-muted-foreground mt-1 block">
+                    Leave Auto to keep the detected source resolution.
                   </span>
-                  <span className="text-xs text-muted-foreground mt-1 block">{t('streamsConfig.detectedFromSource')}</span>
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium mb-2">{t('streams.fps')}</label>
-                  <span className="block w-full px-3 py-2 border border-input rounded-md bg-muted/30 text-muted-foreground">
-                    {currentStream.fps > 0 ? currentStream.fps : t('streamsConfig.autoDetected')}
+                  <label htmlFor="stream-fps" className="block text-sm font-medium mb-2">{t('streams.fps')}</label>
+                  <select
+                    id="stream-fps"
+                    name="fps"
+                    className="w-full px-3 py-2 border border-input rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-primary bg-background text-foreground"
+                    value={currentFpsValue}
+                    onChange={handleFpsChange}
+                  >
+                    {fpsOptions.map(option => (
+                      <option key={option.value || 'auto'} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="text-xs text-muted-foreground mt-1 block">
+                    Leave Auto to keep the detected source frame rate.
                   </span>
-                  <span className="text-xs text-muted-foreground mt-1 block">{t('streamsConfig.detectedFromSource')}</span>
                 </div>
 
                 <div>

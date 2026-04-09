@@ -74,8 +74,9 @@ test.describe('LightNVR API @api', () => {
     });
 
     test('POST /api/streams creates a new stream', async () => {
+      const streamName = `playwright_test_stream_${Date.now()}`;
       const streamData = {
-        name: 'playwright_test_stream',
+        name: streamName,
         url: 'rtsp://localhost:8554/test_pattern',
         enabled: true,
         width: 1280,
@@ -97,6 +98,16 @@ test.describe('LightNVR API @api', () => {
         const data = await response.json();
         // API returns { success: true } on creation
         expect(data.success).toBe(true);
+
+        const detailsResponse = await request.get(`/api/streams/${streamName}`);
+        expect(detailsResponse.ok()).toBeTruthy();
+        const details = await detailsResponse.json();
+        expect(details.name).toBe(streamName);
+        expect(details.width).toBe(1280);
+        expect(details.height).toBe(720);
+        expect(details.fps).toBe(15);
+
+        await request.delete(`/api/streams/${streamName}`);
       }
     });
 
@@ -142,4 +153,3 @@ test.describe('LightNVR API @api', () => {
     });
   });
 });
-
