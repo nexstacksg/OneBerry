@@ -162,6 +162,18 @@ static void put_stream_worker(put_stream_task_t *task) {
         return;
     }
 
+    // Keep the runtime stream state aligned with manually selected video parameters.
+    // Width/height/fps are metadata values, so we update them in-place instead of
+    // routing through the full state update path that can trigger a restart.
+    stream_state_manager_t *state = get_stream_state_by_name(task->config.name);
+    if (state) {
+        pthread_mutex_lock(&state->mutex);
+        state->config.width = task->config.width;
+        state->config.height = task->config.height;
+        state->config.fps = task->config.fps;
+        pthread_mutex_unlock(&state->mutex);
+    }
+
     // Force update of stream configuration in memory to ensure it matches the database
     stream_config_t updated_config;
     if (get_stream_config(task->stream, &updated_config) != 0) {
@@ -466,7 +478,7 @@ void handle_post_stream(const http_request_t *req, http_response_t *res) {
     config.pre_detection_buffer = 5;
     config.post_detection_buffer = 5;
     config.protocol = STREAM_PROTOCOL_TCP;
-    config.record_audio = true; // Default to true for new streams
+    config.record_audio = false; // Default to false for new streams; users can enable if the camera has audio
 
     // Override with provided values
     cJSON *enabled = cJSON_GetObjectItem(stream_json, "enabled");
@@ -479,9 +491,20 @@ void handle_post_stream(const http_request_t *req, http_response_t *res) {
         config.streaming_enabled = cJSON_IsTrue(streaming_enabled);
     }
 
-    // Note: width, height, fps, and codec are auto-detected from the stream
-    // and are not accepted from API input. They remain at their defaults (0/empty)
-    // until populated by stream probing or ONVIF discovery.
+    cJSON *width = cJSON_GetObjectItem(stream_json, "width");
+    if (width && cJSON_IsNumber(width)) {
+        config.width = width->valueint;
+    }
+
+    cJSON *height = cJSON_GetObjectItem(stream_json, "height");
+    if (height && cJSON_IsNumber(height)) {
+        config.height = height->valueint;
+    }
+
+    cJSON *fps = cJSON_GetObjectItem(stream_json, "fps");
+    if (fps && cJSON_IsNumber(fps)) {
+        config.fps = fps->valueint;
+    }
 
     cJSON *priority = cJSON_GetObjectItem(stream_json, "priority");
     if (priority && cJSON_IsNumber(priority)) {
@@ -940,8 +963,23 @@ void handle_put_stream(const http_request_t *req, http_response_t *res) {
         // streaming_enabled can be toggled dynamically, don't set non_dynamic_config_changed
     }
 
-    // Note: width, height, fps, and codec are auto-detected from the stream
-    // and are not accepted from API input on update either.
+    cJSON *width = cJSON_GetObjectItem(stream_json, "width");
+    if (width && cJSON_IsNumber(width)) {
+        config.width = width->valueint;
+        config_changed = true;
+    }
+
+    cJSON *height = cJSON_GetObjectItem(stream_json, "height");
+    if (height && cJSON_IsNumber(height)) {
+        config.height = height->valueint;
+        config_changed = true;
+    }
+
+    cJSON *fps = cJSON_GetObjectItem(stream_json, "fps");
+    if (fps && cJSON_IsNumber(fps)) {
+        config.fps = fps->valueint;
+        config_changed = true;
+    }
 
     cJSON *priority = cJSON_GetObjectItem(stream_json, "priority");
     if (priority && cJSON_IsNumber(priority)) {
