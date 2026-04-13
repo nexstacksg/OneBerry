@@ -138,6 +138,16 @@ export function TimelinePlayer({ videoElementRef = null, autoFullscreen = false 
     } else if (timeChanged) {
       // User is dragging the cursor, just update the current time
       video.currentTime = relativeTime;
+      if (state.isPlaying && video.paused) {
+        // A timeline click can land in the current segment; in that case we need
+        // to resume playback after seeking instead of stopping at the new time.
+        video.play().catch(error => {
+          if (error.name === 'AbortError') {
+            return;
+          }
+          console.error('Error playing video:', error);
+        });
+      }
     } else if (state.isPlaying && video.paused) {
       // Resume playback if needed
       video.play().catch(error => {
@@ -392,8 +402,8 @@ export function TimelinePlayer({ videoElementRef = null, autoFullscreen = false 
       return;
     }
 
-    // Check if cursor position is locked
-    // If so, don't update the timeline state to preserve the cursor position
+    // If the cursor is being manually dragged, keep the UI stable and let the
+    // drag handler own the selected timestamp until it releases control.
     if (timelineState.cursorPositionLocked) {
       return;
     }
