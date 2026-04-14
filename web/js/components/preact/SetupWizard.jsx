@@ -119,7 +119,7 @@ function PerformanceStep({ form, onChange, cpuCores }) {
       <p class="text-sm text-muted-foreground mb-5">
         These settings control capacity, not video quality. Most users can keep the defaults.
       </p>
-      <div class="rounded-lg border border-blue-400 bg-blue-50 dark:bg-blue-900/20 text-blue-800 dark:text-blue-200 p-3 text-sm mb-4 space-y-2">
+      <div class="rounded-lg border border-primary/30 bg-primary/10 text-primary p-3 text-sm mb-4 space-y-2">
         <p>
           <strong>Worker thread pool size</strong> affects background web/server work.
           The recommended default is usually best unless you are tuning performance.
@@ -130,7 +130,7 @@ function PerformanceStep({ form, onChange, cpuCores }) {
           plus a little headroom.
         </p>
       </div>
-      <div class="rounded-lg border border-yellow-400 bg-yellow-50 dark:bg-yellow-900/20 text-yellow-800 dark:text-yellow-200 p-3 text-sm mb-5">
+      <div class="rounded-lg border border-warning/35 bg-warning/10 text-warning p-3 text-sm mb-5">
         ⚠️ <strong>Important:</strong> if you change either setting, the new value is saved
         now but will <strong>not</strong> be used until Oneberry restarts. For example, if the
         current stream limit is 1 and you raise it to 32, you must restart before adding more
@@ -178,13 +178,13 @@ function CompleteStep({ saved, restartRequired }) {
           : 'No settings were changed — defaults will be used.'}
       </p>
       {restartRequired && (
-        <div class="rounded-lg border border-yellow-400 bg-yellow-50 dark:bg-yellow-900/20 text-yellow-800 dark:text-yellow-200 p-3 text-sm mb-4">
+        <div class="rounded-lg border border-warning/35 bg-warning/10 text-warning p-3 text-sm mb-4">
           ⚠️ <strong>Restart required</strong> — thread pool size and/or max streams
           changes are saved, but they will not take effect until the service restarts.
           Restart before adding more cameras or expecting the new capacity limit to apply.
         </div>
       )}
-      <div class="rounded-lg border border-blue-400 bg-blue-50 dark:bg-blue-900/20 text-blue-800 dark:text-blue-200 p-3 text-sm">
+      <div class="rounded-lg border border-primary/30 bg-primary/10 text-primary p-3 text-sm">
         🔒 <strong>Security reminder:</strong> Make sure to change the default admin
         password in the <strong>Users</strong> section if you haven't already.
       </div>

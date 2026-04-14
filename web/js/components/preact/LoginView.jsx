@@ -289,7 +289,7 @@ export function LoginView() {
                   type="text"
                   id="username"
                   name="username"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                  className="w-full px-3 py-2 border border-input rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-background text-foreground"
                   placeholder={t('login.usernamePlaceholder')}
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
@@ -303,7 +303,7 @@ export function LoginView() {
                   type="password"
                   id="password"
                   name="password"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                  className="w-full px-3 py-2 border border-input rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-background text-foreground"
                   placeholder={t('login.passwordPlaceholder')}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
@@ -317,7 +317,7 @@ export function LoginView() {
                 <input
                     type="text"
                     id="totp-code-force"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white text-center text-2xl tracking-widest"
+                    className="w-full px-3 py-2 border border-input rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-background text-foreground text-center text-2xl tracking-widest"
                     placeholder="000000"
                     value={forceMfaTotpCode}
                     onChange={(e) => setForceMfaTotpCode(e.target.value.replace(/[^0-9]/g, '').slice(0, 6))}
@@ -342,7 +342,7 @@ export function LoginView() {
             <div className="form-group">
               <button
                   type="submit"
-                  className="btn-primary w-full focus:outline-none focus:ring-2 focus:ring-offset-2 dark:focus:ring-offset-gray-800 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="btn-primary w-full focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 focus:ring-offset-background disabled:opacity-50 disabled:cursor-not-allowed"
                   disabled={isPrimarySubmitDisabled}
               >
                 {isLoggingIn ? t('login.signingIn') : t('login.signIn')}
@@ -361,7 +361,7 @@ export function LoginView() {
               <input
                   type="text"
                   id="totp-code"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white text-center text-2xl tracking-widest"
+                  className="w-full px-3 py-2 border border-input rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-background text-foreground text-center text-2xl tracking-widest"
                   placeholder="000000"
                   value={totpCode}
                   onChange={(e) => setTotpCode(e.target.value.replace(/[^0-9]/g, '').slice(0, 6))}

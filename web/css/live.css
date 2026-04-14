@@ -236,7 +236,7 @@
     height: 40px;
     border: 3px solid rgba(255, 255, 255, 0.2);
     border-radius: 50%;
-    border-top-color: #1e88e5;
+    border-top-color: hsl(var(--primary));
     animation: spin 1s ease-in-out infinite;
     margin-bottom: 0.75rem;
 }
@@ -265,7 +265,7 @@
 }
 
 .error-icon {
-    color: #f44336;
+    color: hsl(var(--danger));
     font-size: 2rem;
     margin-bottom: 0.75rem;
 }

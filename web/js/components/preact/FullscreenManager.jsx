@@ -308,7 +308,7 @@ export function FullscreenButton({ isFullscreen, onToggle }) {
   return (
     <button 
       id="fullscreen-btn"
-      className="fullscreen-btn px-3 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800"
+      className="fullscreen-btn px-3 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 focus:ring-offset-background"
       onClick={onToggle}
     >
       <svg 

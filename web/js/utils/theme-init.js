@@ -7,11 +7,18 @@
 // Color theme definitions
 export const COLOR_THEMES = {
   default: {
-    name: 'Default',
+    name: 'Oneberry',
     nameKey: 'theme.default',
-    light: { hue: 240, saturation: 5.9 },
-    dark: { hue: 240, saturation: 3.7 },
-    icon: '🎨'
+    light: { hue: 357, saturation: 84 },
+    dark: { hue: 357, saturation: 72 },
+    icon: '🍓'
+  },
+  oneberry: {
+    name: 'Oneberry Red',
+    nameKey: 'theme.oneberry',
+    light: { hue: 357, saturation: 84 },
+    dark: { hue: 357, saturation: 72 },
+    icon: '🍓'
   },
   blue: {
     name: 'Ocean Blue',
@@ -309,4 +316,3 @@ export function getThemeInitScript() {
 })();
 `;
 }
-

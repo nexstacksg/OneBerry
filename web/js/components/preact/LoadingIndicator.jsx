@@ -29,10 +29,10 @@ export function LoadingIndicator({ message, size = 'md', fullPage = false }) {
   // If fullPage is true, display as a full page overlay
   if (fullPage) {
     return (
-      <div className="fixed inset-0 bg-white bg-opacity-75 dark:bg-gray-900 dark:bg-opacity-75 flex items-center justify-center z-50">
+      <div className="fixed inset-0 bg-background/90 backdrop-blur-sm flex items-center justify-center z-50">
         <div className="text-center">
-          <div className={`inline-block animate-spin rounded-full border-4 border-input border-t-blue-600 dark:border-t-blue-500 ${spinnerSize}`}></div>
-          {resolvedMessage && <p className="mt-4 text-gray-700 dark:text-gray-300 text-lg">{resolvedMessage}</p>}
+          <div className={`inline-block animate-spin rounded-full border-4 border-input border-t-primary ${spinnerSize}`}></div>
+          {resolvedMessage && <p className="mt-4 text-muted-foreground text-lg">{resolvedMessage}</p>}
         </div>
       </div>
     );
@@ -41,8 +41,8 @@ export function LoadingIndicator({ message, size = 'md', fullPage = false }) {
   // Default display as an inline element
   return (
     <div className="flex flex-col items-center justify-center py-8">
-      <div className={`inline-block animate-spin rounded-full border-4 border-input border-t-blue-600 dark:border-t-blue-500 ${spinnerSize}`}></div>
-      {resolvedMessage && <p className="mt-4 text-gray-700 dark:text-gray-300">{resolvedMessage}</p>}
+      <div className={`inline-block animate-spin rounded-full border-4 border-input border-t-primary ${spinnerSize}`}></div>
+      {resolvedMessage && <p className="mt-4 text-muted-foreground">{resolvedMessage}</p>}
     </div>
   );
 }
