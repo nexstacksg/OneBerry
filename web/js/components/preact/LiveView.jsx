@@ -792,6 +792,8 @@ export function LiveView({isWebRTCDisabled}) {
           <FullscreenTimelineOverlay
             streamName={selectedStream}
             isVisible={true}
+            mode="floating"
+            playbackTimestamp={null}
           />
         )}
 

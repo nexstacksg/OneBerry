@@ -116,6 +116,35 @@ test.describe('Timeline boundary flows @ui @timeline', () => {
     expect((await segmentBar.boundingBox())?.width ?? 0).toBeGreaterThan(0);
   });
 
+  test('plays recorded video when clicking an empty gap in the timeline bar', async ({ page }) => {
+    const stream = 'front_door';
+    const date = '2026-03-08';
+    const segments: Segment[] = [
+      { id: 401, stream, start_timestamp: localTimestamp(date, '09:00:00'), end_timestamp: localTimestamp(date, '09:10:00') },
+      { id: 402, stream, start_timestamp: localTimestamp(date, '09:15:00'), end_timestamp: localTimestamp(date, '09:25:00') }
+    ];
+
+    await mockTimelineApis(page, stream, segments);
+    await page.goto(`/timeline.html?stream=${stream}&date=${date}&time=09:10:00`, { waitUntil: 'domcontentloaded' });
+
+    const timelinePage = new TimelinePage(page);
+    await expect(timelinePage.timelineContainer).toBeVisible();
+    await expect(timelinePage.videoPlayer).toHaveAttribute('src', /\/api\/recordings\/play\/402(?:\?|$)/);
+    await expect(timelinePage.timelineSegments).toHaveCount(2);
+
+    const firstBox = await timelinePage.timelineSegments.nth(0).boundingBox();
+    const secondBox = await timelinePage.timelineSegments.nth(1).boundingBox();
+    if (!firstBox || !secondBox) {
+      throw new Error('Expected timeline segments to have bounding boxes');
+    }
+
+    const gapX = firstBox.x + firstBox.width + ((secondBox.x - (firstBox.x + firstBox.width)) / 2);
+    const gapY = firstBox.y + (firstBox.height / 2);
+
+    await page.mouse.click(gapX, gapY);
+    await expect(timelinePage.videoPlayer).toHaveAttribute('src', /\/api\/recordings\/play\/401(?:\?|$)/);
+  });
+
   test('keeps the live edge anchored when zooming the timeline', async ({ page }) => {
     const stream = 'front_door';
     const date = '2026-03-08';

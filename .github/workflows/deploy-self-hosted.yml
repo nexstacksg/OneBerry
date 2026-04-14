@@ -1,0 +1,34 @@
+name: Deploy to Self-Hosted Proxmox VM
+
+on:
+  push:
+    branches: [development]
+
+jobs:
+  deploy:
+    name: Build and Deploy
+    runs-on: self-hosted
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Build Web UI
+        run: |
+          # Ensure Node.js and npm are available
+          # the build script checks for them
+          bash scripts/build_web_vite.sh
+
+      - name: Build Backend
+        run: |
+          # Build the C backend in release mode
+          bash scripts/build.sh --release
+
+      - name: Install and Restart Service
+        run: |
+          # Use sudo to run the install script and restart the service.
+          # The runner user must have passwordless sudo for these commands.
+          sudo bash scripts/install.sh
+          sudo systemctl restart lightnvr
+          sudo systemctl status lightnvr

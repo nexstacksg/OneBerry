@@ -5,7 +5,11 @@
 
 import { useState, useEffect, useRef } from 'preact/hooks';
 import { timelineState } from './TimelinePage.jsx';
-import { findContainingSegmentIndex, getClippedSegmentHourRange } from './timelineUtils.js';
+import {
+  findContainingSegmentIndex,
+  findNearestSegmentIndex,
+  getClippedSegmentHourRange
+} from './timelineUtils.js';
 import { formatLocalTime } from '../../../utils/date-utils.js';
 
 /**
@@ -119,8 +123,13 @@ export function TimelineSegments({ segments: propSegments }) {
     // Convert fractional hour → timestamp using the shared utility
     const clickTimestamp = timelineState.timelineHourToTimestamp(clickHour, timelineState.selectedDate);
 
-    // Find segment that contains this timestamp
+    // Resolve the clicked time to an actual recording segment.  If the click lands
+    // in a gap, fall back to the nearest recording so the player stays in recorded
+    // playback instead of dropping into the live/no-segment state.
     const foundIndex = findContainingSegmentIndex(segments, clickTimestamp);
+    const nextSegmentIndex = foundIndex !== -1
+      ? foundIndex
+      : findNearestSegmentIndex(segments, clickTimestamp);
 
     // Move cursor to click position and update segment index in a single atomic setState so
     // that currentTime is never skipped by the "time-only update" batching logic.  When the
@@ -130,8 +139,8 @@ export function TimelineSegments({ segments: propSegments }) {
     timelineState.setState({
       currentTime: clickTimestamp,
       prevCurrentTime: timelineState.currentTime,
-      isPlaying: false,
-      currentSegmentIndex: foundIndex
+      isPlaying: true,
+      currentSegmentIndex: nextSegmentIndex
     });
   };
 

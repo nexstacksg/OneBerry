@@ -112,41 +112,37 @@ export function TimelineCursor() {
       const hourRange = endHourRef.current - startHourRef.current;
       const hour = startHourRef.current + (positionPercent / 100) * hourRange;
       const timestamp = timelineState.timelineHourToTimestamp(hour, timelineState.selectedDate);
+      const previousTime = timelineState.currentTime;
 
       // Reset dragging state
       isDraggingRef.current = false;
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
 
-      // Release cursor control after a short delay
-      setTimeout(() => {
-        timelineState.userControllingCursor = false;
-        timelineState.setState({});
-      }, 100);
-
-      // Set the cursor time
-      timelineState.currentTime = timestamp;
-
       // Snap-guard: nudge away from segment start to prevent snap-back
+      let nextTimestamp = timestamp;
+      let nextSegmentIndex = findNearestSegmentIndex(timelineState.timelineSegments || [], timestamp);
       if (timelineState.timelineSegments && timelineState.timelineSegments.length > 0) {
         const segIndex = findContainingSegmentIndex(timelineState.timelineSegments, timestamp);
         const seg = segIndex !== -1 ? timelineState.timelineSegments[segIndex] : null;
         if (seg && (timestamp - seg.start_timestamp) < 1.0) {
-          timelineState.currentTime = seg.start_timestamp + 1.0;
+          nextTimestamp = seg.start_timestamp + 1.0;
         }
+
+        nextSegmentIndex = segIndex !== -1
+          ? segIndex
+          : findNearestSegmentIndex(timelineState.timelineSegments, timestamp);
       }
 
-      timelineState.prevCurrentTime = timelineState.currentTime;
-      timelineState.isPlaying = false;
-      timelineState.setState({});
-
-      // Find the segment at the drop position (exact match or closest)
-      const segs = timelineState.timelineSegments || [];
-      const containingIndex = findContainingSegmentIndex(segs, timestamp);
-      timelineState.currentSegmentIndex = containingIndex !== -1
-        ? containingIndex
-        : findNearestSegmentIndex(segs, timestamp);
-      timelineState.setState({});
+      timelineState.setState({
+        currentTime: nextTimestamp,
+        prevCurrentTime: previousTime,
+        isPlaying: true,
+        userControllingCursor: false,
+        preserveCursorPosition: false,
+        cursorPositionLocked: false,
+        currentSegmentIndex: nextSegmentIndex
+      });
     };
 
     // Add event listeners

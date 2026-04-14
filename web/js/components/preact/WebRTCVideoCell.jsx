@@ -99,6 +99,7 @@ export function WebRTCVideoCell({
   const [showRefreshConfirm, setShowRefreshConfirm] = useState(false);
   const [isFullscreenCell, setIsFullscreenCell] = useState(false);
   const [fullscreenPlayback, setFullscreenPlayback] = useState(null);
+  const [fullscreenPlaybackTimestamp, setFullscreenPlaybackTimestamp] = useState(null);
 
   // Backchannel (two-way audio) state
   const [isTalking, setIsTalking] = useState(false);
@@ -142,8 +143,14 @@ export function WebRTCVideoCell({
   const [localShowDetections, setLocalShowDetections] = useState(true);
   const showDetections = globalShowDetections && localShowDetections;
 
-  const handleFullscreenPreviewSelect = (sample) => setFullscreenPlayback(sample);
-  const handleReturnToLive = () => setFullscreenPlayback(null);
+  const handleFullscreenPreviewSelect = (sample) => {
+    setFullscreenPlayback(sample);
+    setFullscreenPlaybackTimestamp(sample?.timestamp ?? null);
+  };
+  const handleReturnToLive = () => {
+    setFullscreenPlayback(null);
+    setFullscreenPlaybackTimestamp(null);
+  };
 
 
   // Refs
@@ -183,6 +190,7 @@ export function WebRTCVideoCell({
   useEffect(() => {
     if (!isFullscreenCell && fullscreenPlayback) {
       setFullscreenPlayback(null);
+      setFullscreenPlaybackTimestamp(null);
     }
   }, [fullscreenPlayback, isFullscreenCell]);
 
@@ -211,6 +219,16 @@ export function WebRTCVideoCell({
     video.addEventListener('loadedmetadata', applySeek, { once: true });
     return () => video.removeEventListener('loadedmetadata', applySeek);
   }, [fullscreenPlayback]);
+
+  const handleFullscreenPlaybackTimeUpdate = () => {
+    const video = playbackVideoRef.current;
+    if (!fullscreenPlayback || !video) {
+      return;
+    }
+
+    const playbackStartTimestamp = (fullscreenPlayback.timestamp || 0) - (fullscreenPlayback.offsetSeconds || 0);
+    setFullscreenPlaybackTimestamp(playbackStartTimestamp + video.currentTime);
+  };
 
   // Initialize WebRTC connection when component mounts
   useEffect(() => {
@@ -1255,6 +1273,7 @@ export function WebRTCVideoCell({
           disablePictureInPicture
           src={fullscreenPlayback.playbackUrl}
           onEnded={handleReturnToLive}
+          onTimeUpdate={handleFullscreenPlaybackTimeUpdate}
           style={{
             width: '100%',
             height: 'auto',
@@ -1704,6 +1723,8 @@ export function WebRTCVideoCell({
         <FullscreenTimelineOverlay
           streamName={stream.name}
           isVisible={isFullscreenCell}
+          mode="dock"
+          playbackTimestamp={fullscreenPlaybackTimestamp}
           onPreviewSelect={handleFullscreenPreviewSelect}
           onReturnToLive={handleReturnToLive}
         />
