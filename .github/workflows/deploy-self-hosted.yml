@@ -20,6 +20,13 @@ jobs:
           # the build script checks for them
           bash scripts/build_web_vite.sh
 
+      - name: Prep Dependencies (llhttp)
+        run: |
+          # The backend build requires llhttp. If skip/fail download occurs,
+          # we use the local archive provided in the repository.
+          mkdir -p external/llhttp
+          tar -xzf llhttp.tar.gz -C external/llhttp --strip-components=1
+
       - name: Build Backend
         run: |
           # Build the C backend in release mode
