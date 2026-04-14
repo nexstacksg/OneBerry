@@ -6,7 +6,8 @@
 
 /* Additional custom styles */
 .page {
-  @apply bg-card text-card-foreground rounded-lg shadow p-4 mb-4;
+  @apply text-card-foreground rounded-xl shadow-md border border-border p-4 mb-4;
+  background: linear-gradient(155deg, hsl(var(--card) / 0.95), hsl(var(--card)) 48%, hsl(var(--background)));
 }
 
 .fullscreen-mode.page {
@@ -15,7 +16,7 @@
 
 /* Footer styles */
 footer {
-  @apply bg-card text-card-foreground py-3 px-4 flex justify-between items-center text-sm mt-4;
+  @apply bg-card text-card-foreground py-3 px-4 flex justify-between items-center text-sm mt-4 border-t border-border;
 }
 
 footer a {

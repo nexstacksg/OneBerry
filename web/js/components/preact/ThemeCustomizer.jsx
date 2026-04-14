@@ -89,8 +89,8 @@ export function ThemeCustomizer() {
   if (!mounted) {
     return (
       <div class="animate-pulse">
-        <div class="h-8 bg-gray-200 dark:bg-gray-700 rounded mb-4"></div>
-        <div class="h-32 bg-gray-200 dark:bg-gray-700 rounded"></div>
+        <div class="h-8 bg-muted rounded mb-4"></div>
+        <div class="h-32 bg-muted rounded"></div>
       </div>
     );
   }
@@ -257,4 +257,3 @@ export function ThemeCustomizer() {
     </div>
   );
 }
-

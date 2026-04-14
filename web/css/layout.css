@@ -12,8 +12,9 @@
 /* Header styles */
 header {
     @apply py-2 px-4 flex flex-col justify-between items-center shadow-md;
-    background-color: hsl(var(--card));
+    background: linear-gradient(120deg, hsl(var(--card)) 0%, hsl(var(--card) / 0.94) 100%);
     color: hsl(var(--card-foreground));
+    border-bottom: 1px solid hsl(var(--border) / 0.9);
     /* Ensure header is always on top and clickable */
     position: relative;
     z-index: 1000;
@@ -65,6 +66,10 @@ nav a.active {
 .user-menu a {
     @apply no-underline;
     color: hsl(var(--card-foreground));
+}
+
+.user-menu a:hover {
+  color: hsl(var(--primary));
 }
 
 /* Footer styles */
