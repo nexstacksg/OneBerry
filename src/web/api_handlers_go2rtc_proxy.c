@@ -114,6 +114,8 @@ static bool should_proxy_path(const char *path) {
     // Only proxy HLS streaming endpoints and health check
     // WebRTC endpoints are also proxied when accessed under /go2rtc for
     // browser-hosted deployments.
+    if (strcmp(path, "/go2rtc") == 0) return true;
+    if (strcmp(path, "/go2rtc/") == 0) return true;
     if (strstr(path, "/api/streams") != NULL) return true;   // Health check endpoint
     if (strstr(path, "/api/stream.m3u8") != NULL) return true;
     if (strstr(path, "/api/hls/") != NULL) return true;
@@ -161,13 +163,22 @@ void handle_go2rtc_proxy(const http_request_t *req, http_response_t *res) {
     // Build the target URL
     char url[2048];
     int port = g_config.go2rtc_api_port > 0 ? g_config.go2rtc_api_port : 1984;
+    const char *target_path = req->path;
 
-    if (req->query_string[0] != '\0') {
-        snprintf(url, sizeof(url), "http://127.0.0.1:%d%s?%s", port, req->path, req->query_string);
-    } else {
-        snprintf(url, sizeof(url), "http://127.0.0.1:%d%s", port, req->path);
+    if (strcmp(req->path, "/go2rtc") == 0 || strcmp(req->path, "/go2rtc/") == 0) {
+        target_path = "/go2rtc/api/streams";
     }
 
+    if (req->query_string[0] != '\0') {
+        snprintf(url, sizeof(url), "http://127.0.0.1:%d%s?%s", port, target_path, req->query_string);
+    } else {
+        snprintf(url, sizeof(url), "http://127.0.0.1:%d%s", port, target_path);
+    }
+
+    if (strcmp(req->path, target_path) != 0) {
+        log_debug("go2rtc proxy: normalized path %s -> %s (%s %s)", req->path, target_path,
+                  req->method_str, url);
+    }
     log_debug("go2rtc proxy: %s %s -> %s", req->method_str, req->path, url);
 
     // Get connection handle (libuv-specific)

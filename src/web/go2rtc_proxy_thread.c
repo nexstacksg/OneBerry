@@ -273,11 +273,12 @@ static void proxy_async_cb(uv_async_t *handle) {
 
 bool go2rtc_proxy_path_matches(const char *path) {
     if (!path) return false;
-    // Only intercept paths registered under the /go2rtc/ prefix.
+    // Intercept legacy go2rtc web client routes and streaming endpoints.
     // lightNVR has its own /api/streams handler for stream management — do NOT
     // intercept those.  The go2rtc proxy handlers are registered at:
     //   /go2rtc/api/streams, /go2rtc/api/stream.m3u8,
     //   /go2rtc/api/hls/*, /go2rtc/api/frame.jpeg
+    if (strcmp(path, "/go2rtc") == 0) return true;
     return strncmp(path, "/go2rtc/", 8) == 0;
 }
 

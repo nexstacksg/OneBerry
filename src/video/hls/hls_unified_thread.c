@@ -2376,20 +2376,14 @@ int start_hls_unified_stream(const char *stream_name) {
             // Falling back to config.url — inject credentials below
         }
 
-        // When audio recording is disabled, append ?video to the go2rtc RTSP URL
-        // to request only the video track. Without this, go2rtc defaults to
-        // serving video+audio which triggers phantom audio track issues (FFmpeg
-        // sub-processes trying to transcode Opus audio) that corrupt the stream.
+        // Keep go2rtc URLs clean for HLS input as well; query selectors are
+        // removed to avoid 404 behavior in mixed go2rtc versions.
         if (rtsp_url_success && !config.record_audio) {
-            size_t url_len = strlen(actual_url);
-            const char *suffix = "?video";
-            size_t suffix_len = strlen(suffix);
-            if (url_len + suffix_len < sizeof(actual_url)) {
-                strncat(actual_url, suffix, sizeof(actual_url) - url_len - 1);
-                log_info("Audio recording disabled for %s, using video-only go2rtc RTSP URL for HLS",
-                         stream_name);
-            } else {
-                log_warn("RTSP URL too long to append ?video selector for stream %s", stream_name);
+            char *query = strchr(actual_url, '?');
+            if (query) {
+                *query = '\0';
+                log_info("Stripped query selector from go2rtc RTSP URL for stream %s: %s",
+                         stream_name, actual_url);
             }
         }
     }
