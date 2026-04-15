@@ -45,6 +45,11 @@ Production helper that installs go2rtc if missing, creates a compatibility binar
 sudo bash scripts/fix_go2rtc_production.sh [--version VERSION] [--service lightnvr]
 ```
 
+The helper now:
+- auto-detects `base_path` from `/etc/lightnvr/go2rtc/go2rtc.yaml`
+- waits briefly for `/go2rtc/api/streams` to become reachable before reporting success
+- shows go2rtc logs when startup readiness checks fail
+
 ### `list_go2rtc_client_urls.sh`
 Lists live camera stream names from the LightNVR proxy endpoint and prints ready-to-open `/go2rtc/...` URLs (for port-8080-only access).
 

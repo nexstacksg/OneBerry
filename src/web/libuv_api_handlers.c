@@ -216,11 +216,18 @@ int register_all_libuv_handlers(http_server_handle_t server) {
     // Pattern uses # for single-segment wildcards: /hls/{stream_name}/{filename}
     http_server_register_handler(server, "/hls/#/#", "GET", handle_direct_hls_request);
 
-    // go2rtc Streaming Proxy - SCOPED to HLS streaming endpoints only
+    // go2rtc Streaming Proxy
     // This provides buffered pass-through with concurrency limiting
-    // WebRTC connects directly to go2rtc for lower latency
+    // WebRTC routes are also proxied here so clients can use /go2rtc on
+    // HTTPS without opening go2rtc ports directly.
     // Streams list endpoint (for health check)
     http_server_register_handler(server, "/go2rtc/api/streams", "GET", handle_go2rtc_proxy);
+    // WebRTC SDP endpoint (POST + preflight)
+    http_server_register_handler(server, "/go2rtc/api/webrtc", "POST", handle_go2rtc_proxy);
+    http_server_register_handler(server, "/go2rtc/api/webrtc", "OPTIONS", handle_go2rtc_proxy_options);
+    // MSE/WebSocket endpoint
+    http_server_register_handler(server, "/go2rtc/api/ws", "GET", handle_go2rtc_proxy);
+    http_server_register_handler(server, "/go2rtc/api/ws", "OPTIONS", handle_go2rtc_proxy_options);
     // HLS manifest endpoint
     http_server_register_handler(server, "/go2rtc/api/stream.m3u8", "GET", handle_go2rtc_proxy);
     // HLS segments (fMP4 and MPEG-TS)
@@ -258,4 +265,3 @@ int register_static_file_handler(http_server_handle_t server) {
 
     return 0;
 }
-
