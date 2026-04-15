@@ -45,6 +45,20 @@ Production helper that installs go2rtc if missing, creates a compatibility binar
 sudo bash scripts/fix_go2rtc_production.sh [--version VERSION] [--service lightnvr]
 ```
 
+### `list_go2rtc_client_urls.sh`
+Lists live camera stream names from the LightNVR proxy endpoint and prints ready-to-open `/go2rtc/...` URLs (for port-8080-only access).
+
+```bash
+sudo bash scripts/list_go2rtc_client_urls.sh [--host HOST] [--port PORT]
+```
+
+Examples:
+
+```bash
+scripts/list_go2rtc_client_urls.sh --host 172.16.200.108 --port 8080
+scripts/list_go2rtc_client_urls.sh --host 172.16.200.108 --scheme https --port 8443
+```
+
 ### `install_web_assets.sh`
 Builds (if needed) and installs web interface files to the web root.
 
@@ -125,6 +139,12 @@ sudo systemctl restart lightnvr
 
 ```bash
 sudo bash scripts/fix_go2rtc_production.sh
+```
+
+### Generate 8080-Only Camera URLs for Clients
+
+```bash
+scripts/list_go2rtc_client_urls.sh --host 172.16.200.108 --port 8080
 ```
 
 ### Updating Application Only
