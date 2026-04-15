@@ -11,12 +11,16 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ifaddrs.h>
+#include <arpa/inet.h>
 #include <unistd.h>
 #include <signal.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <sys/prctl.h>
+#include <netinet/in.h>
+#include <net/if.h>
 #include <fcntl.h>
 #include <dirent.h>
 #include <errno.h>
@@ -122,6 +126,75 @@ static bool read_proc_cmdline(pid_t pid, char *cmdline, size_t cmdline_size, siz
     }
 
     return true;
+}
+
+/**
+ * @brief Select a local IPv4 address for WebRTC candidates when external_ip is unset.
+ *
+ * Uses the first non-loopback interface with an IPv4 address, preferring
+ * non-container style interface names first and falling back to the first
+ * available IPv4 address when needed.
+ */
+static bool go2rtc_get_local_ipv4_candidate(char *ip_buffer, size_t ip_buffer_size) {
+    if (!ip_buffer || ip_buffer_size == 0) {
+        return false;
+    }
+    ip_buffer[0] = '\0';
+
+    struct ifaddrs *ifaddr = NULL;
+    if (getifaddrs(&ifaddr) != 0) {
+        log_warn("go2rtc config: failed to enumerate network interfaces for local candidate");
+        return false;
+    }
+
+    char fallback[INET_ADDRSTRLEN] = {0};
+    bool has_fallback = false;
+    bool found = false;
+
+    for (struct ifaddrs *ifa = ifaddr; ifa != NULL; ifa = ifa->ifa_next) {
+        if (!ifa->ifa_addr || ifa->ifa_addr->sa_family != AF_INET) {
+            continue;
+        }
+        if (!ifa->ifa_name || strcmp(ifa->ifa_name, "lo") == 0 || (ifa->ifa_flags & IFF_LOOPBACK)) {
+            continue;
+        }
+
+        struct sockaddr_in *addr = (struct sockaddr_in *)ifa->ifa_addr;
+        char ip[INET_ADDRSTRLEN] = {0};
+        if (!inet_ntop(AF_INET, &addr->sin_addr, ip, sizeof(ip))) {
+            continue;
+        }
+        if (strncmp(ip, "127.", 4) == 0) {
+            continue;
+        }
+        if (!has_fallback) {
+            strncpy(fallback, ip, sizeof(fallback) - 1);
+            has_fallback = true;
+        }
+
+        bool skip_virtual = (strncmp(ifa->ifa_name, "docker", 6) == 0) ||
+                            (strncmp(ifa->ifa_name, "veth", 4) == 0) ||
+                            (strncmp(ifa->ifa_name, "br-", 3) == 0) ||
+                            (strncmp(ifa->ifa_name, "tun", 3) == 0) ||
+                            (strncmp(ifa->ifa_name, "tap", 3) == 0);
+
+        if (!found && (ifa->ifa_flags & IFF_UP) && !skip_virtual) {
+            strncpy(ip_buffer, ip, ip_buffer_size - 1);
+            ip_buffer[ip_buffer_size - 1] = '\0';
+            found = true;
+            break;
+        }
+    }
+
+    freeifaddrs(ifaddr);
+
+    if (!found && has_fallback) {
+        strncpy(ip_buffer, fallback, ip_buffer_size - 1);
+        ip_buffer[ip_buffer_size - 1] = '\0';
+        found = true;
+    }
+
+    return found;
 }
 
 /**
@@ -617,9 +690,12 @@ bool go2rtc_process_generate_config(const char *config_path, int api_port) {
     if (global_config->go2rtc_webrtc_enabled) {
         fprintf(config_file, "\nwebrtc:\n");
 
+        int webrtc_port = global_config->go2rtc_webrtc_listen_port > 0 ?
+                          global_config->go2rtc_webrtc_listen_port : 8555;
+
         // WebRTC listen port
-        if (global_config->go2rtc_webrtc_listen_port > 0) {
-            fprintf(config_file, "  listen: \":%d\"\n", global_config->go2rtc_webrtc_listen_port);
+        if (webrtc_port > 0) {
+            fprintf(config_file, "  listen: \":%d\"\n", webrtc_port);
         }
 
         // ICE servers configuration
@@ -683,13 +759,15 @@ bool go2rtc_process_generate_config(const char *config_path, int api_port) {
         // If external IP is specified, use it
         if (global_config->go2rtc_external_ip[0] != '\0') {
             fprintf(config_file, "    - \"%s:%d\"\n",
-                    global_config->go2rtc_external_ip,
-                    global_config->go2rtc_webrtc_listen_port > 0 ? global_config->go2rtc_webrtc_listen_port : 8555);
+                    global_config->go2rtc_external_ip, webrtc_port);
         } else {
-            // Auto-detect external IP using wildcard
-            // Use separate entries for IPv4 and IPv6 to handle both
-            fprintf(config_file, "    - \"*:%d\"\n",
-                    global_config->go2rtc_webrtc_listen_port > 0 ? global_config->go2rtc_webrtc_listen_port : 8555);
+            char detected_ip[INET_ADDRSTRLEN] = {0};
+            if (go2rtc_get_local_ipv4_candidate(detected_ip, sizeof(detected_ip))) {
+                fprintf(config_file, "    - \"%s:%d\"\n", detected_ip, webrtc_port);
+            } else {
+                // Auto-detect fallback to wildcard
+                fprintf(config_file, "    - \"*:%d\"\n", webrtc_port);
+            }
         }
 
         // Add STUN server as candidate for ICE gathering

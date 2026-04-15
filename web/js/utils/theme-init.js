@@ -71,6 +71,12 @@ export const COLOR_THEMES = {
   }
 };
 
+const VISIBLE_THEME_IDS = ['default', 'oneberry'];
+
+function resolveVisibleThemeId(colorTheme) {
+  return VISIBLE_THEME_IDS.includes(colorTheme) ? colorTheme : 'default';
+}
+
 /**
  * Apply theme colors to CSS variables
  * @param {boolean} isDark - Whether dark mode is active
@@ -79,7 +85,7 @@ export const COLOR_THEMES = {
  */
 export function applyThemeColors(isDark, colorTheme, colorIntensity) {
   const root = document.documentElement;
-  const selectedTheme = COLOR_THEMES[colorTheme] || COLOR_THEMES.default;
+  const selectedTheme = COLOR_THEMES[resolveVisibleThemeId(colorTheme)] || COLOR_THEMES.default;
   const themeColors = isDark ? selectedTheme.dark : selectedTheme.light;
   const intensity = colorIntensity / 100;
 
@@ -177,45 +183,27 @@ export function applyThemeColors(isDark, colorTheme, colorIntensity) {
  */
 export function initTheme() {
   try {
-    // Get user preferences from localStorage
-    const savedTheme = localStorage.getItem('lightnvr-theme');
     const savedColorIntensity = localStorage.getItem('lightnvr-color-intensity');
     const savedColorTheme = localStorage.getItem('lightnvr-color-theme');
-    const systemPrefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    const colorTheme = resolveVisibleThemeId(savedColorTheme);
 
-    // Determine final theme
-    let finalTheme = 'light'; // default
-    if (savedTheme) {
-      finalTheme = savedTheme;
-    } else if (systemPrefersDark) {
-      finalTheme = 'dark';
-    }
-
-    // Apply theme class immediately
-    if (finalTheme === 'dark') {
-      document.documentElement.classList.add('dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-    }
+    document.documentElement.classList.remove('dark');
+    localStorage.setItem('lightnvr-theme', 'light');
 
     // Apply custom color theme and intensity if saved
-    if (savedColorIntensity && savedColorTheme) {
-      const colorTheme = savedColorTheme in COLOR_THEMES ? savedColorTheme : 'default';
+    if (savedColorIntensity) {
       const colorIntensity = parseInt(savedColorIntensity) || 50;
-      const isDark = finalTheme === 'dark';
-
-      applyThemeColors(isDark, colorTheme, colorIntensity);
+      applyThemeColors(false, colorTheme, colorIntensity);
     }
+
+    localStorage.setItem('lightnvr-color-theme', colorTheme);
 
     // Set a flag that preferences have been applied
     window.__LIGHTNVR_THEME_APPLIED__ = true;
 
   } catch (e) {
-    // Fallback to system preference if anything fails
     console.warn('Theme initialization failed:', e);
-    if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
-      document.documentElement.classList.add('dark');
-    }
+    document.documentElement.classList.remove('dark');
   }
 }
 

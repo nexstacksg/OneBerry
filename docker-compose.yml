@@ -20,6 +20,12 @@ services:
       # Timezone configuration
       - TZ=UTC  # Change to your timezone (e.g., America/New_York, Europe/London)
 
+      # Single-network (LAN) deployments:
+      # Set this to your server LAN IP so go2rtc announces the reachable host.
+      # - LIGHTNVR_GO2RTC_EXTERNAL_IP=192.168.1.100
+      # Keep STUN off for pure same-network use, or on for WAN/inbound firewall/NAT.
+      # - LIGHTNVR_GO2RTC_STUN_ENABLED=false
+
       # go2rtc configuration persistence
       # Set to 'false' to let go2rtc regenerate config on each restart
       - GO2RTC_CONFIG_PERSIST=true
@@ -38,4 +44,3 @@ services:
 networks:
   lightnvr:
     driver: bridge
-
