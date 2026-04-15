@@ -5,6 +5,9 @@ services:
       pull: true
     container_name: lightnvr
     restart: unless-stopped
+    # For same-LAN camera and local WebRTC visibility in production, use host mode.
+    # Uncomment only if you're comfortable exposing all host ports used by the app.
+    # network_mode: host
     ports:
       - "8080:8080"     # Web UI
       - "8554:8554"     # RTSP
@@ -23,6 +26,10 @@ services:
       # Single-network (LAN) deployments:
       # Set this to your server LAN IP so go2rtc announces the reachable host.
       # - LIGHTNVR_GO2RTC_EXTERNAL_IP=192.168.1.100
+      # Optional: pin LAN subnet used for auto-detected WebRTC candidates
+      # If set, go2rtc will prefer the local IP in this CIDR.
+      # - LIGHTNVR_GO2RTC_PREFERRED_NETWORK=192.168.1.0/24
+      # You can also set LIGHTNVR_ONVIF_NETWORK=192.168.1.0/24 to reuse same value.
       # Keep STUN off for pure same-network use, or on for WAN/inbound firewall/NAT.
       # - LIGHTNVR_GO2RTC_STUN_ENABLED=false
 

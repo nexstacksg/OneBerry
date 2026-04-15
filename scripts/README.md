@@ -38,6 +38,13 @@ Downloads and installs go2rtc binary (opensensor fork with memory leak fixes).
 sudo bash scripts/install_go2rtc.sh [-d DIR] [-c DIR] [-v VERSION]
 ```
 
+### `fix_go2rtc_production.sh`
+Production helper that installs go2rtc if missing, creates a compatibility binary symlink, restarts LightNVR, and verifies the API.
+
+```bash
+sudo bash scripts/fix_go2rtc_production.sh [--version VERSION] [--service lightnvr]
+```
+
 ### `install_web_assets.sh`
 Builds (if needed) and installs web interface files to the web root.
 
@@ -112,6 +119,12 @@ sudo systemctl enable lightnvr
 bash scripts/build_web_vite.sh
 sudo bash scripts/install_web_assets.sh
 sudo systemctl restart lightnvr
+```
+
+### Recover go2rtc on existing production host
+
+```bash
+sudo bash scripts/fix_go2rtc_production.sh
 ```
 
 ### Updating Application Only
