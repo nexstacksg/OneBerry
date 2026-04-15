@@ -25,6 +25,7 @@
 #include <dirent.h>
 #include <errno.h>
 #include <limits.h>
+#include <stdint.h>
 #include <curl/curl.h>
 
 // Define PATH_MAX if not defined
@@ -135,6 +136,72 @@ static bool read_proc_cmdline(pid_t pid, char *cmdline, size_t cmdline_size, siz
  * non-container style interface names first and falling back to the first
  * available IPv4 address when needed.
  */
+static bool go2rtc_parse_ipv4_cidr(const char *network_cidr, uint32_t *network, uint8_t *prefix) {
+    if (!network_cidr || !*network_cidr || !network || !prefix) {
+        return false;
+    }
+
+    char cidr_copy[64];
+    const char *slash = strchr(network_cidr, '/');
+
+    if (slash == NULL) {
+        struct in_addr parsed;
+        if (inet_pton(AF_INET, network_cidr, &parsed) != 1) {
+            return false;
+        }
+        *network = ntohl(parsed.s_addr);
+        *prefix = 32;
+        return true;
+    }
+
+    if ((size_t)(slash - network_cidr) >= sizeof(cidr_copy)) {
+        return false;
+    }
+    memcpy(cidr_copy, network_cidr, (size_t)(slash - network_cidr));
+    cidr_copy[slash - network_cidr] = '\0';
+
+    long p = strtol(slash + 1, NULL, 10);
+    if (p < 1 || p > 32) {
+        return false;
+    }
+
+    struct in_addr parsed;
+    if (inet_pton(AF_INET, cidr_copy, &parsed) != 1) {
+        return false;
+    }
+
+    *network = ntohl(parsed.s_addr);
+    *prefix = (uint8_t)p;
+    return true;
+}
+
+static bool go2rtc_ip_matches_network(const char *ip, const char *network_cidr) {
+    if (!ip || !network_cidr || !*ip || !*network_cidr) {
+        return false;
+    }
+
+    uint32_t network = 0;
+    uint8_t prefix = 0;
+    if (!go2rtc_parse_ipv4_cidr(network_cidr, &network, &prefix)) {
+        return false;
+    }
+
+    struct in_addr ip_addr;
+    if (inet_pton(AF_INET, ip, &ip_addr) != 1) {
+        return false;
+    }
+
+    uint32_t ip_host = ntohl(ip_addr.s_addr);
+    uint32_t mask = 0;
+    if (prefix == 32) {
+        mask = 0xFFFFFFFFu;
+    } else if (prefix > 0) {
+        mask = 0xFFFFFFFFu << (32 - prefix);
+    }
+
+    return (ip_host & mask) == (network & mask);
+}
+
 static bool go2rtc_get_local_ipv4_candidate(char *ip_buffer, size_t ip_buffer_size) {
     if (!ip_buffer || ip_buffer_size == 0) {
         return false;
@@ -147,9 +214,30 @@ static bool go2rtc_get_local_ipv4_candidate(char *ip_buffer, size_t ip_buffer_si
         return false;
     }
 
+    const char *preferred_network = getenv("LIGHTNVR_GO2RTC_PREFERRED_NETWORK");
+    if (!preferred_network || preferred_network[0] == '\0') {
+        preferred_network = getenv("LIGHTNVR_ONVIF_NETWORK");
+    }
+
+    bool has_preferred_network = false;
+    if (preferred_network && preferred_network[0] != '\0' && strcmp(preferred_network, "auto") != 0) {
+        uint32_t parsed_network;
+        uint8_t parsed_prefix;
+        if (go2rtc_parse_ipv4_cidr(preferred_network, &parsed_network, &parsed_prefix)) {
+            has_preferred_network = true;
+            log_info("go2rtc config: applying preferred network for local candidate selection: %s",
+                     preferred_network);
+        } else {
+            log_warn("go2rtc config: invalid LIGHTNVR_GO2RTC_PREFERRED_NETWORK or LIGHTNVR_ONVIF_NETWORK value: %s",
+                     preferred_network);
+            preferred_network = NULL;
+        }
+    }
+
     char fallback[INET_ADDRSTRLEN] = {0};
     bool has_fallback = false;
     bool found = false;
+    bool found_in_preferred = false;
 
     for (struct ifaddrs *ifa = ifaddr; ifa != NULL; ifa = ifa->ifa_next) {
         if (!ifa->ifa_addr || ifa->ifa_addr->sa_family != AF_INET) {
@@ -178,6 +266,17 @@ static bool go2rtc_get_local_ipv4_candidate(char *ip_buffer, size_t ip_buffer_si
                             (strncmp(ifa->ifa_name, "tun", 3) == 0) ||
                             (strncmp(ifa->ifa_name, "tap", 3) == 0);
 
+        bool in_preferred_network = has_preferred_network &&
+                                    go2rtc_ip_matches_network(ip, preferred_network);
+
+        if (in_preferred_network && (ifa->ifa_flags & IFF_UP) && !skip_virtual) {
+            strncpy(ip_buffer, ip, ip_buffer_size - 1);
+            ip_buffer[ip_buffer_size - 1] = '\0';
+            found_in_preferred = true;
+            found = true;
+            break;
+        }
+
         if (!found && (ifa->ifa_flags & IFF_UP) && !skip_virtual) {
             strncpy(ip_buffer, ip, ip_buffer_size - 1);
             ip_buffer[ip_buffer_size - 1] = '\0';
@@ -187,6 +286,10 @@ static bool go2rtc_get_local_ipv4_candidate(char *ip_buffer, size_t ip_buffer_si
     }
 
     freeifaddrs(ifaddr);
+
+    if (!found && has_preferred_network && !found_in_preferred) {
+        log_warn("go2rtc config: no interface found matching preferred network '%s', using fallback candidate", preferred_network);
+    }
 
     if (!found && has_fallback) {
         strncpy(ip_buffer, fallback, ip_buffer_size - 1);

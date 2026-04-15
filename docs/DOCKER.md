@@ -233,6 +233,9 @@ services:
 | `LIGHTNVR_AUTO_INIT` | `true` | Auto-initialize config files on first run |
 | `LIGHTNVR_WEB_ROOT` | `/var/lib/lightnvr/web` | Web assets directory |
 | `LIGHTNVR_ONVIF_NETWORK` | (none) | Override ONVIF discovery network (e.g., `192.168.1.0/24`) |
+| `LIGHTNVR_GO2RTC_EXTERNAL_IP` | (none) | Explicit WebRTC host IP for go2rtc candidates |
+| `LIGHTNVR_GO2RTC_PREFERRED_NETWORK` | (none) | Optional LAN CIDR to force candidate selection (e.g., `192.168.1.0/24`) |
+| `LIGHTNVR_GO2RTC_STUN_ENABLED` | `true` | Set to `false` on pure same-LAN deployments |
 
 ### Example Usage
 
@@ -242,6 +245,7 @@ environment:
   - GO2RTC_CONFIG_PERSIST=true
   - LIGHTNVR_AUTO_INIT=true
   - LIGHTNVR_ONVIF_NETWORK=192.168.1.0/24
+  - LIGHTNVR_GO2RTC_PREFERRED_NETWORK=192.168.1.0/24
 ```
 
 ### ONVIF Discovery in Containers
@@ -261,6 +265,21 @@ services:
 2. `LIGHTNVR_ONVIF_NETWORK` environment variable
 3. `discovery_network` in config file (`[onvif]` section)
 4. Auto-detection (skips Docker interfaces)
+
+If go2rtc is serving cameras on the same LAN as the server, set a preferred LAN network so go2rtc candidates match client-reachable IPs:
+
+```yaml
+environment:
+  - LIGHTNVR_GO2RTC_PREFERRED_NETWORK=192.168.1.0/24
+  - LIGHTNVR_GO2RTC_STUN_ENABLED=false
+```
+
+The candidate selection uses this network in this order:
+
+1. `LIGHTNVR_GO2RTC_PREFERRED_NETWORK`
+2. `LIGHTNVR_ONVIF_NETWORK`
+3. Auto-detect first non-virtual IPv4 interface
+4. Wildcard fallback
 
 **Finding Your Network:**
 ```bash
@@ -540,4 +559,3 @@ docker run -d \
 For issues and questions:
 - GitHub Issues: https://github.com/opensensor/lightNVR/issues
 - Documentation: https://github.com/opensensor/lightNVR/tree/main/docs
-
