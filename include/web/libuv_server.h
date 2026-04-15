@@ -95,6 +95,16 @@ typedef struct libuv_connection {
     char deferred_content_type[128];    // Deferred content type (empty = auto-detect)
     char deferred_extra_headers[512];   // Deferred extra headers (empty = none)
     write_complete_action_t deferred_action; // Action to take after async response completes
+
+    // go2rtc websocket tunneling state
+    bool ws_tunnel_active;             // true while websocket tunnel is established
+    bool ws_upstream_connected;        // true once /go2rtc websocket backend is connected
+    bool ws_upstream_initialized;      // true after uv_tcp_init on ws_upstream
+    bool ws_tunnel_closing;            // guard to avoid double-closing tunnel
+    char *ws_handshake_buffer;         // Cached WebSocket request forwarded to backend
+    size_t ws_handshake_length;        // Length of ws_handshake_buffer
+    uv_tcp_t ws_upstream;              // Upstream socket for /go2rtc/api/ws
+    uv_connect_t ws_connect;           // Pending/connect context
 } libuv_connection_t;
 
 /**
@@ -178,4 +188,3 @@ void libuv_connection_close(libuv_connection_t *conn);
 #endif /* HTTP_BACKEND_LIBUV */
 
 #endif /* LIBUV_SERVER_H */
-

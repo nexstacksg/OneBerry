@@ -9,6 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <ctype.h>
 #include <sys/stat.h>
 #include <llhttp.h>
 #include <uv.h>
@@ -18,6 +19,7 @@
 #include "web/libuv_connection.h"
 #include "web/go2rtc_proxy_thread.h"
 #include "web/api_handlers_health.h"
+#include "core/config.h"
 #define LOG_COMPONENT "HTTP"
 #include "core/logger.h"
 
@@ -31,6 +33,24 @@ static int on_header_value(llhttp_t *parser, const char *at, size_t length);
 static int on_headers_complete(llhttp_t *parser);
 static int on_body(llhttp_t *parser, const char *at, size_t length);
 static int on_message_complete(llhttp_t *parser);
+
+// WebSocket tunneling helpers for go2rtc
+typedef struct {
+    uv_write_t req;                     // Write request
+    libuv_connection_t *conn;           // Owning connection
+    char *buffer;                       // Buffer to forward; owned by this context
+} libuv_ws_relay_ctx_t;
+
+static bool header_value_has_token(const char *value, const char *token);
+static bool is_go2rtc_websocket_request(libuv_connection_t *conn);
+static int ws_build_handshake_request(libuv_connection_t *conn);
+static int start_go2rtc_websocket_tunnel(libuv_connection_t *conn);
+static void libuv_ws_alloc_cb(uv_handle_t *handle, size_t suggested_size, uv_buf_t *buf);
+static void libuv_ws_client_read_cb(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf);
+static void libuv_ws_upstream_read_cb(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf);
+static void libuv_ws_connect_cb(uv_connect_t *req, int status);
+static void libuv_ws_relay_write_cb(uv_write_t *req, int status);
+static void libuv_ws_tunnel_close(libuv_connection_t *conn);
 
 /**
  * @brief Create a new connection
@@ -141,6 +161,10 @@ void libuv_connection_close(libuv_connection_t *conn) {
         uv_read_stop((uv_stream_t *)&conn->handle);
         uv_close((uv_handle_t *)&conn->handle, libuv_close_cb);
     }
+
+    if (conn->ws_tunnel_active) {
+        libuv_ws_tunnel_close(conn);
+    }
 }
 
 /**
@@ -150,12 +174,37 @@ void libuv_connection_destroy(libuv_connection_t *conn) {
     if (!conn) return;
     
     http_response_free(&conn->response);
+
+    if (conn->ws_handshake_buffer) {
+        safe_free(conn->ws_handshake_buffer);
+        conn->ws_handshake_buffer = NULL;
+        conn->ws_handshake_length = 0;
+    }
     
     if (conn->recv_buffer) {
         safe_free(conn->recv_buffer);
     }
     
     safe_free(conn);
+}
+
+static void libuv_ws_tunnel_close(libuv_connection_t *conn) {
+    if (!conn || conn->ws_tunnel_closing) return;
+    conn->ws_tunnel_closing = true;
+    conn->ws_tunnel_active = false;
+    conn->ws_upstream_connected = false;
+
+    if (conn->ws_upstream_initialized && !uv_is_closing((uv_handle_t *)&conn->ws_upstream)) {
+        uv_read_stop((uv_stream_t *)&conn->ws_upstream);
+        uv_close((uv_handle_t *)&conn->ws_upstream, NULL);
+    }
+
+    if (conn->ws_handshake_buffer) {
+        safe_free(conn->ws_handshake_buffer);
+        conn->ws_handshake_buffer = NULL;
+        conn->ws_handshake_length = 0;
+    }
+    conn->ws_upstream_initialized = false;
 }
 
 /**
@@ -203,6 +252,350 @@ void libuv_alloc_cb(uv_handle_t *handle, size_t suggested_size, uv_buf_t *buf) {
     
     buf->base = conn->recv_buffer + conn->recv_buffer_used;
     buf->len = available;
+}
+
+static bool header_value_has_token(const char *value, const char *token) {
+    if (!value || !token || token[0] == '\0') {
+        return false;
+    }
+
+    size_t token_len = strlen(token);
+    const char *cursor = value;
+
+    while (*cursor != '\0') {
+        while (*cursor == ' ' || *cursor == '\t' || *cursor == ',') {
+            cursor++;
+        }
+
+        const char *token_start = cursor;
+        while (*cursor != '\0' && *cursor != ',' && *cursor != ';') {
+            cursor++;
+        }
+
+        size_t segment_len = (size_t)(cursor - token_start);
+        const char *segment_end = cursor;
+        while (segment_len > 0 &&
+               (segment_end[-1] == ' ' || segment_end[-1] == '\t' ||
+                segment_end[-1] == ';')) {
+            segment_len--;
+            segment_end--;
+        }
+
+        if (segment_len == token_len &&
+            strncasecmp(token_start, token, token_len) == 0) {
+            return true;
+        }
+
+        if (*cursor == ',') {
+            cursor++;
+        }
+    }
+
+    return false;
+}
+
+static bool is_go2rtc_websocket_request(libuv_connection_t *conn) {
+    if (!conn) {
+        return false;
+    }
+
+    if (strcmp(conn->request.path, "/go2rtc/api/ws") != 0) {
+        return false;
+    }
+
+    if (strcmp(conn->request.method_str, "GET") != 0) {
+        return false;
+    }
+
+    const char *upgrade = http_request_get_header(&conn->request, "Upgrade");
+    const char *connection = http_request_get_header(&conn->request, "Connection");
+    if (!upgrade || !connection) {
+        return false;
+    }
+
+    return header_value_has_token(upgrade, "websocket") &&
+           header_value_has_token(connection, "upgrade");
+}
+
+static int ws_build_handshake_request(libuv_connection_t *conn) {
+    if (!conn) {
+        return -1;
+    }
+
+    int port = g_config.go2rtc_api_port > 0 ? g_config.go2rtc_api_port : 1984;
+    const char *path = conn->request.uri[0] != '\0' ? conn->request.uri : conn->request.path;
+    if (path[0] == '\0') {
+        return -1;
+    }
+
+    char *buffer = safe_malloc(65536);
+    if (!buffer) {
+        return -1;
+    }
+
+    size_t len = 0;
+    int wrote = snprintf(buffer + len, 65536 - len,
+                        "GET %s HTTP/1.1\r\nHost: 127.0.0.1:%d\r\n",
+                        path, port);
+    if (wrote < 0 || (size_t)wrote >= (65536 - len)) {
+        safe_free(buffer);
+        return -1;
+    }
+    len += (size_t)wrote;
+
+    for (int i = 0; i < conn->request.num_headers; i++) {
+        const char *name = conn->request.headers[i].name;
+        const char *value = conn->request.headers[i].value;
+        if (!name[0]) {
+            continue;
+        }
+
+        if (strcasecmp(name, "Host") == 0 ||
+            strcasecmp(name, "Connection") == 0 ||
+            strcasecmp(name, "Upgrade") == 0) {
+            continue;
+        }
+
+        wrote = snprintf(buffer + len, 65536 - len, "%s: %s\r\n", name, value);
+        if (wrote < 0 || (size_t)wrote >= (65536 - len)) {
+            safe_free(buffer);
+            return -1;
+        }
+        len += (size_t)wrote;
+    }
+
+    wrote = snprintf(buffer + len, 65536 - len, "Connection: Upgrade\r\nUpgrade: websocket\r\n\r\n");
+    if (wrote < 0 || (size_t)wrote >= (65536 - len)) {
+        safe_free(buffer);
+        return -1;
+    }
+    len += (size_t)wrote;
+
+    conn->ws_handshake_buffer = buffer;
+    conn->ws_handshake_length = len;
+    return 0;
+}
+
+static void libuv_ws_relay_write_cb(uv_write_t *req, int status) {
+    libuv_ws_relay_ctx_t *ctx = (libuv_ws_relay_ctx_t *)req;
+    libuv_connection_t *conn = ctx ? ctx->conn : NULL;
+
+    if (status < 0) {
+        log_warn("libuv websocket relay write failed: %s", uv_strerror(status));
+        if (conn) {
+            libuv_ws_tunnel_close(conn);
+        }
+    }
+
+    if (ctx) {
+        if (ctx->buffer) {
+            safe_free(ctx->buffer);
+        }
+        safe_free(ctx);
+    }
+}
+
+static int libuv_ws_send_to_upstream(libuv_connection_t *conn, char *payload, size_t payload_len) {
+    if (!conn || !payload || payload_len == 0 || conn->ws_tunnel_closing) {
+        if (payload) {
+            safe_free(payload);
+        }
+        return -1;
+    }
+
+    if (!conn->ws_tunnel_active || !conn->ws_upstream_connected ||
+        uv_is_closing((uv_handle_t *)&conn->ws_upstream)) {
+        safe_free(payload);
+        return -1;
+    }
+
+    libuv_ws_relay_ctx_t *ctx = safe_malloc(sizeof(*ctx));
+    if (!ctx) {
+        safe_free(payload);
+        return -1;
+    }
+    ctx->conn = conn;
+    ctx->buffer = payload;
+
+    uv_buf_t buf = uv_buf_init(payload, payload_len);
+    int r = uv_write(&ctx->req, (uv_stream_t *)&conn->ws_upstream, &buf, 1,
+                     libuv_ws_relay_write_cb);
+    if (r != 0) {
+        log_error("libuv_ws_send_to_upstream: uv_write failed: %s", uv_strerror(r));
+        safe_free(payload);
+        safe_free(ctx);
+        libuv_ws_tunnel_close(conn);
+        return -1;
+    }
+    return 0;
+}
+
+static void libuv_ws_client_read_cb(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
+    libuv_connection_t *conn = (libuv_connection_t *)stream->data;
+    if (!conn) {
+        if (buf && buf->base) {
+            safe_free(buf->base);
+        }
+        return;
+    }
+
+    if (conn->ws_tunnel_closing) {
+        safe_free(buf->base);
+        return;
+    }
+
+    if (nread < 0) {
+        if (nread != UV_EOF) {
+            log_debug("libuv_ws_client_read_cb: Read error: %s", uv_strerror((int)nread));
+        }
+        safe_free(buf->base);
+        libuv_ws_tunnel_close(conn);
+        libuv_connection_close(conn);
+        return;
+    }
+
+    if (nread == 0) {
+        safe_free(buf->base);
+        return;
+    }
+
+    if (libuv_ws_send_to_upstream(conn, buf->base, (size_t)nread) != 0) {
+        libuv_connection_close(conn);
+    }
+}
+
+static void libuv_ws_upstream_read_cb(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
+    libuv_connection_t *conn = (libuv_connection_t *)stream->data;
+    if (!conn) {
+        if (buf && buf->base) {
+            safe_free(buf->base);
+        }
+        return;
+    }
+
+    if (conn->ws_tunnel_closing) {
+        safe_free(buf->base);
+        return;
+    }
+
+    if (nread < 0) {
+        if (nread != UV_EOF) {
+            log_debug("libuv_ws_upstream_read_cb: Read error: %s", uv_strerror((int)nread));
+        }
+        safe_free(buf->base);
+        libuv_ws_tunnel_close(conn);
+        libuv_connection_close(conn);
+        return;
+    }
+
+    if (nread == 0) {
+        safe_free(buf->base);
+        return;
+    }
+
+    if (libuv_connection_send(conn, buf->base, (size_t)nread, true) != 0) {
+        safe_free(buf->base);
+        libuv_connection_close(conn);
+    }
+}
+
+static void libuv_ws_alloc_cb(uv_handle_t *handle, size_t suggested_size, uv_buf_t *buf) {
+    (void)suggested_size;
+    char *chunk = safe_malloc(64 * 1024);
+    if (!chunk) {
+        buf->base = NULL;
+        buf->len = 0;
+        return;
+    }
+
+    buf->base = chunk;
+    buf->len = 64 * 1024;
+}
+
+static void libuv_ws_connect_cb(uv_connect_t *req, int status) {
+    libuv_connection_t *conn = (libuv_connection_t *)req->data;
+    if (!conn) {
+        return;
+    }
+
+    if (status != 0) {
+        log_error("libuv_ws_connect_cb: Upstream connect failed: %s", uv_strerror(status));
+        conn->ws_tunnel_active = false;
+        libuv_ws_tunnel_close(conn);
+        libuv_connection_close(conn);
+        return;
+    }
+
+    conn->ws_upstream_connected = true;
+
+    if (uv_read_start((uv_stream_t *)&conn->ws_upstream,
+                      libuv_ws_alloc_cb, libuv_ws_upstream_read_cb) != 0) {
+        log_error("libuv_ws_connect_cb: Failed to start upstream read");
+        libuv_ws_tunnel_close(conn);
+        libuv_connection_close(conn);
+        return;
+    }
+
+    if (libuv_ws_send_to_upstream(conn, conn->ws_handshake_buffer, conn->ws_handshake_length) != 0) {
+        log_error("libuv_ws_connect_cb: Failed to forward websocket handshake");
+        libuv_connection_close(conn);
+        return;
+    }
+    conn->ws_handshake_buffer = NULL;
+    conn->ws_handshake_length = 0;
+
+    if (uv_read_start((uv_stream_t *)&conn->handle, libuv_ws_alloc_cb, libuv_ws_client_read_cb) != 0) {
+        log_error("libuv_ws_connect_cb: Failed to start client websocket read");
+        libuv_ws_tunnel_close(conn);
+        libuv_connection_close(conn);
+        return;
+    }
+}
+
+static int start_go2rtc_websocket_tunnel(libuv_connection_t *conn) {
+    if (!conn) {
+        return -1;
+    }
+
+    int port = g_config.go2rtc_api_port > 0 ? g_config.go2rtc_api_port : 1984;
+    struct sockaddr_in dest;
+    if (uv_ip4_addr("127.0.0.1", port, &dest) != 0) {
+        log_error("start_go2rtc_websocket_tunnel: Invalid go2rtc address");
+        return -1;
+    }
+
+    if (ws_build_handshake_request(conn) != 0) {
+        log_error("start_go2rtc_websocket_tunnel: Failed to build websocket handshake");
+        return -1;
+    }
+
+    int r = uv_tcp_init(conn->server->loop, &conn->ws_upstream);
+    if (r != 0) {
+        safe_free(conn->ws_handshake_buffer);
+        conn->ws_handshake_buffer = NULL;
+        conn->ws_handshake_length = 0;
+        log_error("start_go2rtc_websocket_tunnel: Failed to init upstream socket: %s",
+                  uv_strerror(r));
+        return -1;
+    }
+    conn->ws_upstream_initialized = true;
+
+    conn->ws_tunnel_active = true;
+    conn->ws_tunnel_closing = false;
+    conn->ws_upstream_connected = false;
+    conn->ws_connect.data = conn;
+    conn->handle.data = conn;
+    conn->ws_upstream.data = conn;
+
+    r = uv_tcp_connect(&conn->ws_connect, &conn->ws_upstream, (const struct sockaddr *)&dest,
+                       libuv_ws_connect_cb);
+    if (r != 0) {
+        log_error("start_go2rtc_websocket_tunnel: uv_tcp_connect failed: %s", uv_strerror(r));
+        libuv_ws_tunnel_close(conn);
+        return -1;
+    }
+
+    return 0;
 }
 
 /**
@@ -616,6 +1009,19 @@ static int on_message_complete(llhttp_t *parser) {
     // Set user_data to point to connection (needed for file serving and proxy)
     conn->request.user_data = conn;
 
+    // go2rtc websocket requires raw tunnel semantics (no buffering/copying via curl)
+    if (is_go2rtc_websocket_request(conn)) {
+        uv_read_stop((uv_stream_t *)&conn->handle);
+        if (start_go2rtc_websocket_tunnel(conn) != 0) {
+            http_response_set_json_error(&conn->response, 502, "WebSocket handshake failed");
+            conn->ws_handshake_buffer = NULL;
+            conn->ws_handshake_length = 0;
+            libuv_send_response_ex(conn, &conn->response, WRITE_ACTION_CLOSE);
+            return HPE_OK;
+        }
+        return HPE_OK;
+    }
+
     // Go2rtc proxy paths use dedicated detached threads to avoid starving the
     // shared libuv thread pool with 30-second blocking curl calls.
     if (go2rtc_proxy_path_matches(conn->request.path)) {
@@ -708,4 +1114,3 @@ static int on_message_complete(llhttp_t *parser) {
 }
 
 #endif /* HTTP_BACKEND_LIBUV */
-

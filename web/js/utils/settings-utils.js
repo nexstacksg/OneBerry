@@ -76,11 +76,10 @@ export async function getGo2rtcApiPort() {
  * are served under the /go2rtc prefix (e.g., /go2rtc/api/streams).
  *
  * Over HTTPS: Routes through external reverse proxy at /go2rtc/* which forwards
- * to go2rtc. The proxy must handle both HTTP and WebSocket connections.
+ * to go2rtc.
  *
- * Over HTTP (local dev): lightNVR's built-in /go2rtc/* proxy only handles HLS
- * and snapshots (not WebRTC). WebRTC must connect directly to go2rtc's port
- * for lower latency and because the curl-based proxy can't handle the SDP exchange.
+ * Over HTTP (local dev): lightNVR's built-in /go2rtc/* proxy is preferred for
+ * API endpoints, while direct port access is used when bypassing the web server.
  *
  * @returns {Promise<string>} - go2rtc base URL (e.g., "https://hostname/go2rtc" or "http://hostname:1984/go2rtc")
  */
@@ -92,7 +91,7 @@ export async function getGo2rtcBaseUrl() {
   }
 
   // Over HTTP (local dev), connect directly to go2rtc's port
-  // because lightNVR's proxy doesn't handle WebRTC endpoints
+  // keep behavior compatible with local setups that bypass the web reverse proxy
   const port = await getGo2rtcApiPort();
   return `http://${window.location.hostname}:${port}/go2rtc`;
 }
@@ -100,9 +99,10 @@ export async function getGo2rtcBaseUrl() {
 /**
  * Get the go2rtc WebSocket URL for MSE streaming.
  *
- * lightNVR's reverse proxy at /go2rtc/* uses curl (HTTP-only) and CANNOT
- * handle WebSocket upgrade requests. MSE streaming requires a WebSocket
- * connection, so it must connect directly to go2rtc, bypassing the proxy.
+ * lightNVR's reverse proxy at /go2rtc/* currently supports standard HTTP-based
+ * endpoints (including WebRTC SDP) used by <video/> playback.
+ * MSE streaming requires a WebSocket upgrade; proxy support depends on your
+ * reverse proxy configuration.
  *
  * Over HTTP:  ws://hostname:go2rtc_port/go2rtc  (direct to go2rtc)
  * Over HTTPS: wss://hostname/go2rtc              (external reverse proxy handles WS)
@@ -110,8 +110,8 @@ export async function getGo2rtcBaseUrl() {
  * @returns {Promise<string>} - WebSocket-compatible go2rtc base URL
  */
 export async function getGo2rtcWebSocketUrl() {
-  // Over HTTPS, the external reverse proxy (nginx, HA ingress, etc.) handles
-  // WebSocket upgrades natively and routes /go2rtc/* to go2rtc.
+  // Over HTTPS, use the reverse proxy endpoint. If your reverse proxy does
+  // not support WebSocket upgrades, MSE fallback may fail and return error.
   if (window.location.protocol === 'https:') {
     return `wss://${window.location.host}/go2rtc`;
   }
@@ -240,4 +240,3 @@ export function clearSettingsCache() {
   go2rtcAvailableCacheTime = 0;
   go2rtcAvailableInflight = null;
 }
-

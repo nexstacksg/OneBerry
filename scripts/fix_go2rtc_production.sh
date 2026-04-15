@@ -5,12 +5,14 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSTALL_DIR="/usr/local/bin"
 CONFIG_DIR="/etc/lightnvr/go2rtc"
+GO2RTC_BASE_PATH="/go2rtc"
 VERSION="latest"
 LIGHTNVR_SERVICE="lightnvr"
 CHECK_ONLY=false
 FORCE_INSTALL=false
 RESTART_SERVICE=true
 GO2RTC_LEGACY_BIN="/bin/go2rtc"
+WAIT_FOR_GO2RTC_SECONDS=20
 
 log_info() {
     echo "[go2rtc-fix] $1"
@@ -27,6 +29,8 @@ Usage: scripts/fix_go2rtc_production.sh [options]
 Options:
   -d, --install-dir DIR    install go2rtc binary here (default: /usr/local/bin)
   -c, --config-dir DIR     go2rtc config directory (default: /etc/lightnvr/go2rtc)
+      --base-path PATH     base_path configured in go2rtc.yaml (default: /go2rtc)
+  -w, --wait-seconds SEC   how long to wait for go2rtc API on startup (default: 20)
   -v, --version VERSION    go2rtc release version to install (default: latest)
   -s, --service NAME       lightnvr service name (default: lightnvr)
       --no-restart         install only, do not restart lightnvr service
@@ -47,8 +51,16 @@ while [[ $# -gt 0 ]]; do
             CONFIG_DIR="$2"
             shift 2
             ;;
+        --base-path)
+            GO2RTC_BASE_PATH="$2"
+            shift 2
+            ;;
         -v|--version)
             VERSION="$2"
+            shift 2
+            ;;
+        -w|--wait-seconds)
+            WAIT_FOR_GO2RTC_SECONDS="$2"
             shift 2
             ;;
         -s|--service)
@@ -130,6 +142,37 @@ else
     exit 1
 fi
 
+if [[ -f "$CONFIG_DIR/go2rtc.yaml" ]]; then
+    YAML_BASE_PATH=$(sed -n 's/^[[:space:]]*base_path:[[:space:]]*//p' "$CONFIG_DIR/go2rtc.yaml" | sed -n '1p')
+    if [[ -n "$YAML_BASE_PATH" ]]; then
+        # Trim inline comments and whitespace
+        YAML_BASE_PATH="$(echo "$YAML_BASE_PATH" | sed 's/[[:space:]]*#.*$//' | xargs)"
+        # Remove optional quotes
+        YAML_BASE_PATH="${YAML_BASE_PATH%\"}"
+        YAML_BASE_PATH="${YAML_BASE_PATH#\"}"
+        YAML_BASE_PATH="${YAML_BASE_PATH%\'}"
+        YAML_BASE_PATH="${YAML_BASE_PATH#\'}"
+        if [[ -n "$YAML_BASE_PATH" ]]; then
+            GO2RTC_BASE_PATH="$YAML_BASE_PATH"
+        fi
+    fi
+fi
+
+normalize_base_path() {
+    local path="$1"
+    if [[ "$path" == "/" || "$path" == " " || "$path" == "" ]]; then
+        echo ""
+        return
+    fi
+    if [[ "$path" != /* ]]; then
+        path="/$path"
+    fi
+    path="${path%/}"
+    echo "$path"
+}
+
+GO2RTC_BASE_PATH="$(normalize_base_path "$GO2RTC_BASE_PATH")"
+
 if [[ ! -f "$CONFIG_DIR/go2rtc.yaml" ]]; then
     log_error "go2rtc config is missing at $CONFIG_DIR/go2rtc.yaml"
     if ! "$SCRIPT_DIR/install_go2rtc.sh" -d "$INSTALL_DIR" -c "$CONFIG_DIR" > /dev/null; then
@@ -154,22 +197,42 @@ if [[ "$RESTART_SERVICE" == "true" ]]; then
     fi
 fi
 
-if ss -ltn 2>/dev/null | awk '{print $4}' | grep -qE '(^|[:.])1984$'; then
-    log_info "Port 1984 is now listening."
-else
-    log_error "Port 1984 is not listening on the host."
-    log_info "Checking recent lightnvr startup logs..."
-    journalctl -u "$LIGHTNVR_SERVICE" -n 120 --no-pager || true
-    exit 1
-fi
+wait_for_go2rtc_ready() {
+    local attempt=0
+    local attempts_max="$WAIT_FOR_GO2RTC_SECONDS"
+    local port=1984
+    local base_path="$GO2RTC_BASE_PATH"
+    while [[ $attempt -lt "$attempts_max" ]]; do
+        if ss -ltn 2>/dev/null | awk '{print $4}' | grep -qE "(^|[:.])${port}$"; then
+            if curl -fsS --max-time 2 "http://127.0.0.1:${port}${base_path}/api/streams" >/dev/null 2>&1; then
+                return 0
+            fi
+            if [[ "$base_path" != "" ]] && curl -fsS --max-time 2 "http://127.0.0.1:${port}/api/streams" >/dev/null 2>&1; then
+                return 0
+            fi
+        fi
+        attempt=$((attempt + 1))
+        sleep 1
+    done
+    return 1
+}
 
-if curl -fsS --max-time 5 http://127.0.0.1:1984/api/streams >/dev/null; then
-    log_info "go2rtc API is reachable: http://127.0.0.1:1984/api/streams"
+if wait_for_go2rtc_ready; then
+    if [[ -n "$GO2RTC_BASE_PATH" ]]; then
+        log_info "go2rtc API is reachable: http://127.0.0.1:1984${GO2RTC_BASE_PATH}/api/streams"
+    else
+        log_info "go2rtc API is reachable: http://127.0.0.1:1984/api/streams"
+    fi
     log_info "Verification complete. Next: access http://<server-ip>:8080 for LightNVR and use WebRTC/HLS features."
     exit 0
 fi
 
-log_error "Could not reach go2rtc API at /api/streams"
-log_info "Recent lightnvr logs:"
-journalctl -u "$LIGHTNVR_SERVICE" -n 180 --no-pager || true
+log_error "go2rtc is not yet reachable on port 1984 (base_path='${GO2RTC_BASE_PATH:-/go2rtc}')."
+log_error "Waited up to ${WAIT_FOR_GO2RTC_SECONDS}s."
+log_info "Checking recent lightnvr startup logs..."
+journalctl -u "$LIGHTNVR_SERVICE" -n 200 --no-pager || true
+if [[ -f /var/log/go2rtc.log ]]; then
+    log_info "Checking go2rtc log tail..."
+    tail -n 120 /var/log/go2rtc.log || true
+fi
 exit 1

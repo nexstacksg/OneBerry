@@ -112,12 +112,26 @@ static size_t buffered_header_cb(char *buffer, size_t size, size_t nitems, void 
  */
 static bool should_proxy_path(const char *path) {
     // Only proxy HLS streaming endpoints and health check
-    // WebRTC connects directly to go2rtc for lower latency
+    // WebRTC endpoints are also proxied when accessed under /go2rtc for
+    // browser-hosted deployments.
     if (strstr(path, "/api/streams") != NULL) return true;   // Health check endpoint
     if (strstr(path, "/api/stream.m3u8") != NULL) return true;
     if (strstr(path, "/api/hls/") != NULL) return true;
     if (strstr(path, "/api/frame.jpeg") != NULL) return true;
+    if (strstr(path, "/api/webrtc") != NULL) return true;
+    if (strstr(path, "/api/ws") != NULL) return true;
     return false;
+}
+
+/**
+ * @brief Handle CORS preflight for /go2rtc API endpoints
+ */
+void handle_go2rtc_proxy_options(const http_request_t *req, http_response_t *res) {
+    (void)req;
+    http_response_set_json(res, 204, "{}");
+    http_response_add_header(res, "Access-Control-Allow-Origin", "*");
+    http_response_add_header(res, "Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+    http_response_add_header(res, "Access-Control-Allow-Headers", "Content-Type, Authorization");
 }
 
 void handle_go2rtc_proxy(const http_request_t *req, http_response_t *res) {
@@ -262,4 +276,3 @@ void handle_go2rtc_proxy(const http_request_t *req, http_response_t *res) {
               req->method_str, req->path, ctx.http_code, ctx.buffer_size,
               ctx.content_type[0] ? ctx.content_type : "unknown");
 }
-

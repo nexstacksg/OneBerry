@@ -24,5 +24,11 @@
  */
 void handle_go2rtc_proxy(const http_request_t *req, http_response_t *res);
 
-#endif /* API_HANDLERS_GO2RTC_PROXY_H */
+/**
+ * @brief Handle CORS preflight requests for /go2rtc API endpoints
+ * @param req HTTP request
+ * @param res HTTP response
+ */
+void handle_go2rtc_proxy_options(const http_request_t *req, http_response_t *res);
 
+#endif /* API_HANDLERS_GO2RTC_PROXY_H */
