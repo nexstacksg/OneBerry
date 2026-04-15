@@ -41,20 +41,21 @@ function extractColorThemes() {
  */
 function generateThemeScript(colorThemes) {
   const themesJson = JSON.stringify(colorThemes);
+  const visibleThemeIds = JSON.stringify(['default', 'oneberry']);
   
   return `<script>
     (function() {
       try {
         const COLOR_THEMES = ${themesJson};
-        const savedTheme = localStorage.getItem('lightnvr-theme');
+        const VISIBLE_THEME_IDS = ${visibleThemeIds};
         const savedColorIntensity = localStorage.getItem('lightnvr-color-intensity');
         const savedColorTheme = localStorage.getItem('lightnvr-color-theme');
-        const systemPrefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-        let finalTheme = 'light';
-        if (savedTheme) { finalTheme = savedTheme; } else if (systemPrefersDark) { finalTheme = 'dark'; }
-        if (finalTheme === 'dark') { document.documentElement.classList.add('dark'); } else { document.documentElement.classList.remove('dark'); }
-        if (savedColorIntensity && savedColorTheme) {
-          const colorTheme = savedColorTheme in COLOR_THEMES ? savedColorTheme : 'default';
+        const colorTheme = VISIBLE_THEME_IDS.includes(savedColorTheme) && savedColorTheme in COLOR_THEMES ? savedColorTheme : 'default';
+        const finalTheme = 'light';
+        document.documentElement.classList.remove('dark');
+        localStorage.setItem('lightnvr-theme', finalTheme);
+        localStorage.setItem('lightnvr-color-theme', colorTheme);
+        if (savedColorIntensity) {
           const colorIntensity = parseInt(savedColorIntensity) || 50;
           const isDark = finalTheme === 'dark';
           const selectedTheme = COLOR_THEMES[colorTheme];
@@ -143,7 +144,7 @@ function generateThemeScript(colorThemes) {
         window.__LIGHTNVR_THEME_APPLIED__ = true;
       } catch (e) {
         console.warn('Theme script failed:', e);
-        if (window.matchMedia('(prefers-color-scheme: dark)').matches) { document.documentElement.classList.add('dark'); }
+        document.documentElement.classList.remove('dark');
       }
     })();
     </script>`;
@@ -176,4 +177,3 @@ export default function themeInjectPlugin() {
     }
   };
 }
-

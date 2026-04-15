@@ -22,7 +22,7 @@ export function Footer() {
         <div class="text-sm text-muted-foreground">
           {t('footer.tagline')} © {year}
         </div>
-        <div>
+        <div class="hidden">
           <a href="https://github.com/opensensor/lightnvr" class="text-sm no-underline hover:underline"
              style={{color: 'hsl(var(--primary))'}}
              target="_blank" rel="noopener noreferrer">{t('footer.github')}</a>
@@ -31,4 +31,3 @@ export function Footer() {
     </footer>
   );
 }
-

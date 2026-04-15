@@ -13,8 +13,10 @@ import { useI18n } from '../../i18n.js';
  * @returns {JSX.Element} ThemeCustomizer component
  */
 export function ThemeCustomizer() {
+  const VISIBLE_THEME_IDS = new Set(['default', 'oneberry']);
+  const visibleThemes = Object.entries(COLOR_THEMES).filter(([themeId]) => VISIBLE_THEME_IDS.has(themeId));
+
   const [mounted, setMounted] = useState(false);
-  const [isDark, setIsDark] = useState(false);
   const [colorIntensity, setColorIntensity] = useState(50);
   const [colorTheme, setColorTheme] = useState('default');
   const { t } = useI18n();
@@ -24,20 +26,11 @@ export function ThemeCustomizer() {
   // Load saved preferences from localStorage
   useEffect(() => {
     setMounted(true);
-    
-    const savedTheme = localStorage.getItem('lightnvr-theme');
     const savedIntensity = localStorage.getItem('lightnvr-color-intensity');
     const savedColorTheme = localStorage.getItem('lightnvr-color-theme');
-    const systemPrefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
 
-    // Determine theme
-    let finalTheme = 'light';
-    if (savedTheme) {
-      finalTheme = savedTheme;
-    } else if (systemPrefersDark) {
-      finalTheme = 'dark';
-    }
-    setIsDark(finalTheme === 'dark');
+    document.documentElement.classList.remove('dark');
+    localStorage.setItem('lightnvr-theme', 'light');
 
     // Load intensity
     if (savedIntensity) {
@@ -45,8 +38,10 @@ export function ThemeCustomizer() {
     }
 
     // Load color theme
-    if (savedColorTheme && COLOR_THEMES[savedColorTheme]) {
+    if (savedColorTheme && COLOR_THEMES[savedColorTheme] && VISIBLE_THEME_IDS.has(savedColorTheme)) {
       setColorTheme(savedColorTheme);
+    } else {
+      setColorTheme('default');
     }
   }, []);
 
@@ -54,25 +49,16 @@ export function ThemeCustomizer() {
   useEffect(() => {
     if (!mounted) return;
 
-    // Apply dark/light mode class
-    if (isDark) {
-      document.documentElement.classList.add('dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-    }
+    document.documentElement.classList.remove('dark');
 
     // Apply color theme and intensity
-    applyThemeColors(isDark, colorTheme, colorIntensity);
+    applyThemeColors(false, colorTheme, colorIntensity);
 
     // Save to localStorage
-    localStorage.setItem('lightnvr-theme', isDark ? 'dark' : 'light');
+    localStorage.setItem('lightnvr-theme', 'light');
     localStorage.setItem('lightnvr-color-intensity', colorIntensity.toString());
     localStorage.setItem('lightnvr-color-theme', colorTheme);
-  }, [mounted, isDark, colorIntensity, colorTheme]);
-
-  const toggleDarkMode = () => {
-    setIsDark(!isDark);
-  };
+  }, [mounted, colorIntensity, colorTheme]);
 
   const handleIntensityChange = (e) => {
     setColorIntensity(parseInt(e.target.value));
@@ -97,35 +83,6 @@ export function ThemeCustomizer() {
 
   return (
     <div class="space-y-6">
-      {/* Dark Mode Toggle */}
-      <div class="flex items-center justify-between p-4 bg-card rounded-lg border border-border">
-        <div class="flex items-center gap-3">
-          <div class="text-2xl">
-            {isDark ? '🌙' : '☀️'}
-          </div>
-          <div>
-            <h3 class="font-semibold text-card-foreground">{t('appearance.darkMode')}</h3>
-            <p class="text-sm text-muted-foreground">
-              {isDark ? t('appearance.switchToLightMode') : t('appearance.switchToDarkMode')}
-            </p>
-          </div>
-        </div>
-        <button
-          onClick={toggleDarkMode}
-          class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
-          style={{
-            backgroundColor: isDark ? 'hsl(var(--primary))' : 'hsl(var(--muted))'
-          }}
-        >
-          <span
-            class="inline-block h-4 w-4 transform rounded-full bg-white transition-transform"
-            style={{
-              transform: isDark ? 'translateX(1.5rem)' : 'translateX(0.25rem)'
-            }}
-          />
-        </button>
-      </div>
-
       {/* Color Theme Selection */}
       <div class="p-4 bg-card rounded-lg border border-border">
         <div class="flex items-center gap-2 mb-4">
@@ -134,7 +91,7 @@ export function ThemeCustomizer() {
         </div>
         
         <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          {Object.entries(COLOR_THEMES).map(([themeId, themeConfig]) => (
+          {visibleThemes.map(([themeId, themeConfig]) => (
             <button
               key={themeId}
               onClick={() => handleThemeChange(themeId)}
@@ -162,9 +119,9 @@ export function ThemeCustomizer() {
 
         <div class="space-y-4">
           <div class="flex items-center justify-between text-sm text-muted-foreground">
-            <span>{isDark ? t('appearance.darker') : t('appearance.lighter')}</span>
+            <span>{t('appearance.lighter')}</span>
             <span class="font-semibold text-card-foreground">{colorIntensity}%</span>
-            <span>{isDark ? t('appearance.brighter') : t('appearance.higherContrast')}</span>
+            <span>{t('appearance.higherContrast')}</span>
           </div>
 
           <input
@@ -214,17 +171,11 @@ export function ThemeCustomizer() {
 
       {/* Current Theme Info */}
       <div class="p-4 bg-accent/50 rounded-lg border border-border">
-        <div class="flex items-center justify-between mb-2">
+        <div class="flex items-center justify-between">
           <span class="text-sm font-medium text-accent-foreground">
             {COLOR_THEMES[colorTheme].icon} {getThemeDisplayName(COLOR_THEMES[colorTheme])}
           </span>
-          <span class="text-sm text-muted-foreground">
-            {isDark ? t('appearance.modeDark') : t('appearance.modeLight')}
-          </span>
         </div>
-        <p class="text-xs text-muted-foreground">
-          {t('appearance.tipAdaptiveThemes')}
-        </p>
       </div>
 
       {/* Preview Section */}
