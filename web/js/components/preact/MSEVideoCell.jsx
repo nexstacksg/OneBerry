@@ -17,6 +17,8 @@ import { formatUtils } from './recordings/formatUtils.js';
 import { useI18n } from '../../i18n.js';
 import { useQueryClient } from '../../query-client.js';
 import { createPlayerTelemetry } from '../../utils/player-telemetry.js';
+import { StreamQualitySelector } from './StreamQualitySelector.jsx';
+import { useStreamQuality } from './useStreamQuality.js';
 
 /**
  * MSEVideoCell component
@@ -39,12 +41,30 @@ export function MSEVideoCell({
 }) {
   const { t } = useI18n();
   const queryClient = useQueryClient();
+  const {
+    hasLowQuality,
+    selectedStreamSource,
+    setStreamQuality,
+    streamQuality,
+  } = useStreamQuality(stream);
 
   // Component state
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
+
+  const handleStreamQualityChange = (quality) => {
+    if (quality === streamQuality) {
+      return;
+    }
+
+    setStreamQuality(quality);
+    setError(null);
+    setIsLoading(true);
+    setIsPlaying(false);
+    setRetryCount((value) => value + 1);
+  };
 
   // Auto-retry tracking (separate from manual retryCount to avoid infinite loops)
   const autoRetryCountRef = useRef(0);
@@ -117,9 +137,12 @@ export function MSEVideoCell({
     setError(null);
 
     try {
+      const activeStreamSource = selectedStreamSource || stream.name;
+
       // Use direct WebSocket URL to go2rtc (bypasses lightNVR's HTTP-only proxy)
       const go2rtcWsUrl = await getGo2rtcWebSocketUrl();
-      const wsUrl = `${go2rtcWsUrl}/api/ws?src=${encodeURIComponent(stream.name)}`;
+      const wsUrl = `${go2rtcWsUrl}/api/ws?src=${encodeURIComponent(activeStreamSource)}`;
+      console.log(`[MSE ${stream.name}] Using go2rtc source ${activeStreamSource}`);
 
       // Create WebSocket connection
       const ws = new WebSocket(wsUrl);
@@ -507,7 +530,7 @@ export function MSEVideoCell({
       if (delayTimeout) clearTimeout(delayTimeout);
       cleanup();
     };
-  }, [stream?.name, retryCount, initDelay]);
+  }, [stream?.name, retryCount, initDelay, selectedStreamSource]);
 
   // Auto-retry when stream status transitions back to 'Running' while the
   // error overlay is visible (e.g. camera came back online after an outage).
@@ -741,6 +764,13 @@ export function MSEVideoCell({
             zIndex: 10
           }}
         >
+          {hasLowQuality && (
+            <StreamQualitySelector
+              value={streamQuality}
+              onChange={handleStreamQualityChange}
+            />
+          )}
+
           {/* Snapshot button */}
           <SnapshotButton streamId={streamId} streamName={stream.name} onSnapshot={handleSnapshot} />
 
