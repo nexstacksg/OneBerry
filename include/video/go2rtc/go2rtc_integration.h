@@ -144,7 +144,8 @@ bool go2rtc_integration_get_hls_url(const char *stream_name, char *url, size_t u
  * when responding to configuration changes.
  *
  * @param stream_name Name of the stream to reload
- * @param new_url New stream URL (can be NULL to use current config)
+ * @param new_url New primary stream URL (can be NULL to use current config)
+ * @param new_secondary_url New secondary stream URL (can be NULL to use current config)
  * @param new_username New username (can be NULL to use current config)
  * @param new_password New password (can be NULL to use current config)
  * @param new_backchannel_enabled New backchannel setting (-1 to use current config)
@@ -154,6 +155,7 @@ bool go2rtc_integration_get_hls_url(const char *stream_name, char *url, size_t u
  */
 bool go2rtc_integration_reload_stream_config(const char *stream_name,
                                              const char *new_url,
+                                             const char *new_secondary_url,
                                              const char *new_username,
                                              const char *new_password,
                                              int new_backchannel_enabled,

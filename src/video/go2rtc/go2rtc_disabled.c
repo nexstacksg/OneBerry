@@ -36,10 +36,11 @@ bool go2rtc_stream_init(const char *binary_path, const char *config_dir, int api
     UNUSED(binary_path); UNUSED(config_dir); UNUSED(api_port); return false;
 }
 bool go2rtc_stream_register(const char *stream_id, const char *stream_url,
+                            const char *secondary_stream_url,
                             const char *username, const char *password,
                             bool backchannel_enabled, stream_protocol_t protocol,
                             bool record_audio) {
-    UNUSED(stream_id); UNUSED(stream_url); UNUSED(username); UNUSED(password);
+    UNUSED(stream_id); UNUSED(stream_url); UNUSED(secondary_stream_url); UNUSED(username); UNUSED(password);
     UNUSED(backchannel_enabled); UNUSED(protocol); UNUSED(record_audio); return true;
 }
 bool go2rtc_stream_unregister(const char *stream_id) { UNUSED(stream_id); return true; }
@@ -82,12 +83,13 @@ bool go2rtc_integration_get_hls_url(const char *stream_name, char *url, size_t u
 }
 bool go2rtc_integration_reload_stream_config(const char *stream_name,
                                              const char *new_url,
+                                             const char *new_secondary_url,
                                              const char *new_username,
                                              const char *new_password,
                                              int new_backchannel_enabled,
                                              int new_protocol,
                                              int new_record_audio) {
-    UNUSED(stream_name); UNUSED(new_url); UNUSED(new_username); UNUSED(new_password);
+    UNUSED(stream_name); UNUSED(new_url); UNUSED(new_secondary_url); UNUSED(new_username); UNUSED(new_password);
     UNUSED(new_backchannel_enabled); UNUSED(new_protocol); UNUSED(new_record_audio); return true;
 }
 bool go2rtc_integration_reload_stream(const char *stream_name) { UNUSED(stream_name); return true; }

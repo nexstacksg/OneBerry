@@ -517,6 +517,26 @@ export function StreamConfigModal({
                 </div>
 
                 <div className="md:col-span-2">
+                  <label htmlFor="stream-secondary-url" className="block text-sm font-medium mb-2">
+                    {t('streamsConfig.secondaryStreamUrl')}
+                  </label>
+                  <input
+                    type="text"
+                    id="stream-secondary-url"
+                    name="secondaryUrl"
+                    className={`w-full px-3 py-2 border border-input rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-primary bg-background text-foreground ${hideCredentials ? 'cursor-not-allowed opacity-75' : ''}`}
+                    placeholder={t('streamsConfig.secondaryStreamUrlPlaceholder')}
+                    value={hideCredentials ? obfuscateUrlCredentials(currentStream.secondaryUrl || '') : (currentStream.secondaryUrl || '')}
+                    onChange={onInputChange}
+                    readOnly={hideCredentials}
+                    title={hideCredentials ? t('streamsConfig.urlCredentialsHiddenTitle') : ''}
+                  />
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {t('streamsConfig.secondaryStreamUrlHelp')}
+                  </p>
+                </div>
+
+                <div className="md:col-span-2">
                   <label htmlFor="stream-admin-url" className="block text-sm font-medium mb-2">
                     {t('streamsConfig.cameraAdminUrl')}
                   </label>

@@ -38,6 +38,7 @@ typedef struct {
     stream_config_t config;                    // Updated stream configuration
     char stream_id[MAX_STREAM_NAME];          // Decoded stream ID
     char original_url[MAX_URL_LENGTH];         // Original URL before update
+    char original_secondary_url[MAX_URL_LENGTH]; // Original secondary URL before update
     stream_protocol_t original_protocol;       // Original protocol before update
     bool original_record_audio;                // Original record_audio before update
     bool config_changed;                       // Whether config changed
@@ -122,6 +123,12 @@ static void normalize_stream_url_credentials(stream_config_t *config) {
     if (url_strip_credentials(config->url, stripped_url, sizeof(stripped_url)) == 0) {
         strncpy(config->url, stripped_url, sizeof(config->url) - 1);
         config->url[sizeof(config->url) - 1] = '\0';
+    }
+
+    if (config->secondary_url[0] != '\0' &&
+        url_strip_credentials(config->secondary_url, stripped_url, sizeof(stripped_url)) == 0) {
+        strncpy(config->secondary_url, stripped_url, sizeof(config->secondary_url) - 1);
+        config->secondary_url[sizeof(config->secondary_url) - 1] = '\0';
     }
 }
 
@@ -324,12 +331,13 @@ static void put_stream_worker(put_stream_task_t *task) {
                 task->non_dynamic_config_changed ? "true" : "false");
 
         bool url_changed = strcmp(task->original_url, task->config.url) != 0;
+        bool secondary_url_changed = strcmp(task->original_secondary_url, task->config.secondary_url) != 0;
         bool protocol_changed = task->original_protocol != task->config.protocol;
         bool record_audio_changed = task->original_record_audio != task->config.record_audio;
 
         // First clear HLS segments if URL changed
-        if (url_changed) {
-            log_info("URL changed for stream %s, clearing HLS segments", task->config.name);
+        if (url_changed || secondary_url_changed) {
+            log_info("Stream source URL changed for stream %s, clearing HLS segments", task->config.name);
             if (clear_stream_hls_segments(task->config.name) != 0) {
                 log_warn("Failed to clear HLS segments for stream %s", task->config.name);
             }
@@ -356,10 +364,11 @@ static void put_stream_worker(put_stream_task_t *task) {
         }
 
         // If URL, protocol, record_audio, or credentials changed, update go2rtc stream registration
-        if ((url_changed || protocol_changed || record_audio_changed || task->credentials_changed)) {
-            log_info("URL, protocol, record_audio, or credentials changed for stream %s, updating go2rtc registration", task->config.name);
+        if ((url_changed || secondary_url_changed || protocol_changed || record_audio_changed || task->credentials_changed)) {
+            log_info("URL, secondary URL, protocol, record_audio, or credentials changed for stream %s, updating go2rtc registration", task->config.name);
 
             if (go2rtc_integration_reload_stream_config(task->config.name, task->config.url,
+                                                        task->config.secondary_url,
                                                         task->config.onvif_username[0] != '\0' ? task->config.onvif_username : NULL,
                                                         task->config.onvif_password[0] != '\0' ? task->config.onvif_password : NULL,
                                                         task->config.backchannel_enabled ? 1 : 0,
@@ -382,7 +391,7 @@ static void put_stream_worker(put_stream_task_t *task) {
             }
 
             // Force restart the HLS stream thread if streaming is enabled and URL/protocol changed
-            if ((url_changed || protocol_changed) && task->config.streaming_enabled) {
+            if ((url_changed || secondary_url_changed || protocol_changed) && task->config.streaming_enabled) {
                 log_info("Force restarting HLS stream thread for %s after go2rtc update", task->config.name);
                 if (stream_restart_hls(task->config.name) != 0) {
                     log_warn("Failed to force restart HLS stream for %s", task->config.name);
@@ -461,6 +470,13 @@ void handle_post_stream(const http_request_t *req, http_response_t *res) {
         config.name[--name_len] = '\0';
     }
     strncpy(config.url, url->valuestring, sizeof(config.url) - 1);
+    config.url[sizeof(config.url) - 1] = '\0';
+
+    cJSON *secondary_url = cJSON_GetObjectItem(stream_json, "secondary_url");
+    if (secondary_url && cJSON_IsString(secondary_url)) {
+        strncpy(config.secondary_url, secondary_url->valuestring, sizeof(config.secondary_url) - 1);
+        config.secondary_url[sizeof(config.secondary_url) - 1] = '\0';
+    }
 
     // Optional fields with defaults
     config.enabled = true;
@@ -930,6 +946,9 @@ void handle_put_stream(const http_request_t *req, http_response_t *res) {
     char original_url[MAX_URL_LENGTH];
     strncpy(original_url, config.url, MAX_URL_LENGTH - 1);
     original_url[MAX_URL_LENGTH - 1] = '\0';
+    char original_secondary_url[MAX_URL_LENGTH];
+    strncpy(original_secondary_url, config.secondary_url, MAX_URL_LENGTH - 1);
+    original_secondary_url[MAX_URL_LENGTH - 1] = '\0';
 
     stream_protocol_t original_protocol = config.protocol;
     bool original_record_audio = config.record_audio;
@@ -938,6 +957,7 @@ void handle_put_stream(const http_request_t *req, http_response_t *res) {
     if (url && cJSON_IsString(url)) {
         if (strcmp(config.url, url->valuestring) != 0) {
             strncpy(config.url, url->valuestring, sizeof(config.url) - 1);
+            config.url[sizeof(config.url) - 1] = '\0';
             config_changed = true;
             requires_restart = true;  // URL changes always require restart
             char safe_original_url[MAX_URL_LENGTH];
@@ -945,6 +965,29 @@ void handle_put_stream(const http_request_t *req, http_response_t *res) {
             redact_url_for_log(original_url, safe_original_url, sizeof(safe_original_url));
             redact_url_for_log(config.url, safe_new_url, sizeof(safe_new_url));
             log_info("URL changed from '%s' to '%s' - restart required", safe_original_url, safe_new_url);
+        }
+    }
+
+    cJSON *secondary_url = cJSON_GetObjectItem(stream_json, "secondary_url");
+    if (secondary_url && cJSON_IsString(secondary_url)) {
+        if (strcmp(config.secondary_url, secondary_url->valuestring) != 0) {
+            strncpy(config.secondary_url, secondary_url->valuestring, sizeof(config.secondary_url) - 1);
+            config.secondary_url[sizeof(config.secondary_url) - 1] = '\0';
+            config_changed = true;
+            requires_restart = true;
+            char safe_original_secondary_url[MAX_URL_LENGTH];
+            char safe_new_secondary_url[MAX_URL_LENGTH];
+            redact_url_for_log(original_secondary_url, safe_original_secondary_url, sizeof(safe_original_secondary_url));
+            redact_url_for_log(config.secondary_url, safe_new_secondary_url, sizeof(safe_new_secondary_url));
+            log_info("Secondary URL changed from '%s' to '%s' - restart required",
+                     safe_original_secondary_url, safe_new_secondary_url);
+        }
+    } else if (secondary_url && cJSON_IsNull(secondary_url)) {
+        if (config.secondary_url[0] != '\0') {
+            config.secondary_url[0] = '\0';
+            config_changed = true;
+            requires_restart = true;
+            log_info("Secondary URL cleared - restart required");
         }
     }
 
@@ -1565,6 +1608,7 @@ void handle_put_stream(const http_request_t *req, http_response_t *res) {
     memcpy(&task->config, &config, sizeof(stream_config_t));
     strncpy(task->stream_id, stream_id, MAX_STREAM_NAME - 1);
     strncpy(task->original_url, original_url, MAX_URL_LENGTH - 1);
+    strncpy(task->original_secondary_url, original_secondary_url, MAX_URL_LENGTH - 1);
     task->original_protocol = original_protocol;
     task->original_record_audio = original_record_audio;
     task->config_changed = config_changed;

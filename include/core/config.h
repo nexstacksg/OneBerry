@@ -25,6 +25,7 @@ typedef enum {
 typedef struct {
     char name[MAX_STREAM_NAME];
     char url[MAX_URL_LENGTH];
+    char secondary_url[MAX_URL_LENGTH]; // Optional secondary/substream/fallback RTSP URL
     bool enabled;
     int width;
     int height;

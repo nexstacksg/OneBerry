@@ -121,7 +121,7 @@ uint64_t add_stream_config(const stream_config_t *stream) {
         }
 
         const char *update_sql = "UPDATE streams SET "
-                                "url = ?, enabled = ?, streaming_enabled = ?, width = ?, height = ?, "
+                                "url = ?, secondary_url = ?, enabled = ?, streaming_enabled = ?, width = ?, height = ?, "
                                 "fps = ?, codec = ?, priority = ?, record = ?, segment_duration = ?, "
                                 "detection_based_recording = ?, detection_model = ?, detection_threshold = ?, "
                                 "detection_interval = ?, pre_detection_buffer = ?, post_detection_buffer = ?, "
@@ -142,81 +142,78 @@ uint64_t add_stream_config(const stream_config_t *stream) {
             return 0;
         }
 
+        int bind_idx = 1;
+
         // Bind parameters for basic stream settings
-        sqlite3_bind_text(stmt, 1, stream->url, -1, SQLITE_STATIC);
-        sqlite3_bind_int(stmt, 2, stream->enabled ? 1 : 0);
-        sqlite3_bind_int(stmt, 3, stream->streaming_enabled ? 1 : 0);
-        sqlite3_bind_int(stmt, 4, stream->width);
-        sqlite3_bind_int(stmt, 5, stream->height);
-        sqlite3_bind_int(stmt, 6, stream->fps);
-        sqlite3_bind_text(stmt, 7, stream->codec, -1, SQLITE_STATIC);
-        sqlite3_bind_int(stmt, 8, stream->priority);
-        sqlite3_bind_int(stmt, 9, stream->record ? 1 : 0);
-        sqlite3_bind_int(stmt, 10, stream->segment_duration);
+        sqlite3_bind_text(stmt, bind_idx++, stream->url, -1, SQLITE_STATIC);
+        sqlite3_bind_text(stmt, bind_idx++, stream->secondary_url, -1, SQLITE_STATIC);
+        sqlite3_bind_int(stmt, bind_idx++, stream->enabled ? 1 : 0);
+        sqlite3_bind_int(stmt, bind_idx++, stream->streaming_enabled ? 1 : 0);
+        sqlite3_bind_int(stmt, bind_idx++, stream->width);
+        sqlite3_bind_int(stmt, bind_idx++, stream->height);
+        sqlite3_bind_int(stmt, bind_idx++, stream->fps);
+        sqlite3_bind_text(stmt, bind_idx++, stream->codec, -1, SQLITE_STATIC);
+        sqlite3_bind_int(stmt, bind_idx++, stream->priority);
+        sqlite3_bind_int(stmt, bind_idx++, stream->record ? 1 : 0);
+        sqlite3_bind_int(stmt, bind_idx++, stream->segment_duration);
 
         // Bind parameters for detection settings
-        sqlite3_bind_int(stmt, 11, stream->detection_based_recording ? 1 : 0);
-        sqlite3_bind_text(stmt, 12, stream->detection_model, -1, SQLITE_STATIC);
-        sqlite3_bind_double(stmt, 13, stream->detection_threshold);
-        sqlite3_bind_int(stmt, 14, stream->detection_interval);
-        sqlite3_bind_int(stmt, 15, stream->pre_detection_buffer);
-        sqlite3_bind_int(stmt, 16, stream->post_detection_buffer);
-        sqlite3_bind_text(stmt, 17, stream->detection_api_url, -1, SQLITE_STATIC);
+        sqlite3_bind_int(stmt, bind_idx++, stream->detection_based_recording ? 1 : 0);
+        sqlite3_bind_text(stmt, bind_idx++, stream->detection_model, -1, SQLITE_STATIC);
+        sqlite3_bind_double(stmt, bind_idx++, stream->detection_threshold);
+        sqlite3_bind_int(stmt, bind_idx++, stream->detection_interval);
+        sqlite3_bind_int(stmt, bind_idx++, stream->pre_detection_buffer);
+        sqlite3_bind_int(stmt, bind_idx++, stream->post_detection_buffer);
+        sqlite3_bind_text(stmt, bind_idx++, stream->detection_api_url, -1, SQLITE_STATIC);
 
         // Bind detection object filter parameters
-        sqlite3_bind_text(stmt, 18, stream->detection_object_filter, -1, SQLITE_STATIC);
-        sqlite3_bind_text(stmt, 19, stream->detection_object_filter_list, -1, SQLITE_STATIC);
+        sqlite3_bind_text(stmt, bind_idx++, stream->detection_object_filter, -1, SQLITE_STATIC);
+        sqlite3_bind_text(stmt, bind_idx++, stream->detection_object_filter_list, -1, SQLITE_STATIC);
 
-        // Bind protocol parameter
-        sqlite3_bind_int(stmt, 20, (int)stream->protocol);
-
-        // Bind is_onvif parameter
-        sqlite3_bind_int(stmt, 21, stream->is_onvif ? 1 : 0);
-
-        // Bind record_audio parameter
-        sqlite3_bind_int(stmt, 22, stream->record_audio ? 1 : 0);
-
-        // Bind backchannel_enabled parameter
-        sqlite3_bind_int(stmt, 23, stream->backchannel_enabled ? 1 : 0);
+        // Bind protocol, ONVIF, audio and backchannel parameters
+        sqlite3_bind_int(stmt, bind_idx++, (int)stream->protocol);
+        sqlite3_bind_int(stmt, bind_idx++, stream->is_onvif ? 1 : 0);
+        sqlite3_bind_int(stmt, bind_idx++, stream->record_audio ? 1 : 0);
+        sqlite3_bind_int(stmt, bind_idx++, stream->backchannel_enabled ? 1 : 0);
 
         // Bind retention policy parameters
-        sqlite3_bind_int(stmt, 24, stream->retention_days);
-        sqlite3_bind_int(stmt, 25, stream->detection_retention_days);
-        sqlite3_bind_int(stmt, 26, stream->max_storage_mb);
+        sqlite3_bind_int(stmt, bind_idx++, stream->retention_days);
+        sqlite3_bind_int(stmt, bind_idx++, stream->detection_retention_days);
+        sqlite3_bind_int(stmt, bind_idx++, stream->max_storage_mb);
 
         // Bind tier multiplier parameters
-        sqlite3_bind_double(stmt, 27, stream->tier_critical_multiplier);
-        sqlite3_bind_double(stmt, 28, stream->tier_important_multiplier);
-        sqlite3_bind_double(stmt, 29, stream->tier_ephemeral_multiplier);
-        sqlite3_bind_int(stmt, 30, stream->storage_priority);
+        sqlite3_bind_double(stmt, bind_idx++, stream->tier_critical_multiplier);
+        sqlite3_bind_double(stmt, bind_idx++, stream->tier_important_multiplier);
+        sqlite3_bind_double(stmt, bind_idx++, stream->tier_ephemeral_multiplier);
+        sqlite3_bind_int(stmt, bind_idx++, stream->storage_priority);
 
         // Bind PTZ parameters
-        sqlite3_bind_int(stmt, 31, stream->ptz_enabled ? 1 : 0);
-        sqlite3_bind_int(stmt, 32, stream->ptz_max_x);
-        sqlite3_bind_int(stmt, 33, stream->ptz_max_y);
-        sqlite3_bind_int(stmt, 34, stream->ptz_max_z);
-        sqlite3_bind_int(stmt, 35, stream->ptz_has_home ? 1 : 0);
+        sqlite3_bind_int(stmt, bind_idx++, stream->ptz_enabled ? 1 : 0);
+        sqlite3_bind_int(stmt, bind_idx++, stream->ptz_max_x);
+        sqlite3_bind_int(stmt, bind_idx++, stream->ptz_max_y);
+        sqlite3_bind_int(stmt, bind_idx++, stream->ptz_max_z);
+        sqlite3_bind_int(stmt, bind_idx++, stream->ptz_has_home ? 1 : 0);
 
         // Bind ONVIF credentials
-        sqlite3_bind_text(stmt, 36, stream->onvif_username, -1, SQLITE_STATIC);
-        sqlite3_bind_text(stmt, 37, stream->onvif_password, -1, SQLITE_STATIC);
-        sqlite3_bind_text(stmt, 38, stream->onvif_profile, -1, SQLITE_STATIC);
-        sqlite3_bind_int(stmt, 39, stream->onvif_port);
+        sqlite3_bind_text(stmt, bind_idx++, stream->onvif_username, -1, SQLITE_STATIC);
+        sqlite3_bind_text(stmt, bind_idx++, stream->onvif_password, -1, SQLITE_STATIC);
+        sqlite3_bind_text(stmt, bind_idx++, stream->onvif_profile, -1, SQLITE_STATIC);
+        sqlite3_bind_int(stmt, bind_idx++, stream->onvif_port);
 
         // Bind recording schedule parameters
-        sqlite3_bind_int(stmt, 40, stream->record_on_schedule ? 1 : 0);
+        sqlite3_bind_int(stmt, bind_idx++, stream->record_on_schedule ? 1 : 0);
         char schedule_buf[RECORDING_SCHEDULE_TEXT_SIZE];
         serialize_recording_schedule(stream->recording_schedule, schedule_buf, sizeof(schedule_buf));
-        sqlite3_bind_text(stmt, 41, schedule_buf, -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(stmt, bind_idx++, schedule_buf, -1, SQLITE_TRANSIENT);
 
         // Bind tags, admin URL, privacy_mode and motion_trigger_source parameters
-        sqlite3_bind_text(stmt, 42, stream->tags, -1, SQLITE_STATIC);
-        sqlite3_bind_text(stmt, 43, stream->admin_url, -1, SQLITE_STATIC);
-        sqlite3_bind_int(stmt, 44, stream->privacy_mode ? 1 : 0);
-        sqlite3_bind_text(stmt, 45, stream->motion_trigger_source, -1, SQLITE_STATIC);
+        sqlite3_bind_text(stmt, bind_idx++, stream->tags, -1, SQLITE_STATIC);
+        sqlite3_bind_text(stmt, bind_idx++, stream->admin_url, -1, SQLITE_STATIC);
+        sqlite3_bind_int(stmt, bind_idx++, stream->privacy_mode ? 1 : 0);
+        sqlite3_bind_text(stmt, bind_idx++, stream->motion_trigger_source, -1, SQLITE_STATIC);
 
         // Bind ID parameter
-        sqlite3_bind_int64(stmt, 46, (sqlite3_int64)existing_id);
+        sqlite3_bind_int64(stmt, bind_idx++, (sqlite3_int64)existing_id);
 
         // Execute statement
         rc = sqlite3_step(stmt);
@@ -255,7 +252,7 @@ uint64_t add_stream_config(const stream_config_t *stream) {
     }
 
     // No disabled stream found, insert a new one
-    const char *sql = "INSERT INTO streams (name, url, enabled, streaming_enabled, width, height, fps, codec, priority, record, segment_duration, "
+    const char *sql = "INSERT INTO streams (name, url, secondary_url, enabled, streaming_enabled, width, height, fps, codec, priority, record, segment_duration, "
           "detection_based_recording, detection_model, detection_threshold, detection_interval, "
           "pre_detection_buffer, post_detection_buffer, detection_api_url, "
           "detection_object_filter, detection_object_filter_list, "
@@ -265,7 +262,7 @@ uint64_t add_stream_config(const stream_config_t *stream) {
           "ptz_enabled, ptz_max_x, ptz_max_y, ptz_max_z, ptz_has_home, "
           "onvif_username, onvif_password, onvif_profile, onvif_port, "
           "record_on_schedule, recording_schedule, tags, admin_url, privacy_mode, motion_trigger_source) "
-          "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);";
+          "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);";
 
     rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
     if (rc != SQLITE_OK) {
@@ -274,79 +271,76 @@ uint64_t add_stream_config(const stream_config_t *stream) {
         return 0;
     }
 
+    int insert_bind_idx = 1;
+
     // Bind parameters for basic stream settings
-    sqlite3_bind_text(stmt, 1, stream->name, -1, SQLITE_STATIC);
-    sqlite3_bind_text(stmt, 2, stream->url, -1, SQLITE_STATIC);
-    sqlite3_bind_int(stmt, 3, stream->enabled ? 1 : 0);
-    sqlite3_bind_int(stmt, 4, stream->streaming_enabled ? 1 : 0);
-    sqlite3_bind_int(stmt, 5, stream->width);
-    sqlite3_bind_int(stmt, 6, stream->height);
-    sqlite3_bind_int(stmt, 7, stream->fps);
-    sqlite3_bind_text(stmt, 8, stream->codec, -1, SQLITE_STATIC);
-    sqlite3_bind_int(stmt, 9, stream->priority);
-    sqlite3_bind_int(stmt, 10, stream->record ? 1 : 0);
-    sqlite3_bind_int(stmt, 11, stream->segment_duration);
+    sqlite3_bind_text(stmt, insert_bind_idx++, stream->name, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, insert_bind_idx++, stream->url, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, insert_bind_idx++, stream->secondary_url, -1, SQLITE_STATIC);
+    sqlite3_bind_int(stmt, insert_bind_idx++, stream->enabled ? 1 : 0);
+    sqlite3_bind_int(stmt, insert_bind_idx++, stream->streaming_enabled ? 1 : 0);
+    sqlite3_bind_int(stmt, insert_bind_idx++, stream->width);
+    sqlite3_bind_int(stmt, insert_bind_idx++, stream->height);
+    sqlite3_bind_int(stmt, insert_bind_idx++, stream->fps);
+    sqlite3_bind_text(stmt, insert_bind_idx++, stream->codec, -1, SQLITE_STATIC);
+    sqlite3_bind_int(stmt, insert_bind_idx++, stream->priority);
+    sqlite3_bind_int(stmt, insert_bind_idx++, stream->record ? 1 : 0);
+    sqlite3_bind_int(stmt, insert_bind_idx++, stream->segment_duration);
 
     // Bind parameters for detection settings
-    sqlite3_bind_int(stmt, 12, stream->detection_based_recording ? 1 : 0);
-    sqlite3_bind_text(stmt, 13, stream->detection_model, -1, SQLITE_STATIC);
-    sqlite3_bind_double(stmt, 14, stream->detection_threshold);
-    sqlite3_bind_int(stmt, 15, stream->detection_interval);
-    sqlite3_bind_int(stmt, 16, stream->pre_detection_buffer);
-    sqlite3_bind_int(stmt, 17, stream->post_detection_buffer);
-    sqlite3_bind_text(stmt, 18, stream->detection_api_url, -1, SQLITE_STATIC);
+    sqlite3_bind_int(stmt, insert_bind_idx++, stream->detection_based_recording ? 1 : 0);
+    sqlite3_bind_text(stmt, insert_bind_idx++, stream->detection_model, -1, SQLITE_STATIC);
+    sqlite3_bind_double(stmt, insert_bind_idx++, stream->detection_threshold);
+    sqlite3_bind_int(stmt, insert_bind_idx++, stream->detection_interval);
+    sqlite3_bind_int(stmt, insert_bind_idx++, stream->pre_detection_buffer);
+    sqlite3_bind_int(stmt, insert_bind_idx++, stream->post_detection_buffer);
+    sqlite3_bind_text(stmt, insert_bind_idx++, stream->detection_api_url, -1, SQLITE_STATIC);
 
     // Bind detection object filter parameters
-    sqlite3_bind_text(stmt, 19, stream->detection_object_filter, -1, SQLITE_STATIC);
-    sqlite3_bind_text(stmt, 20, stream->detection_object_filter_list, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, insert_bind_idx++, stream->detection_object_filter, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, insert_bind_idx++, stream->detection_object_filter_list, -1, SQLITE_STATIC);
 
-    // Bind protocol parameter
-    sqlite3_bind_int(stmt, 21, (int)stream->protocol);
-
-    // Bind is_onvif parameter
-    sqlite3_bind_int(stmt, 22, stream->is_onvif ? 1 : 0);
-
-    // Bind record_audio parameter
-    sqlite3_bind_int(stmt, 23, stream->record_audio ? 1 : 0);
-
-    // Bind backchannel_enabled parameter
-    sqlite3_bind_int(stmt, 24, stream->backchannel_enabled ? 1 : 0);
+    // Bind protocol, ONVIF, audio and backchannel parameters
+    sqlite3_bind_int(stmt, insert_bind_idx++, (int)stream->protocol);
+    sqlite3_bind_int(stmt, insert_bind_idx++, stream->is_onvif ? 1 : 0);
+    sqlite3_bind_int(stmt, insert_bind_idx++, stream->record_audio ? 1 : 0);
+    sqlite3_bind_int(stmt, insert_bind_idx++, stream->backchannel_enabled ? 1 : 0);
 
     // Bind retention policy parameters
-    sqlite3_bind_int(stmt, 25, stream->retention_days);
-    sqlite3_bind_int(stmt, 26, stream->detection_retention_days);
-    sqlite3_bind_int(stmt, 27, stream->max_storage_mb);
+    sqlite3_bind_int(stmt, insert_bind_idx++, stream->retention_days);
+    sqlite3_bind_int(stmt, insert_bind_idx++, stream->detection_retention_days);
+    sqlite3_bind_int(stmt, insert_bind_idx++, stream->max_storage_mb);
 
     // Bind tier multiplier parameters
-    sqlite3_bind_double(stmt, 28, stream->tier_critical_multiplier);
-    sqlite3_bind_double(stmt, 29, stream->tier_important_multiplier);
-    sqlite3_bind_double(stmt, 30, stream->tier_ephemeral_multiplier);
-    sqlite3_bind_int(stmt, 31, stream->storage_priority);
+    sqlite3_bind_double(stmt, insert_bind_idx++, stream->tier_critical_multiplier);
+    sqlite3_bind_double(stmt, insert_bind_idx++, stream->tier_important_multiplier);
+    sqlite3_bind_double(stmt, insert_bind_idx++, stream->tier_ephemeral_multiplier);
+    sqlite3_bind_int(stmt, insert_bind_idx++, stream->storage_priority);
 
     // Bind PTZ parameters
-    sqlite3_bind_int(stmt, 32, stream->ptz_enabled ? 1 : 0);
-    sqlite3_bind_int(stmt, 33, stream->ptz_max_x);
-    sqlite3_bind_int(stmt, 34, stream->ptz_max_y);
-    sqlite3_bind_int(stmt, 35, stream->ptz_max_z);
-    sqlite3_bind_int(stmt, 36, stream->ptz_has_home ? 1 : 0);
+    sqlite3_bind_int(stmt, insert_bind_idx++, stream->ptz_enabled ? 1 : 0);
+    sqlite3_bind_int(stmt, insert_bind_idx++, stream->ptz_max_x);
+    sqlite3_bind_int(stmt, insert_bind_idx++, stream->ptz_max_y);
+    sqlite3_bind_int(stmt, insert_bind_idx++, stream->ptz_max_z);
+    sqlite3_bind_int(stmt, insert_bind_idx++, stream->ptz_has_home ? 1 : 0);
 
     // Bind ONVIF credentials
-    sqlite3_bind_text(stmt, 37, stream->onvif_username, -1, SQLITE_STATIC);
-    sqlite3_bind_text(stmt, 38, stream->onvif_password, -1, SQLITE_STATIC);
-    sqlite3_bind_text(stmt, 39, stream->onvif_profile, -1, SQLITE_STATIC);
-    sqlite3_bind_int(stmt, 40, stream->onvif_port);
+    sqlite3_bind_text(stmt, insert_bind_idx++, stream->onvif_username, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, insert_bind_idx++, stream->onvif_password, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, insert_bind_idx++, stream->onvif_profile, -1, SQLITE_STATIC);
+    sqlite3_bind_int(stmt, insert_bind_idx++, stream->onvif_port);
 
     // Bind recording schedule parameters
-    sqlite3_bind_int(stmt, 41, stream->record_on_schedule ? 1 : 0);
+    sqlite3_bind_int(stmt, insert_bind_idx++, stream->record_on_schedule ? 1 : 0);
     char insert_schedule_buf[RECORDING_SCHEDULE_TEXT_SIZE];
     serialize_recording_schedule(stream->recording_schedule, insert_schedule_buf, sizeof(insert_schedule_buf));
-    sqlite3_bind_text(stmt, 42, insert_schedule_buf, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, insert_bind_idx++, insert_schedule_buf, -1, SQLITE_TRANSIENT);
 
     // Bind tags, admin URL, privacy_mode, and motion_trigger_source parameters
-    sqlite3_bind_text(stmt, 43, stream->tags, -1, SQLITE_STATIC);
-    sqlite3_bind_text(stmt, 44, stream->admin_url, -1, SQLITE_STATIC);
-    sqlite3_bind_int(stmt, 45, stream->privacy_mode ? 1 : 0);
-    sqlite3_bind_text(stmt, 46, stream->motion_trigger_source, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, insert_bind_idx++, stream->tags, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, insert_bind_idx++, stream->admin_url, -1, SQLITE_STATIC);
+    sqlite3_bind_int(stmt, insert_bind_idx++, stream->privacy_mode ? 1 : 0);
+    sqlite3_bind_text(stmt, insert_bind_idx++, stream->motion_trigger_source, -1, SQLITE_STATIC);
 
     // Execute statement
     rc = sqlite3_step(stmt);
@@ -406,7 +400,7 @@ int update_stream_config(const char *name, const stream_config_t *stream) {
 
     // Now update the stream with all fields including detection settings, protocol, is_onvif, record_audio, backchannel_enabled, retention settings, PTZ, ONVIF credentials, recording schedule, tags, and privacy_mode
     const char *sql = "UPDATE streams SET "
-                      "name = ?, url = ?, enabled = ?, streaming_enabled = ?, width = ?, height = ?, "
+                      "name = ?, url = ?, secondary_url = ?, enabled = ?, streaming_enabled = ?, width = ?, height = ?, "
                       "fps = ?, codec = ?, priority = ?, record = ?, segment_duration = ?, "
                       "detection_based_recording = ?, detection_model = ?, detection_threshold = ?, "
                       "detection_interval = ?, pre_detection_buffer = ?, post_detection_buffer = ?, "
@@ -427,82 +421,79 @@ int update_stream_config(const char *name, const stream_config_t *stream) {
         return -1;
     }
 
+    int update_bind_idx = 1;
+
     // Bind parameters for basic stream settings
-    sqlite3_bind_text(stmt, 1, stream->name, -1, SQLITE_STATIC);
-    sqlite3_bind_text(stmt, 2, stream->url, -1, SQLITE_STATIC);
-    sqlite3_bind_int(stmt, 3, stream->enabled ? 1 : 0);
-    sqlite3_bind_int(stmt, 4, stream->streaming_enabled ? 1 : 0);
-    sqlite3_bind_int(stmt, 5, stream->width);
-    sqlite3_bind_int(stmt, 6, stream->height);
-    sqlite3_bind_int(stmt, 7, stream->fps);
-    sqlite3_bind_text(stmt, 8, stream->codec, -1, SQLITE_STATIC);
-    sqlite3_bind_int(stmt, 9, stream->priority);
-    sqlite3_bind_int(stmt, 10, stream->record ? 1 : 0);
-    sqlite3_bind_int(stmt, 11, stream->segment_duration);
+    sqlite3_bind_text(stmt, update_bind_idx++, stream->name, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, update_bind_idx++, stream->url, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, update_bind_idx++, stream->secondary_url, -1, SQLITE_STATIC);
+    sqlite3_bind_int(stmt, update_bind_idx++, stream->enabled ? 1 : 0);
+    sqlite3_bind_int(stmt, update_bind_idx++, stream->streaming_enabled ? 1 : 0);
+    sqlite3_bind_int(stmt, update_bind_idx++, stream->width);
+    sqlite3_bind_int(stmt, update_bind_idx++, stream->height);
+    sqlite3_bind_int(stmt, update_bind_idx++, stream->fps);
+    sqlite3_bind_text(stmt, update_bind_idx++, stream->codec, -1, SQLITE_STATIC);
+    sqlite3_bind_int(stmt, update_bind_idx++, stream->priority);
+    sqlite3_bind_int(stmt, update_bind_idx++, stream->record ? 1 : 0);
+    sqlite3_bind_int(stmt, update_bind_idx++, stream->segment_duration);
 
     // Bind parameters for detection settings
-    sqlite3_bind_int(stmt, 12, stream->detection_based_recording ? 1 : 0);
-    sqlite3_bind_text(stmt, 13, stream->detection_model, -1, SQLITE_STATIC);
-    sqlite3_bind_double(stmt, 14, stream->detection_threshold);
-    sqlite3_bind_int(stmt, 15, stream->detection_interval);
-    sqlite3_bind_int(stmt, 16, stream->pre_detection_buffer);
-    sqlite3_bind_int(stmt, 17, stream->post_detection_buffer);
-    sqlite3_bind_text(stmt, 18, stream->detection_api_url, -1, SQLITE_STATIC);
+    sqlite3_bind_int(stmt, update_bind_idx++, stream->detection_based_recording ? 1 : 0);
+    sqlite3_bind_text(stmt, update_bind_idx++, stream->detection_model, -1, SQLITE_STATIC);
+    sqlite3_bind_double(stmt, update_bind_idx++, stream->detection_threshold);
+    sqlite3_bind_int(stmt, update_bind_idx++, stream->detection_interval);
+    sqlite3_bind_int(stmt, update_bind_idx++, stream->pre_detection_buffer);
+    sqlite3_bind_int(stmt, update_bind_idx++, stream->post_detection_buffer);
+    sqlite3_bind_text(stmt, update_bind_idx++, stream->detection_api_url, -1, SQLITE_STATIC);
 
     // Bind detection object filter parameters
-    sqlite3_bind_text(stmt, 19, stream->detection_object_filter, -1, SQLITE_STATIC);
-    sqlite3_bind_text(stmt, 20, stream->detection_object_filter_list, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, update_bind_idx++, stream->detection_object_filter, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, update_bind_idx++, stream->detection_object_filter_list, -1, SQLITE_STATIC);
 
-    // Bind protocol parameter
-    sqlite3_bind_int(stmt, 21, (int)stream->protocol);
-
-    // Bind is_onvif parameter
-    sqlite3_bind_int(stmt, 22, stream->is_onvif ? 1 : 0);
-
-    // Bind record_audio parameter
-    sqlite3_bind_int(stmt, 23, stream->record_audio ? 1 : 0);
-
-    // Bind backchannel_enabled parameter
-    sqlite3_bind_int(stmt, 24, stream->backchannel_enabled ? 1 : 0);
+    // Bind protocol, ONVIF, audio and backchannel parameters
+    sqlite3_bind_int(stmt, update_bind_idx++, (int)stream->protocol);
+    sqlite3_bind_int(stmt, update_bind_idx++, stream->is_onvif ? 1 : 0);
+    sqlite3_bind_int(stmt, update_bind_idx++, stream->record_audio ? 1 : 0);
+    sqlite3_bind_int(stmt, update_bind_idx++, stream->backchannel_enabled ? 1 : 0);
 
     // Bind retention policy parameters
-    sqlite3_bind_int(stmt, 25, stream->retention_days);
-    sqlite3_bind_int(stmt, 26, stream->detection_retention_days);
-    sqlite3_bind_int(stmt, 27, stream->max_storage_mb);
+    sqlite3_bind_int(stmt, update_bind_idx++, stream->retention_days);
+    sqlite3_bind_int(stmt, update_bind_idx++, stream->detection_retention_days);
+    sqlite3_bind_int(stmt, update_bind_idx++, stream->max_storage_mb);
 
     // Bind tier multiplier parameters
-    sqlite3_bind_double(stmt, 28, stream->tier_critical_multiplier);
-    sqlite3_bind_double(stmt, 29, stream->tier_important_multiplier);
-    sqlite3_bind_double(stmt, 30, stream->tier_ephemeral_multiplier);
-    sqlite3_bind_int(stmt, 31, stream->storage_priority);
+    sqlite3_bind_double(stmt, update_bind_idx++, stream->tier_critical_multiplier);
+    sqlite3_bind_double(stmt, update_bind_idx++, stream->tier_important_multiplier);
+    sqlite3_bind_double(stmt, update_bind_idx++, stream->tier_ephemeral_multiplier);
+    sqlite3_bind_int(stmt, update_bind_idx++, stream->storage_priority);
 
     // Bind PTZ parameters
-    sqlite3_bind_int(stmt, 32, stream->ptz_enabled ? 1 : 0);
-    sqlite3_bind_int(stmt, 33, stream->ptz_max_x);
-    sqlite3_bind_int(stmt, 34, stream->ptz_max_y);
-    sqlite3_bind_int(stmt, 35, stream->ptz_max_z);
-    sqlite3_bind_int(stmt, 36, stream->ptz_has_home ? 1 : 0);
+    sqlite3_bind_int(stmt, update_bind_idx++, stream->ptz_enabled ? 1 : 0);
+    sqlite3_bind_int(stmt, update_bind_idx++, stream->ptz_max_x);
+    sqlite3_bind_int(stmt, update_bind_idx++, stream->ptz_max_y);
+    sqlite3_bind_int(stmt, update_bind_idx++, stream->ptz_max_z);
+    sqlite3_bind_int(stmt, update_bind_idx++, stream->ptz_has_home ? 1 : 0);
 
     // Bind ONVIF credentials
-    sqlite3_bind_text(stmt, 37, stream->onvif_username, -1, SQLITE_STATIC);
-    sqlite3_bind_text(stmt, 38, stream->onvif_password, -1, SQLITE_STATIC);
-    sqlite3_bind_text(stmt, 39, stream->onvif_profile, -1, SQLITE_STATIC);
-    sqlite3_bind_int(stmt, 40, stream->onvif_port);
+    sqlite3_bind_text(stmt, update_bind_idx++, stream->onvif_username, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, update_bind_idx++, stream->onvif_password, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, update_bind_idx++, stream->onvif_profile, -1, SQLITE_STATIC);
+    sqlite3_bind_int(stmt, update_bind_idx++, stream->onvif_port);
 
     // Bind recording schedule parameters
-    sqlite3_bind_int(stmt, 41, stream->record_on_schedule ? 1 : 0);
+    sqlite3_bind_int(stmt, update_bind_idx++, stream->record_on_schedule ? 1 : 0);
     char update_schedule_buf[RECORDING_SCHEDULE_TEXT_SIZE];
     serialize_recording_schedule(stream->recording_schedule, update_schedule_buf, sizeof(update_schedule_buf));
-    sqlite3_bind_text(stmt, 42, update_schedule_buf, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, update_bind_idx++, update_schedule_buf, -1, SQLITE_TRANSIENT);
 
     // Bind tags, admin URL, privacy_mode, and motion_trigger_source parameters
-    sqlite3_bind_text(stmt, 43, stream->tags, -1, SQLITE_STATIC);
-    sqlite3_bind_text(stmt, 44, stream->admin_url, -1, SQLITE_STATIC);
-    sqlite3_bind_int(stmt, 45, stream->privacy_mode ? 1 : 0);
-    sqlite3_bind_text(stmt, 46, stream->motion_trigger_source, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, update_bind_idx++, stream->tags, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, update_bind_idx++, stream->admin_url, -1, SQLITE_STATIC);
+    sqlite3_bind_int(stmt, update_bind_idx++, stream->privacy_mode ? 1 : 0);
+    sqlite3_bind_text(stmt, update_bind_idx++, stream->motion_trigger_source, -1, SQLITE_STATIC);
 
     // Bind the WHERE clause parameter
-    sqlite3_bind_text(stmt, 47, name, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, update_bind_idx++, name, -1, SQLITE_STATIC);
 
     // Execute statement
     rc = sqlite3_step(stmt);
@@ -765,7 +756,7 @@ int get_stream_config_by_name(const char *name, stream_config_t *stream) {
     // After migrations, all columns are guaranteed to exist
     // Use a single query with all columns - column indices are fixed
     const char *sql =
-        "SELECT name, url, enabled, streaming_enabled, width, height, fps, codec, priority, record, segment_duration, "
+        "SELECT name, url, secondary_url, enabled, streaming_enabled, width, height, fps, codec, priority, record, segment_duration, "
         "detection_based_recording, detection_model, detection_threshold, detection_interval, "
         "pre_detection_buffer, post_detection_buffer, detection_api_url, "
         "detection_object_filter, detection_object_filter_list, "
@@ -779,7 +770,7 @@ int get_stream_config_by_name(const char *name, stream_config_t *stream) {
 
     // Column index constants for readability
     enum {
-        COL_NAME = 0, COL_URL, COL_ENABLED, COL_STREAMING_ENABLED,
+        COL_NAME = 0, COL_URL, COL_SECONDARY_URL, COL_ENABLED, COL_STREAMING_ENABLED,
         COL_WIDTH, COL_HEIGHT, COL_FPS, COL_CODEC, COL_PRIORITY, COL_RECORD, COL_SEGMENT_DURATION,
         COL_DETECTION_BASED_RECORDING, COL_DETECTION_MODEL, COL_DETECTION_THRESHOLD, COL_DETECTION_INTERVAL,
         COL_PRE_DETECTION_BUFFER, COL_POST_DETECTION_BUFFER, COL_DETECTION_API_URL,
@@ -816,6 +807,12 @@ int get_stream_config_by_name(const char *name, stream_config_t *stream) {
         if (url) {
             strncpy(stream->url, url, MAX_URL_LENGTH - 1);
             stream->url[MAX_URL_LENGTH - 1] = '\0';
+        }
+
+        const char *secondary_url = (const char *)sqlite3_column_text(stmt, COL_SECONDARY_URL);
+        if (secondary_url) {
+            strncpy(stream->secondary_url, secondary_url, MAX_URL_LENGTH - 1);
+            stream->secondary_url[MAX_URL_LENGTH - 1] = '\0';
         }
 
         stream->enabled = sqlite3_column_int(stmt, COL_ENABLED) != 0;
@@ -1006,7 +1003,7 @@ int get_all_stream_configs(stream_config_t *streams, int max_count) {
 
     // After migrations, all columns are guaranteed to exist
     const char *sql =
-        "SELECT name, url, enabled, streaming_enabled, width, height, fps, codec, priority, record, segment_duration, "
+        "SELECT name, url, secondary_url, enabled, streaming_enabled, width, height, fps, codec, priority, record, segment_duration, "
         "detection_based_recording, detection_model, detection_threshold, detection_interval, "
         "pre_detection_buffer, post_detection_buffer, detection_api_url, "
         "detection_object_filter, detection_object_filter_list, "
@@ -1020,7 +1017,7 @@ int get_all_stream_configs(stream_config_t *streams, int max_count) {
 
     // Column index constants (same as get_stream_config_by_name)
     enum {
-        COL_NAME = 0, COL_URL, COL_ENABLED, COL_STREAMING_ENABLED,
+        COL_NAME = 0, COL_URL, COL_SECONDARY_URL, COL_ENABLED, COL_STREAMING_ENABLED,
         COL_WIDTH, COL_HEIGHT, COL_FPS, COL_CODEC, COL_PRIORITY, COL_RECORD, COL_SEGMENT_DURATION,
         COL_DETECTION_BASED_RECORDING, COL_DETECTION_MODEL, COL_DETECTION_THRESHOLD, COL_DETECTION_INTERVAL,
         COL_PRE_DETECTION_BUFFER, COL_POST_DETECTION_BUFFER, COL_DETECTION_API_URL,
@@ -1056,6 +1053,12 @@ int get_all_stream_configs(stream_config_t *streams, int max_count) {
         if (url) {
             strncpy(s->url, url, MAX_URL_LENGTH - 1);
             s->url[MAX_URL_LENGTH - 1] = '\0';
+        }
+
+        const char *secondary_url = (const char *)sqlite3_column_text(stmt, COL_SECONDARY_URL);
+        if (secondary_url) {
+            strncpy(s->secondary_url, secondary_url, MAX_URL_LENGTH - 1);
+            s->secondary_url[MAX_URL_LENGTH - 1] = '\0';
         }
 
         s->enabled = sqlite3_column_int(stmt, COL_ENABLED) != 0;

@@ -89,7 +89,61 @@ bool go2rtc_stream_init(const char *binary_path, const char *config_dir, int api
     return true;
 }
 
+static void prepare_go2rtc_source_url(const char *stream_url,
+                                      const char *username,
+                                      const char *password,
+                                      bool include_backchannel,
+                                      stream_protocol_t protocol,
+                                      char *out_url,
+                                      size_t out_url_size) {
+    if (!stream_url || !out_url || out_url_size == 0) {
+        return;
+    }
+
+    strncpy(out_url, stream_url, out_url_size - 1);
+    out_url[out_url_size - 1] = '\0';
+
+    // Inject credentials into URL if provided and not already embedded.
+    char credentialed_url[URL_BUFFER_SIZE];
+    if (url_apply_credentials(out_url, username, password,
+                              credentialed_url, sizeof(credentialed_url)) == 0) {
+        if (strcmp(credentialed_url, out_url) != 0) {
+            strncpy(out_url, credentialed_url, out_url_size - 1);
+            out_url[out_url_size - 1] = '\0';
+            log_info("Applied credentials to go2rtc source URL for registration");
+        }
+    }
+
+    // go2rtc uses fragment (#) parameters for source options.
+    char fragment_params[256] = {0};
+    int offset = 0;
+
+    if (strstr(out_url, "#transport=") == NULL) {
+        if (protocol == STREAM_PROTOCOL_UDP) {
+            offset += snprintf(fragment_params + offset, sizeof(fragment_params) - offset, "#transport=udp");
+            log_info("Adding UDP transport parameter for stream");
+        } else {
+            offset += snprintf(fragment_params + offset, sizeof(fragment_params) - offset, "#transport=tcp");
+            log_info("Adding TCP transport parameter for stream");
+        }
+    }
+
+    if (strstr(out_url, "#timeout=") == NULL) {
+        offset += snprintf(fragment_params + offset, sizeof(fragment_params) - offset, "#timeout=30");
+    }
+
+    if (include_backchannel && strstr(out_url, "#backchannel=") == NULL) {
+        snprintf(fragment_params + offset, sizeof(fragment_params) - offset, "#backchannel=1");
+    }
+
+    char new_url[URL_BUFFER_SIZE];
+    snprintf(new_url, sizeof(new_url), "%s%s", out_url, fragment_params);
+    strncpy(out_url, new_url, out_url_size - 1);
+    out_url[out_url_size - 1] = '\0';
+}
+
 bool go2rtc_stream_register(const char *stream_id, const char *stream_url,
+                           const char *secondary_stream_url,
                            const char *username, const char *password,
                            bool backchannel_enabled, stream_protocol_t protocol,
                            bool record_audio) {
@@ -132,61 +186,26 @@ bool go2rtc_stream_register(const char *stream_id, const char *stream_url,
         }
     }
 
-    // Use a static buffer for the modified URL to avoid memory allocation issues
-    char modified_url[URL_BUFFER_SIZE];
-    strncpy(modified_url, stream_url, URL_BUFFER_SIZE - 1);
-    modified_url[URL_BUFFER_SIZE - 1] = '\0';
+    char primary_url[URL_BUFFER_SIZE];
+    prepare_go2rtc_source_url(stream_url, username, password, backchannel_enabled,
+                              protocol, primary_url, sizeof(primary_url));
 
-    // Inject credentials into URL if provided and not already embedded
-    {
-        char credentialed_url[URL_BUFFER_SIZE];
-        if (url_apply_credentials(modified_url, username, password,
-                                  credentialed_url, sizeof(credentialed_url)) == 0) {
-            if (strcmp(credentialed_url, modified_url) != 0) {
-                strncpy(modified_url, credentialed_url, URL_BUFFER_SIZE - 1);
-                modified_url[URL_BUFFER_SIZE - 1] = '\0';
-                log_info("Applied credentials to go2rtc source URL for registration");
-            }
-        }
+    bool has_secondary = secondary_stream_url && secondary_stream_url[0] != '\0';
+    char secondary_url[URL_BUFFER_SIZE] = {0};
+    if (has_secondary) {
+        prepare_go2rtc_source_url(secondary_stream_url, username, password, false,
+                                  protocol, secondary_url, sizeof(secondary_url));
     }
 
-    // Build fragment parameters for go2rtc
-    // go2rtc uses fragment (#) parameters for stream options like timeout, backchannel, transport
-    char fragment_params[256] = {0};
-    int offset = 0;
-
-    // Add transport parameter based on protocol setting
-    // Note: Check if URL already contains #transport= to avoid duplicates
-    // go2rtc uses #transport=tcp or #transport=udp to control RTP transport
-    // Without explicit transport, go2rtc may use UDP for RTP even with TCP RTSP connection
-    if (strstr(modified_url, "#transport=") == NULL) {
-        if (protocol == STREAM_PROTOCOL_UDP) {
-            offset += snprintf(fragment_params + offset, sizeof(fragment_params) - offset, "#transport=udp");
-            log_info("Adding UDP transport parameter for stream");
-        } else {
-            // Default to TCP for more reliable streaming (STREAM_PROTOCOL_TCP)
-            offset += snprintf(fragment_params + offset, sizeof(fragment_params) - offset, "#transport=tcp");
-            log_info("Adding TCP transport parameter for stream");
-        }
+    log_info("Prepared go2rtc primary source URL for stream registration of %s: %s", stream_id, primary_url);
+    if (has_secondary) {
+        log_info("Prepared go2rtc secondary source URL for stream registration of %s: %s", stream_id, secondary_url);
     }
-
-    // Add timeout parameter
-    offset += snprintf(fragment_params + offset, sizeof(fragment_params) - offset, "#timeout=30");
-
-    // Add backchannel parameter if enabled
-    if (backchannel_enabled) {
-        snprintf(fragment_params + offset, sizeof(fragment_params) - offset, "#backchannel=1");
-    }
-
-    // Append fragment parameters to URL
-    char new_url[URL_BUFFER_SIZE];
-    snprintf(new_url, URL_BUFFER_SIZE, "%s%s", modified_url, fragment_params);
-    strncpy(modified_url, new_url, URL_BUFFER_SIZE - 1);
-    modified_url[URL_BUFFER_SIZE - 1] = '\0';
-
-    log_info("Prepared go2rtc source URL for stream registration of %s: %s", stream_id, modified_url);
 
     bool result;
+    const char *sources[3];
+    int source_count = 0;
+    sources[source_count++] = primary_url;
 
     // Register the stream with go2rtc.
     //
@@ -204,6 +223,10 @@ bool go2rtc_stream_register(const char *stream_id, const char *stream_url,
     //       that would open a second connection to the camera, creating a
     //       duplicate video producer and RTSP 404 errors.  Video is served
     //       directly from the primary RTSP source.
+    if (has_secondary) {
+        sources[source_count++] = secondary_url;
+    }
+
     if (record_audio) {
         log_info("Audio recording enabled for stream %s, adding FFmpeg AAC source for MP4 recording", stream_id);
 
@@ -214,8 +237,8 @@ bool go2rtc_stream_register(const char *stream_id, const char *stream_url,
         char ffmpeg_aac_source[URL_BUFFER_SIZE];
         snprintf(ffmpeg_aac_source, URL_BUFFER_SIZE, "ffmpeg:%s#audio=aac", encoded_stream_id);
 
-        const char *sources[2] = { modified_url, ffmpeg_aac_source };
-        result = go2rtc_api_add_stream_multi(encoded_stream_id, sources, 2);
+        sources[source_count++] = ffmpeg_aac_source;
+        result = go2rtc_api_add_stream_multi(encoded_stream_id, sources, source_count);
 
         if (result) {
             log_info("Successfully registered stream with go2rtc (with AAC audio for recording): %s", encoded_stream_id);
@@ -223,7 +246,19 @@ bool go2rtc_stream_register(const char *stream_id, const char *stream_url,
             log_error("Failed to register stream with go2rtc (with AAC audio): %s", encoded_stream_id);
             // Fall back to primary RTSP source only
             log_warn("Falling back to single source registration without audio transcoding");
-            result = go2rtc_api_add_stream(encoded_stream_id, modified_url);
+            result = go2rtc_api_add_stream(encoded_stream_id, primary_url);
+        }
+    } else if (source_count > 1) {
+        log_info("Registering stream %s with primary and secondary RTSP sources", stream_id);
+
+        result = go2rtc_api_add_stream_multi(encoded_stream_id, sources, source_count);
+
+        if (result) {
+            log_info("Successfully registered stream with go2rtc using %d sources: %s", source_count, encoded_stream_id);
+        } else {
+            log_error("Failed to register stream with go2rtc using %d sources: %s", source_count, encoded_stream_id);
+            log_warn("Falling back to primary source registration");
+            result = go2rtc_api_add_stream(encoded_stream_id, primary_url);
         }
     } else {
         // No audio recording: register only the primary RTSP source.
@@ -231,7 +266,7 @@ bool go2rtc_stream_register(const char *stream_id, const char *stream_url,
         // without requiring a persistent ffmpeg process.
         log_info("Registering stream %s with primary RTSP source only (on-demand OPUS transcoding by go2rtc)", stream_id);
 
-        result = go2rtc_api_add_stream(encoded_stream_id, modified_url);
+        result = go2rtc_api_add_stream(encoded_stream_id, primary_url);
 
         if (result) {
             log_info("Successfully registered stream with go2rtc: %s", encoded_stream_id);

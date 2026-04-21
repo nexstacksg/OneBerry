@@ -257,6 +257,7 @@ export function StreamsView() {
   const [currentStream, setCurrentStream] = useState({
     name: '',
     url: '',
+    secondaryUrl: '',
     adminUrl: '',
     enabled: true,
     streamingEnabled: true,
@@ -610,6 +611,7 @@ export function StreamsView() {
     const streamData = {
       name: currentStream.name.trim(),
       url: currentStream.url,
+      secondary_url: currentStream.secondaryUrl || '',
       admin_url: currentStream.adminUrl || '',
       enabled: currentStream.enabled,
       streaming_enabled: currentStream.streamingEnabled,
@@ -786,6 +788,7 @@ export function StreamsView() {
     setCurrentStream({
       name: '',
       url: '',
+      secondaryUrl: '',
       adminUrl: '',
       enabled: true,
       streamingEnabled: true,
@@ -872,6 +875,7 @@ export function StreamsView() {
         detectionZones: stream.detection_zones || [],
         postBuffer: stream.post_detection_buffer || 30,
         // Map API fields to form fields
+        secondaryUrl: stream.secondary_url || '',
         adminUrl: stream.admin_url || '',
         streamingEnabled: stream.streaming_enabled !== undefined ? stream.streaming_enabled : true,
         isOnvif: stream.isOnvif !== undefined ? stream.isOnvif : false,
@@ -962,6 +966,7 @@ export function StreamsView() {
         preBuffer: stream.pre_detection_buffer || 10,
         detectionZones: [],
         postBuffer: stream.post_detection_buffer || 30,
+        secondaryUrl: stream.secondary_url || '',
         adminUrl: stream.admin_url || '',
         streamingEnabled: stream.streaming_enabled !== undefined ? stream.streaming_enabled : true,
         isOnvif: stream.isOnvif !== undefined ? stream.isOnvif : false,
@@ -1306,6 +1311,7 @@ export function StreamsView() {
       // This mapping intentionally translates the ONVIF profile shape to the
       // stream configuration shape expected by the API.
       url: selectedProfile.stream_uri,
+      secondary_url: '',
       enabled: true,
       streaming_enabled: true,
       width,
