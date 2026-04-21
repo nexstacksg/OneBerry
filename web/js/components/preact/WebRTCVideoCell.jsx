@@ -19,6 +19,8 @@ import { formatUtils } from './recordings/formatUtils.js';
 import { useI18n } from '../../i18n.js';
 import { useQueryClient } from '../../query-client.js';
 import { createPlayerTelemetry } from '../../utils/player-telemetry.js';
+import { StreamQualitySelector } from './StreamQualitySelector.jsx';
+import { useStreamQuality } from './useStreamQuality.js';
 import 'webrtc-adapter';
 
 // Retry configuration for sending WebRTC offers to go2rtc.
@@ -72,6 +74,12 @@ export function WebRTCVideoCell({
 }) {
   const { t } = useI18n();
   const queryClient = useQueryClient();
+  const {
+    hasLowQuality,
+    selectedStreamSource,
+    setStreamQuality,
+    streamQuality,
+  } = useStreamQuality(stream);
 
   // Component state
   const [isLoading, setIsLoading] = useState(() => {
@@ -100,6 +108,19 @@ export function WebRTCVideoCell({
   const [isFullscreenCell, setIsFullscreenCell] = useState(false);
   const [fullscreenPlayback, setFullscreenPlayback] = useState(null);
   const [fullscreenPlaybackTimestamp, setFullscreenPlaybackTimestamp] = useState(null);
+
+  const handleStreamQualityChange = useCallback((quality) => {
+    if (quality === streamQuality) {
+      return;
+    }
+
+    setStreamQuality(quality);
+    setError(null);
+    setIsLoading(true);
+    setIsPlaying(false);
+    setConnectionQuality('unknown');
+    setRetryCount((value) => value + 1);
+  }, [setStreamQuality, streamQuality]);
 
   // Backchannel (two-way audio) state
   const [isTalking, setIsTalking] = useState(false);
@@ -234,7 +255,8 @@ export function WebRTCVideoCell({
   useEffect(() => {
     if (!stream || !stream.name || !videoRef.current) return;
 
-    console.log(`Initializing WebRTC connection for stream ${stream.name}`);
+    const activeStreamSource = selectedStreamSource || stream.name;
+    console.log(`Initializing WebRTC connection for stream ${stream.name} using go2rtc source ${activeStreamSource}`);
     setIsLoading(true);
     setError(null);
 
@@ -650,7 +672,7 @@ export function WebRTCVideoCell({
         // but we log them here for debugging purposes
         // If trickle ICE is needed, uncomment the code below:
         /*
-        fetch(`/api/webrtc/ice?src=${encodeURIComponent(stream.name)}`, {
+        fetch(`/api/webrtc/ice?src=${encodeURIComponent(activeStreamSource)}`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -712,7 +734,7 @@ export function WebRTCVideoCell({
         // Create a new AbortController for this request
         abortControllerRef.current = new AbortController();
 
-        console.log(`Sending offer directly to go2rtc for stream ${stream.name}`);
+        console.log(`Sending offer directly to go2rtc for stream ${stream.name} using source ${activeStreamSource}`);
 
         // Send the offer directly to go2rtc with retry logic for 404 responses.
         // On slower devices, go2rtc may not have the stream ready yet when we
@@ -722,7 +744,7 @@ export function WebRTCVideoCell({
         const baseRetryDelayMs = BASE_RETRY_DELAY_MS;
 
         const sendOfferWithRetry = async (attempt) => {
-          const response = await fetch(`${go2rtcBaseUrl}/api/webrtc?src=${encodeURIComponent(stream.name)}`, {
+          const response = await fetch(`${go2rtcBaseUrl}/api/webrtc?src=${encodeURIComponent(activeStreamSource)}`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/sdp',
@@ -943,7 +965,7 @@ export function WebRTCVideoCell({
     };
 
     return cleanupWebRTCResources;
-  }, [stream, retryCount, t]);
+  }, [stream, retryCount, t, selectedStreamSource]);
 
   /**
    * Refresh the stream's go2rtc registration
@@ -1380,6 +1402,12 @@ export function WebRTCVideoCell({
           borderRadius: '4px'
         }}
       >
+        {hasLowQuality && (
+          <StreamQualitySelector
+            value={streamQuality}
+            onChange={handleStreamQualityChange}
+          />
+        )}
         <div
           style={{
             backgroundColor: 'transparent',

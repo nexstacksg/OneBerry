@@ -17,6 +17,8 @@ import { formatUtils } from './recordings/formatUtils.js';
 import { useI18n } from '../../i18n.js';
 import { useQueryClient } from '../../query-client.js';
 import { createPlayerTelemetry } from '../../utils/player-telemetry.js';
+import { StreamQualitySelector } from './StreamQualitySelector.jsx';
+import { useStreamQuality } from './useStreamQuality.js';
 import Hls from 'hls.js';
 
 /**
@@ -40,6 +42,12 @@ export function HLSVideoCell({
 }) {
   const { t } = useI18n();
   const queryClient = useQueryClient();
+  const {
+    hasLowQuality,
+    selectedStreamSource,
+    setStreamQuality,
+    streamQuality,
+  } = useStreamQuality(stream);
 
   // Component state
   const [isLoading, setIsLoading] = useState(true);
@@ -62,6 +70,18 @@ export function HLSVideoCell({
   const [hlsMode, setHlsMode] = useState(() => {
     return stream && stream.go2rtc_hls_available ? 'go2rtc' : 'native';
   });
+
+  const handleStreamQualityChange = (quality) => {
+    if (quality === streamQuality) {
+      return;
+    }
+
+    setStreamQuality(quality);
+    setError(null);
+    setIsLoading(true);
+    setIsPlaying(false);
+    setRetryCount((value) => value + 1);
+  };
 
   // PTZ controls state
   const [showPTZControls, setShowPTZControls] = useState(false);
@@ -122,7 +142,8 @@ export function HLSVideoCell({
       return;
     }
 
-    console.log(`[HLS ${stream.name}] useEffect triggered, videoRef:`, !!videoRef.current, 'retryCount:', retryCount, 'initDelay:', initDelay);
+    const activeStreamSource = selectedStreamSource || stream.name;
+    console.log(`[HLS ${stream.name}] useEffect triggered, videoRef:`, !!videoRef.current, 'retryCount:', retryCount, 'initDelay:', initDelay, 'source:', activeStreamSource);
 
     // Track if component is still mounted - using ref for stable access in callbacks
     let isMounted = true;
@@ -184,9 +205,9 @@ export function HLSVideoCell({
 
           // Build the HLS stream URL using go2rtc's dynamic HLS endpoint
           // Using &mp4=flac for best codec compatibility (H264/H265 + AAC/PCMA/PCMU/PCM)
-          hlsStreamUrl = `${go2rtcBaseUrl}/api/stream.m3u8?src=${encodeURIComponent(stream.name)}&mp4=flac`;
+          hlsStreamUrl = `${go2rtcBaseUrl}/api/stream.m3u8?src=${encodeURIComponent(activeStreamSource)}&mp4=flac`;
           usingGo2rtc = true;
-          console.log(`[HLS ${stream.name}] Using go2rtc HLS: ${hlsStreamUrl}`);
+          console.log(`[HLS ${stream.name}] Using go2rtc HLS source ${activeStreamSource}: ${hlsStreamUrl}`);
           console.log(`[HLS ${stream.name}] go2rtc base URL: ${go2rtcBaseUrl}`);
 
           if (!isMounted) return;
@@ -499,7 +520,7 @@ export function HLSVideoCell({
         videoRef.current.load();
       }
     };
-  }, [stream, retryCount, initDelay, hlsMode, t]);
+  }, [stream, retryCount, initDelay, hlsMode, t, selectedStreamSource]);
 
   // Auto-retry when stream status transitions back to 'Running' while the
   // error overlay is visible (e.g. camera came back online after an outage).
@@ -725,6 +746,12 @@ export function HLSVideoCell({
           borderRadius: '4px'
         }}
       >
+        {hasLowQuality && hlsMode === 'go2rtc' && (
+          <StreamQualitySelector
+            value={streamQuality}
+            onChange={handleStreamQualityChange}
+          />
+        )}
         <div
           style={{
             backgroundColor: 'transparent',

@@ -30,6 +30,7 @@
 
 // Buffer sizes
 #define URL_BUFFER_SIZE 2048
+#define SECONDARY_STREAM_SUFFIX "__low"
 
 extern config_t g_config;
 
@@ -43,6 +44,21 @@ static bool g_ready_cache_valid = false;
 static bool g_ready_cache_value = false;
 static time_t g_ready_cache_time = 0;
 #define READY_CACHE_TTL_SEC 5  // Cache result for 5 seconds
+
+static bool build_secondary_stream_id(const char *stream_id, char *buffer, size_t buffer_size) {
+    if (!stream_id || !buffer || buffer_size == 0) {
+        return false;
+    }
+
+    int written = snprintf(buffer, buffer_size, "%s%s", stream_id, SECONDARY_STREAM_SUFFIX);
+    if (written < 0 || (size_t)written >= buffer_size) {
+        log_error("Secondary go2rtc stream id is too long for stream %s", stream_id);
+        buffer[0] = '\0';
+        return false;
+    }
+
+    return true;
+}
 
 bool go2rtc_stream_init(const char *binary_path, const char *config_dir, int api_port) {
     if (g_initialized) {
@@ -192,14 +208,19 @@ bool go2rtc_stream_register(const char *stream_id, const char *stream_url,
 
     bool has_secondary = secondary_stream_url && secondary_stream_url[0] != '\0';
     char secondary_url[URL_BUFFER_SIZE] = {0};
+    char secondary_stream_id[URL_BUFFER_SIZE] = {0};
     if (has_secondary) {
         prepare_go2rtc_source_url(secondary_stream_url, username, password, false,
                                   protocol, secondary_url, sizeof(secondary_url));
+        if (!build_secondary_stream_id(stream_id, secondary_stream_id, sizeof(secondary_stream_id))) {
+            has_secondary = false;
+        }
     }
 
     log_info("Prepared go2rtc primary source URL for stream registration of %s: %s", stream_id, primary_url);
     if (has_secondary) {
-        log_info("Prepared go2rtc secondary source URL for stream registration of %s: %s", stream_id, secondary_url);
+        log_info("Prepared go2rtc secondary source URL for low-quality stream registration of %s as %s: %s",
+                 stream_id, secondary_stream_id, secondary_url);
     }
 
     bool result;
@@ -223,10 +244,6 @@ bool go2rtc_stream_register(const char *stream_id, const char *stream_url,
     //       that would open a second connection to the camera, creating a
     //       duplicate video producer and RTSP 404 errors.  Video is served
     //       directly from the primary RTSP source.
-    if (has_secondary) {
-        sources[source_count++] = secondary_url;
-    }
-
     if (record_audio) {
         log_info("Audio recording enabled for stream %s, adding FFmpeg AAC source for MP4 recording", stream_id);
 
@@ -248,18 +265,6 @@ bool go2rtc_stream_register(const char *stream_id, const char *stream_url,
             log_warn("Falling back to single source registration without audio transcoding");
             result = go2rtc_api_add_stream(encoded_stream_id, primary_url);
         }
-    } else if (source_count > 1) {
-        log_info("Registering stream %s with primary and secondary RTSP sources", stream_id);
-
-        result = go2rtc_api_add_stream_multi(encoded_stream_id, sources, source_count);
-
-        if (result) {
-            log_info("Successfully registered stream with go2rtc using %d sources: %s", source_count, encoded_stream_id);
-        } else {
-            log_error("Failed to register stream with go2rtc using %d sources: %s", source_count, encoded_stream_id);
-            log_warn("Falling back to primary source registration");
-            result = go2rtc_api_add_stream(encoded_stream_id, primary_url);
-        }
     } else {
         // No audio recording: register only the primary RTSP source.
         // go2rtc transcodes audio to OPUS for WebRTC viewers on demand
@@ -272,6 +277,17 @@ bool go2rtc_stream_register(const char *stream_id, const char *stream_url,
             log_info("Successfully registered stream with go2rtc: %s", encoded_stream_id);
         } else {
             log_error("Failed to register stream with go2rtc: %s", encoded_stream_id);
+        }
+    }
+
+    if (has_secondary) {
+        bool secondary_result = go2rtc_api_add_stream(secondary_stream_id, secondary_url);
+        if (secondary_result) {
+            log_info("Successfully registered low-quality go2rtc stream alias %s for primary stream %s",
+                     secondary_stream_id, stream_id);
+        } else {
+            log_error("Failed to register low-quality go2rtc stream alias %s for primary stream %s",
+                      secondary_stream_id, stream_id);
         }
     }
 
@@ -312,6 +328,7 @@ bool go2rtc_stream_unregister(const char *stream_id) {
 
     // Unregister stream from go2rtc
     bool result = go2rtc_api_remove_stream(stream_id);
+    bool secondary_result = true;
 
     if (result) {
         log_info("Unregistered stream from go2rtc: %s", stream_id);
@@ -319,7 +336,18 @@ bool go2rtc_stream_unregister(const char *stream_id) {
         log_error("Failed to unregister stream from go2rtc: %s", stream_id);
     }
 
-    return result;
+    char secondary_stream_id[URL_BUFFER_SIZE] = {0};
+    if (build_secondary_stream_id(stream_id, secondary_stream_id, sizeof(secondary_stream_id)) &&
+        go2rtc_api_stream_exists(secondary_stream_id)) {
+        secondary_result = go2rtc_api_remove_stream(secondary_stream_id);
+        if (secondary_result) {
+            log_info("Unregistered low-quality go2rtc stream alias: %s", secondary_stream_id);
+        } else {
+            log_error("Failed to unregister low-quality go2rtc stream alias: %s", secondary_stream_id);
+        }
+    }
+
+    return result && secondary_result;
 }
 
 bool go2rtc_stream_get_webrtc_url(const char *stream_id, char *buffer, size_t buffer_size) {
