@@ -21,6 +21,12 @@ export const VIDEO_RESOLUTION_PRESETS = [
 
 export const VIDEO_FPS_PRESETS = [5, 10, 12, 15, 20, 24, 25, 30, 50, 60];
 
+export const VIDEO_CODEC_OPTIONS = [
+  { value: 'h264', label: 'H.264' },
+  { value: 'h265', label: 'H.265 / HEVC' },
+  { value: 'mjpeg', label: 'MJPEG' }
+];
+
 export function formatResolutionValue(width, height) {
   const parsedWidth = Number(width) || 0;
   const parsedHeight = Number(height) || 0;

@@ -505,7 +505,7 @@ static bool ensure_stream_registered_with_go2rtc(const char *stream_name) {
     }
 
     // Register the stream with go2rtc
-    if (!go2rtc_stream_register(stream_name, config.url,
+    if (!go2rtc_stream_register(stream_name, config.url, config.secondary_url,
                                config.onvif_username[0] != '\0' ? config.onvif_username : NULL,
                                config.onvif_password[0] != '\0' ? config.onvif_password : NULL,
                                config.backchannel_enabled, config.protocol,
@@ -1251,25 +1251,23 @@ int go2rtc_integration_start_hls(const char *stream_name) {
     if (using_go2rtc) {
         log_info("Using go2rtc native HLS for stream %s (no ffmpeg HLS thread needed)", stream_name);
 
-        // Only preload if not already tracked as active.  go2rtc's AddPreload
-        // removes the existing consumer before adding a new one; calling it every
-        // 30 s from the periodic service check briefly leaves the stream with no
-        // consumers, which can cause go2rtc to disconnect from the camera and
-        // creates unnecessary noise/reconnections for working streams.
-        go2rtc_stream_tracking_t *existing = find_tracked_stream(stream_name);
-        if (!existing || !existing->using_go2rtc_for_hls) {
-            if (!go2rtc_api_preload_stream(stream_name)) {
-                log_warn("Failed to preload stream %s in go2rtc - detection snapshots may be intermittent", stream_name);
-                // Continue anyway - go2rtc HLS will still work for viewers
-            } else {
-                log_info("Preloaded stream %s to keep go2rtc producer active for HLS/detection", stream_name);
-            }
-        } else {
+        // Only queue preload if not already tracked as active.  go2rtc's
+        // AddPreload removes the existing consumer before adding a new one;
+        // calling it repeatedly can briefly leave the stream with no consumers.
+        go2rtc_stream_tracking_t *tracking = add_tracked_stream(stream_name);
+        if (tracking && tracking->using_go2rtc_for_hls) {
             log_debug("Stream %s already preloaded for go2rtc HLS, skipping redundant preload", stream_name);
+        } else {
+            if (tracking) {
+                tracking->using_go2rtc_for_hls = true;
+            }
+            if (!go2rtc_api_preload_stream_async(stream_name)) {
+                log_warn("Failed to queue go2rtc preload for stream %s - HLS/WebRTC can still start on demand", stream_name);
+            }
         }
 
-        // Update tracking
-        go2rtc_stream_tracking_t *tracking = add_tracked_stream(stream_name);
+        // Update tracking even if queuing preload failed; this stream is still
+        // configured to use go2rtc native HLS and can start producers on demand.
         if (tracking) {
             tracking->using_go2rtc_for_hls = true;
         }
@@ -1370,7 +1368,7 @@ bool go2rtc_integration_register_all_streams(void) {
             log_info("Registering stream %s with go2rtc", streams[i].name);
 
             // Register the stream with go2rtc
-            if (!go2rtc_stream_register(streams[i].name, streams[i].url,
+            if (!go2rtc_stream_register(streams[i].name, streams[i].url, streams[i].secondary_url,
                                        streams[i].onvif_username[0] != '\0' ? streams[i].onvif_username : NULL,
                                        streams[i].onvif_password[0] != '\0' ? streams[i].onvif_password : NULL,
                                        streams[i].backchannel_enabled, streams[i].protocol,
@@ -1469,7 +1467,7 @@ bool go2rtc_sync_streams_from_database(void) {
         }
 
         // Register the stream
-        if (!go2rtc_stream_register(db_streams[i].name, db_streams[i].url,
+        if (!go2rtc_stream_register(db_streams[i].name, db_streams[i].url, db_streams[i].secondary_url,
                                     username, password,
                                     db_streams[i].backchannel_enabled, db_streams[i].protocol,
                                     db_streams[i].record_audio)) {
@@ -1641,6 +1639,7 @@ bool go2rtc_integration_get_hls_url(const char *stream_name, char *buffer, size_
 
 bool go2rtc_integration_reload_stream_config(const char *stream_name,
                                              const char *new_url,
+                                             const char *new_secondary_url,
                                              const char *new_username,
                                              const char *new_password,
                                              int new_backchannel_enabled,
@@ -1670,6 +1669,7 @@ bool go2rtc_integration_reload_stream_config(const char *stream_name,
 
     // Determine the values to use
     const char *url = new_url;
+    const char *secondary_url = new_secondary_url;
     const char *username = new_username;
     const char *password = new_password;
     bool backchannel = (new_backchannel_enabled >= 0) ? (new_backchannel_enabled != 0) : false;
@@ -1678,6 +1678,7 @@ bool go2rtc_integration_reload_stream_config(const char *stream_name,
 
     if (have_config) {
         if (!url) url = config.url;
+        if (!secondary_url) secondary_url = config.secondary_url;
         if (!username) username = config.onvif_username[0] != '\0' ? config.onvif_username : NULL;
         if (!password) password = config.onvif_password[0] != '\0' ? config.onvif_password : NULL;
         if (new_backchannel_enabled < 0) backchannel = config.backchannel_enabled;
@@ -1711,13 +1712,14 @@ bool go2rtc_integration_reload_stream_config(const char *stream_name,
     usleep(500000); // 500ms
 
     // Re-register with new configuration
-    if (!go2rtc_stream_register(stream_name, url, username, password, backchannel, protocol, record_audio)) {
+    if (!go2rtc_stream_register(stream_name, url, secondary_url, username, password, backchannel, protocol, record_audio)) {
         log_error("Failed to re-register stream %s with go2rtc", stream_name);
         return false;
     }
 
-    log_info("Successfully reloaded stream %s in go2rtc with URL: %s (protocol=%s)",
-             stream_name, url, protocol == STREAM_PROTOCOL_UDP ? "UDP" : "TCP");
+    log_info("Successfully reloaded stream %s in go2rtc with URL: %s, secondary=%s (protocol=%s)",
+             stream_name, url, secondary_url && secondary_url[0] ? "present" : "none",
+             protocol == STREAM_PROTOCOL_UDP ? "UDP" : "TCP");
     return true;
 }
 
@@ -1728,7 +1730,7 @@ bool go2rtc_integration_reload_stream(const char *stream_name) {
     }
 
     // Use the generic reload function with -1 values to use current config
-    return go2rtc_integration_reload_stream_config(stream_name, NULL, NULL, NULL, -1, -1, -1);
+    return go2rtc_integration_reload_stream_config(stream_name, NULL, NULL, NULL, NULL, -1, -1, -1);
 }
 
 bool go2rtc_integration_unregister_stream(const char *stream_name) {
@@ -1833,7 +1835,7 @@ bool go2rtc_integration_register_stream(const char *stream_name) {
     }
 
     // Register with go2rtc
-    if (go2rtc_stream_register(stream_name, config.url,
+    if (go2rtc_stream_register(stream_name, config.url, config.secondary_url,
                                username[0] != '\0' ? username : NULL,
                                password[0] != '\0' ? password : NULL,
                                config.backchannel_enabled, config.protocol,
