@@ -1251,25 +1251,23 @@ int go2rtc_integration_start_hls(const char *stream_name) {
     if (using_go2rtc) {
         log_info("Using go2rtc native HLS for stream %s (no ffmpeg HLS thread needed)", stream_name);
 
-        // Only preload if not already tracked as active.  go2rtc's AddPreload
-        // removes the existing consumer before adding a new one; calling it every
-        // 30 s from the periodic service check briefly leaves the stream with no
-        // consumers, which can cause go2rtc to disconnect from the camera and
-        // creates unnecessary noise/reconnections for working streams.
-        go2rtc_stream_tracking_t *existing = find_tracked_stream(stream_name);
-        if (!existing || !existing->using_go2rtc_for_hls) {
-            if (!go2rtc_api_preload_stream(stream_name)) {
-                log_warn("Failed to preload stream %s in go2rtc - detection snapshots may be intermittent", stream_name);
-                // Continue anyway - go2rtc HLS will still work for viewers
-            } else {
-                log_info("Preloaded stream %s to keep go2rtc producer active for HLS/detection", stream_name);
-            }
-        } else {
+        // Only queue preload if not already tracked as active.  go2rtc's
+        // AddPreload removes the existing consumer before adding a new one;
+        // calling it repeatedly can briefly leave the stream with no consumers.
+        go2rtc_stream_tracking_t *tracking = add_tracked_stream(stream_name);
+        if (tracking && tracking->using_go2rtc_for_hls) {
             log_debug("Stream %s already preloaded for go2rtc HLS, skipping redundant preload", stream_name);
+        } else {
+            if (tracking) {
+                tracking->using_go2rtc_for_hls = true;
+            }
+            if (!go2rtc_api_preload_stream_async(stream_name)) {
+                log_warn("Failed to queue go2rtc preload for stream %s - HLS/WebRTC can still start on demand", stream_name);
+            }
         }
 
-        // Update tracking
-        go2rtc_stream_tracking_t *tracking = add_tracked_stream(stream_name);
+        // Update tracking even if queuing preload failed; this stream is still
+        // configured to use go2rtc native HLS and can start producers on demand.
         if (tracking) {
             tracking->using_go2rtc_for_hls = true;
         }

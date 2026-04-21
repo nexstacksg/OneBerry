@@ -118,6 +118,18 @@ bool go2rtc_api_get_application_info(int *rtsp_port,
 bool go2rtc_api_preload_stream(const char *stream_id);
 
 /**
+ * @brief Queue a background video preload for a stream in go2rtc
+ *
+ * This starts the camera producer without blocking the caller. It preloads
+ * video only because HLS keepalive and detection snapshots do not require
+ * audio, and some cameras stall when audio is requested during preload.
+ *
+ * @param stream_id Identifier of the stream to preload
+ * @return true if the preload worker was queued successfully, false otherwise
+ */
+bool go2rtc_api_preload_stream_async(const char *stream_id);
+
+/**
  * @brief Clean up resources used by the go2rtc API client
  */
 void go2rtc_api_cleanup(void);

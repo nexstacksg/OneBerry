@@ -14,6 +14,7 @@
 #include <curl/curl.h>
 #include <ctype.h>
 #include <cjson/cJSON.h>
+#include <pthread.h>
 
 
 // API client configuration
@@ -768,7 +769,10 @@ bool go2rtc_api_get_server_info(int *rtsp_port) {
  * Internal helper: attempt a single preload PUT request with a given query string.
  * Returns true on HTTP 200, false on any other outcome.
  */
-static bool preload_attempt(const char *stream_id, const char *query, long timeout_sec) {
+static bool preload_attempt_with_endpoint(const char *api_host, int api_port,
+                                          const char *stream_id,
+                                          const char *query,
+                                          long timeout_sec) {
     CURL *curl = curl_easy_init();
     if (!curl) {
         log_error("Failed to initialize CURL for preload attempt");
@@ -781,7 +785,7 @@ static bool preload_attempt(const char *stream_id, const char *query, long timeo
 
     char url[URL_BUFFER_SIZE];
     snprintf(url, sizeof(url), "http://%s:%d" GO2RTC_BASE_PATH "/api/preload?src=%s&%s", // codeql[cpp/non-https-url] - localhost-only internal API
-             g_api_host, g_api_port, encoded_id, query);
+             api_host, api_port, encoded_id, query);
 
     log_info("Preloading stream with URL: %s", url);
 
@@ -817,6 +821,10 @@ static bool preload_attempt(const char *stream_id, const char *query, long timeo
     return success;
 }
 
+static bool preload_attempt(const char *stream_id, const char *query, long timeout_sec) {
+    return preload_attempt_with_endpoint(g_api_host, g_api_port, stream_id, query, timeout_sec);
+}
+
 bool go2rtc_api_preload_stream(const char *stream_id) {
     if (!g_initialized) {
         log_error("go2rtc API client not initialized");
@@ -841,6 +849,77 @@ bool go2rtc_api_preload_stream(const char *stream_id) {
              "(camera may lack a compatible audio track)", stream_id);
 
     return preload_attempt(stream_id, "video", 10L);
+}
+
+typedef struct {
+    char stream_id[MAX_STREAM_NAME];
+    char api_host[256];
+    int api_port;
+} preload_async_task_t;
+
+static void *preload_stream_async_worker(void *arg) {
+    preload_async_task_t *task = (preload_async_task_t *)arg;
+    if (!task) {
+        return NULL;
+    }
+
+    log_set_thread_context("go2rtc", task->stream_id);
+    log_info("Starting background video preload for stream %s", task->stream_id);
+
+    if (!preload_attempt_with_endpoint(task->api_host, task->api_port,
+                                       task->stream_id, "video", 10L)) {
+        log_warn("Background video preload failed for stream %s", task->stream_id);
+    } else {
+        log_info("Background video preload completed for stream %s", task->stream_id);
+    }
+
+    free(task);
+    return NULL;
+}
+
+bool go2rtc_api_preload_stream_async(const char *stream_id) {
+    if (!g_initialized) {
+        log_error("go2rtc API client not initialized");
+        return false;
+    }
+
+    if (!stream_id) {
+        log_error("Invalid parameters for go2rtc_api_preload_stream_async");
+        return false;
+    }
+
+    if (!g_api_host || g_api_port <= 0) {
+        log_error("go2rtc API endpoint is not configured");
+        return false;
+    }
+
+    preload_async_task_t *task = calloc(1, sizeof(preload_async_task_t));
+    if (!task) {
+        log_error("Failed to allocate go2rtc preload task");
+        return false;
+    }
+
+    strncpy(task->stream_id, stream_id, sizeof(task->stream_id) - 1);
+    task->stream_id[sizeof(task->stream_id) - 1] = '\0';
+    strncpy(task->api_host, g_api_host, sizeof(task->api_host) - 1);
+    task->api_host[sizeof(task->api_host) - 1] = '\0';
+    task->api_port = g_api_port;
+
+    pthread_t thread_id;
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+
+    if (pthread_create(&thread_id, &attr, preload_stream_async_worker, task) != 0) {
+        pthread_attr_destroy(&attr);
+        log_error("Failed to create go2rtc preload worker thread for stream %s", stream_id);
+        free(task);
+        return false;
+    }
+
+    pthread_attr_destroy(&attr);
+    log_info("Queued background video preload for stream %s", stream_id);
+    return true;
 }
 
 void go2rtc_api_cleanup(void) {
