@@ -9,6 +9,7 @@ import { obfuscateUrlCredentials } from '../../utils/url-utils.js';
 import { useI18n } from '../../i18n.js';
 import { showStatusMessage } from './ToastContainer.jsx';
 import {
+  VIDEO_CODEC_OPTIONS,
   VIDEO_FPS_PRESETS,
   VIDEO_RESOLUTION_PRESETS,
   formatFpsValue,
@@ -734,11 +735,23 @@ export function StreamConfigModal({
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium mb-2">{t('streams.codec')}</label>
-                  <span className="block w-full px-3 py-2 border border-input rounded-md bg-muted/30 text-muted-foreground">
-                    {currentStream.codec ? currentStream.codec.toUpperCase() : t('streamsConfig.autoDetected')}
+                  <label htmlFor="stream-codec" className="block text-sm font-medium mb-2">{t('streams.codec')}</label>
+                  <select
+                    id="stream-codec"
+                    name="codec"
+                    className="w-full px-3 py-2 border border-input rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-primary bg-background text-foreground"
+                    value={currentStream.codec || 'h264'}
+                    onChange={onInputChange}
+                  >
+                    {VIDEO_CODEC_OPTIONS.map(option => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="text-xs text-muted-foreground mt-1 block">
+                    {t('streamsConfig.codecSelectionHelp')}
                   </span>
-                  <span className="text-xs text-muted-foreground mt-1 block">{t('streamsConfig.detectedFromSource')}</span>
                 </div>
 
                 <div>

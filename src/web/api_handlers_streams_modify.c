@@ -178,6 +178,8 @@ static void put_stream_worker(put_stream_task_t *task) {
         state->config.width = task->config.width;
         state->config.height = task->config.height;
         state->config.fps = task->config.fps;
+        strncpy(state->config.codec, task->config.codec, sizeof(state->config.codec) - 1);
+        state->config.codec[sizeof(state->config.codec) - 1] = '\0';
         pthread_mutex_unlock(&state->mutex);
     }
 
@@ -520,6 +522,12 @@ void handle_post_stream(const http_request_t *req, http_response_t *res) {
     cJSON *fps = cJSON_GetObjectItem(stream_json, "fps");
     if (fps && cJSON_IsNumber(fps)) {
         config.fps = fps->valueint;
+    }
+
+    cJSON *codec = cJSON_GetObjectItem(stream_json, "codec");
+    if (codec && cJSON_IsString(codec)) {
+        strncpy(config.codec, codec->valuestring, sizeof(config.codec) - 1);
+        config.codec[sizeof(config.codec) - 1] = '\0';
     }
 
     cJSON *priority = cJSON_GetObjectItem(stream_json, "priority");
@@ -1021,6 +1029,13 @@ void handle_put_stream(const http_request_t *req, http_response_t *res) {
     cJSON *fps = cJSON_GetObjectItem(stream_json, "fps");
     if (fps && cJSON_IsNumber(fps)) {
         config.fps = fps->valueint;
+        config_changed = true;
+    }
+
+    cJSON *codec = cJSON_GetObjectItem(stream_json, "codec");
+    if (codec && cJSON_IsString(codec) && strcmp(config.codec, codec->valuestring) != 0) {
+        strncpy(config.codec, codec->valuestring, sizeof(config.codec) - 1);
+        config.codec[sizeof(config.codec) - 1] = '\0';
         config_changed = true;
     }
 

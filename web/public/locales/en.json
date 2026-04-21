@@ -829,6 +829,7 @@
   "streamsConfig.zeroAutoDetect": "0 = auto-detect",
   "streamsConfig.autoDetected": "Auto-detected",
   "streamsConfig.detectedFromSource": "Detected from stream source",
+  "streamsConfig.codecSelectionHelp": "Select the camera video codec so stream metadata is available immediately.",
   "streamsConfig.protocol": "Protocol",
   "streamsConfig.recordingSettings": "Recording Settings",
   "streamsConfig.recordingMode": "Recording Mode",
