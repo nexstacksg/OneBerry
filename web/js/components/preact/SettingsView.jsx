@@ -337,6 +337,7 @@ export function SettingsView() {
     const parsedMaxStreams = parseInt(settings.maxStreams, 10);
     const parsedDbBackupIntervalMinutes = parseInt(settings.dbBackupIntervalMinutes, 10);
     const parsedDbBackupRetentionCount = parseInt(settings.dbBackupRetentionCount, 10);
+    const parsedRetentionDays = parseInt(settings.retention, 10);
     const mappedSettings = {
       log_level: parseInt(settings.logLevel, 10),
       syslog_enabled: settings.syslogEnabled,
@@ -345,7 +346,7 @@ export function SettingsView() {
       storage_path: settings.storagePath,
       storage_path_hls: settings.storagePathHls, // Include the HLS storage path
       max_storage_size: parseInt(settings.maxStorage, 10),
-      retention_days: parseInt(settings.retention, 10),
+      ...(Number.isNaN(parsedRetentionDays) ? {} : { retention_days: Math.max(0, parsedRetentionDays) }),
       auto_delete_oldest: settings.autoDelete,
       generate_thumbnails: settings.generateThumbnails,
       db_path: settings.dbPath,
@@ -663,16 +664,19 @@ export function SettingsView() {
           </div>
           <div class="setting grid grid-cols-1 md:grid-cols-3 gap-4 items-center mb-4">
             <label for="setting-retention" class="font-medium">{t('settings.retentionDays')}</label>
-            <input
-              type="number"
-              id="setting-retention"
-              name="retention"
-              min="1"
-              class="col-span-2 p-2 border border-input rounded bg-background text-foreground disabled:opacity-60 disabled:cursor-not-allowed"
-              value={settings.retention}
-              onChange={handleInputChange}
-              disabled={!canModifySettings}
-            />
+            <div class="col-span-2">
+              <input
+                type="number"
+                id="setting-retention"
+                name="retention"
+                min="0"
+                class="col-span-2 w-full p-2 border border-input rounded bg-background text-foreground disabled:opacity-60 disabled:cursor-not-allowed"
+                value={settings.retention}
+                onChange={handleInputChange}
+                disabled={!canModifySettings}
+              />
+              <span class="hint text-sm text-muted-foreground block mt-1">{t('settings.retentionDaysHelp')}</span>
+            </div>
           </div>
           <div class="setting grid grid-cols-1 md:grid-cols-3 gap-4 items-center mb-4">
             <label for="setting-auto-delete" class="font-medium">{t('settings.autoDeleteOldest')}</label>
