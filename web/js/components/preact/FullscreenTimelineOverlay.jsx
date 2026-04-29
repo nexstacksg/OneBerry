@@ -11,8 +11,10 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { useQuery } from '../../query-client.js';
 import { useI18n } from '../../i18n.js';
 import { currentDateInputValue, getLocalDayIsoRange } from '../../utils/date-utils.js';
+import { Priority } from '../../request-queue.js';
 import { forceNavigation } from '../../utils/navigation-utils.js';
 import { formatUtils } from './recordings/formatUtils.js';
+import { TimelineThumbnailTile } from './timeline/TimelineThumbnailTile.jsx';
 import {
   findContainingSegmentIndex,
   findNearestSegmentIndex,
@@ -730,12 +732,11 @@ export function FullscreenTimelineOverlay({
                       className="relative aspect-video overflow-hidden rounded-[3px] border border-white/10 bg-[#10151f] transition-colors hover:border-sky-300/40 hover:bg-[#18202d]"
                     >
                       {sample.thumbUrl ? (
-                        <img
-                          src={sample.thumbUrl}
+                        <TimelineThumbnailTile
+                          thumbUrl={sample.thumbUrl}
                           alt="Timeline preview"
-                          className="h-full w-full object-cover"
-                          loading="lazy"
-                          decoding="async"
+                          priority={Priority.HIGH}
+                          imgClassName="h-full w-full object-cover"
                         />
                       ) : (
                         <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-slate-800 to-slate-950 text-[9px] text-white/35">
