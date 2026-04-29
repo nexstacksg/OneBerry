@@ -4,7 +4,9 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
+import { Priority } from '../../../request-queue.js';
 import { timelineState } from './TimelinePage.jsx';
+import { TimelineThumbnailTile } from './TimelineThumbnailTile.jsx';
 import {
   findContainingSegmentIndex,
   findNearestSegmentIndex,
@@ -184,12 +186,11 @@ export function TimelinePreviewStrip({ segments: propSegments }) {
             onClick={() => handleSampleClick(sample)}
           >
             {sample.thumbUrl ? (
-              <img
-                src={sample.thumbUrl}
+              <TimelineThumbnailTile
+                thumbUrl={sample.thumbUrl}
                 alt="Timeline preview"
-                className="h-full w-full object-cover opacity-90 transition-opacity group-hover:opacity-100"
-                loading="lazy"
-                decoding="async"
+                priority={Priority.NORMAL}
+                imgClassName="h-full w-full object-cover opacity-90 transition-opacity group-hover:opacity-100"
               />
             ) : (
               <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-slate-800 to-slate-950 text-[9px] text-white/35">
