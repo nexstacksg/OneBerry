@@ -24,6 +24,7 @@ export function TimelineCursor() {
   const [visible, setVisible] = useState(false);
   const [startHour, setStartHour] = useState(0);
   const [endHour, setEndHour] = useState(24);
+  const [timeLabel, setTimeLabel] = useState('00:00:00');
 
   // Refs — use refs for values read inside event-handler closures so they
   // always see the latest value without needing to re-attach listeners.
@@ -182,14 +183,16 @@ export function TimelineCursor() {
     if (time === null) return;
 
     const timeDisplay = document.getElementById('time-display');
-    if (!timeDisplay) return;
-
     const streamName = resolvePlaybackStreamName(
       timelineState.timelineSegments,
       timelineState.currentSegmentIndex,
       time
     );
-    timeDisplay.textContent = formatPlaybackTimeLabel(time, streamName) || '00:00:00';
+    const nextLabel = formatPlaybackTimeLabel(time, streamName) || '00:00:00';
+    setTimeLabel(nextLabel);
+    if (timeDisplay) {
+      timeDisplay.textContent = nextLabel;
+    }
   };
 
   // Initialise cursor on mount (with retries for async data)
@@ -248,26 +251,51 @@ export function TimelineCursor() {
         className="pointer-events-none absolute top-0 bottom-0"
         style={{
           left: '50%',
-          width: '1.5px',
-          marginLeft: '-0.75px',
-          background: '#ef6c00'
+          width: '2px',
+          marginLeft: '-1px',
+          background: '#fbbf24',
+          boxShadow: '0 0 10px rgba(251,191,36,0.75)'
         }}
       />
 
-      {/* Thumb — small rounded pill pinned to top of ruler */}
+      {/* Thumb label */}
       <div
         className="pointer-events-none absolute"
         style={{
           left: '50%',
-          top: '0px',
+          top: '-4px',
           transform: 'translateX(-50%)',
-          width: '10px',
-          height: '18px',
-          borderRadius: '3px',
-          background: '#ef6c00',
-          boxShadow: '0 1px 3px rgba(0,0,0,0.35)'
+          whiteSpace: 'nowrap'
         }}
-      />
+      >
+        <div
+          style={{
+            margin: '0 auto',
+            height: '16px',
+            width: '2px',
+            borderRadius: '999px',
+            background: '#fbbf24',
+            boxShadow: '0 0 10px rgba(251,191,36,0.75)'
+          }}
+        />
+        <div
+          style={{
+            marginTop: '2px',
+            transform: 'translateX(-50%)',
+            borderRadius: '3px',
+            border: '1px solid rgba(253, 224, 71, 0.3)',
+            background: 'rgba(245, 158, 11, 0.92)',
+            padding: '2px 6px',
+            color: '#0b0b0c',
+            fontSize: '9px',
+            fontWeight: '600',
+            letterSpacing: '0.12em',
+            boxShadow: '0 8px 16px rgba(0,0,0,0.35)'
+          }}
+        >
+          {timeLabel}
+        </div>
+      </div>
     </div>
   );
 }

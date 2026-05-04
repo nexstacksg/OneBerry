@@ -377,6 +377,32 @@ static bool find_first_mp4_in_dir(const char *dir_path, const char *prefix,
     return true;
 }
 
+static bool find_first_mp4_in_quality_dirs(const char *base_dir,
+                                           const char *prefix,
+                                           bool any_mp4,
+                                           char *out_path,
+                                           size_t out_size) {
+    static const char *quality_dirs[] = {"high", "low"};
+
+    if (!base_dir || !out_path || out_size == 0) {
+        return false;
+    }
+
+    if (find_first_mp4_in_dir(base_dir, prefix, any_mp4, out_path, out_size)) {
+        return true;
+    }
+
+    for (size_t i = 0; i < sizeof(quality_dirs) / sizeof(quality_dirs[0]); i++) {
+        char quality_path[MAX_PATH_LENGTH];
+        snprintf(quality_path, sizeof(quality_path), "%s/%s", base_dir, quality_dirs[i]);
+        if (find_first_mp4_in_dir(quality_path, prefix, any_mp4, out_path, out_size)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 /**
  * Find MP4 recording for a stream based on timestamp
  * Returns 1 if found, 0 if not found, -1 on error
@@ -412,7 +438,7 @@ int find_mp4_recording(const char *stream_name, time_t timestamp, char *mp4_path
     log_info("Looking for MP4 recording for stream '%s' with timestamp around %s in %s",
             stream_name, timestamp_str, base_path);
 
-    if (find_first_mp4_in_dir(base_path, prefix, false, mp4_path, path_size)) {
+    if (find_first_mp4_in_quality_dirs(base_path, prefix, false, mp4_path, path_size)) {
         struct stat st;
         stat(mp4_path, &st);
         log_info("Found MP4 file: %s (%lld bytes)", mp4_path, (long long)st.st_size);
@@ -425,7 +451,7 @@ int find_mp4_recording(const char *stream_name, time_t timestamp, char *mp4_path
                 global_config->mp4_storage_path, stream_path);
         log_info("Looking in alternative MP4 location: %s", base_path);
 
-        if (find_first_mp4_in_dir(base_path, prefix, false, mp4_path, path_size)) {
+        if (find_first_mp4_in_quality_dirs(base_path, prefix, false, mp4_path, path_size)) {
             struct stat st;
             stat(mp4_path, &st);
             log_info("Found MP4 file in alternative location: %s (%lld bytes)",

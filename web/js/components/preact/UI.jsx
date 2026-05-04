@@ -31,6 +31,19 @@ const parseRecordingTimestamp = (value) => {
   return parsed.isValid() ? parsed.unix() : 0;
 };
 
+const formatPlaybackClockLabel = (timestamp) => {
+  if (!Number.isFinite(timestamp) || timestamp <= 0) {
+    return '';
+  }
+
+  return new Intl.DateTimeFormat(undefined, {
+    hour: 'numeric',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: true
+  }).format(new Date(timestamp * 1000));
+};
+
 // Create contexts for modals
 export const ModalContext = createContext({
   showVideoModal: () => {},
@@ -298,6 +311,7 @@ export function VideoModal({ isOpen, onClose, videoUrl, title, downloadUrl }) {
   const [detectionStatus, setDetectionStatus] = useState('No detections loaded');
   const [currentSpeed, setCurrentSpeed] = useState(1.0);
   const [currentPlaybackSeconds, setCurrentPlaybackSeconds] = useState(0);
+  const [videoDurationSeconds, setVideoDurationSeconds] = useState(0);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isProtected, setIsProtected] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -306,11 +320,72 @@ export function VideoModal({ isOpen, onClose, videoUrl, title, downloadUrl }) {
   const canvasRef = useRef(null);
   const modalRef = useRef(null);
   const videoContainerRef = useRef(null);
+  const playbackTimelineRef = useRef(null);
+  const playbackScrubStateRef = useRef({ isDragging: false, pointerId: null });
 
   const updatePlaybackSeconds = useCallback((video) => {
     const nextSeconds = Math.max(0, Math.floor(video?.currentTime || 0));
     setCurrentPlaybackSeconds(prev => prev === nextSeconds ? prev : nextSeconds);
   }, []);
+
+  const recordingStartTimestamp = recordingData ? parseRecordingTimestamp(recordingData.start_time) : 0;
+  const recordingEndTimestamp = recordingData ? parseRecordingTimestamp(recordingData.end_time) : 0;
+  const recordedDurationSeconds = recordingStartTimestamp > 0 &&
+    recordingEndTimestamp > recordingStartTimestamp
+    ? recordingEndTimestamp - recordingStartTimestamp
+    : 0;
+  const totalDurationSeconds = Math.max(videoDurationSeconds, recordedDurationSeconds);
+  const playbackProgressPercent = totalDurationSeconds > 0
+    ? Math.min((currentPlaybackSeconds / totalDurationSeconds) * 100, 100)
+    : 0;
+  const absolutePlaybackTimestamp = recordingStartTimestamp > 0
+    ? recordingStartTimestamp + currentPlaybackSeconds
+    : 0;
+  const timelineDetectionMarkers = totalDurationSeconds > 0 && recordingStartTimestamp > 0
+    ? detections
+      .filter((detection) => Number.isFinite(detection?.timestamp))
+      .map((detection, index) => {
+        const offsetSeconds = detection.timestamp - recordingStartTimestamp;
+        if (offsetSeconds < 0 || offsetSeconds > totalDurationSeconds) {
+          return null;
+        }
+
+        return {
+          key: `${detection.timestamp}-${detection.label || 'detection'}-${index}`,
+          left: (offsetSeconds / totalDurationSeconds) * 100,
+          label: detection.label || 'Detection'
+        };
+      })
+      .filter(Boolean)
+    : [];
+
+  const seekToRatio = useCallback((ratio) => {
+    const video = videoRef.current;
+    const safeDuration = totalDurationSeconds;
+    if (!video || safeDuration <= 0) {
+      return;
+    }
+
+    const clampedRatio = Math.max(0, Math.min(ratio, 1));
+    const nextTime = clampedRatio * safeDuration;
+    video.currentTime = nextTime;
+    updatePlaybackSeconds(video);
+  }, [totalDurationSeconds, updatePlaybackSeconds]);
+
+  const updateSeekFromPointer = useCallback((event) => {
+    const timelineElement = playbackTimelineRef.current;
+    if (!timelineElement) {
+      return;
+    }
+
+    const rect = timelineElement.getBoundingClientRect();
+    if (!rect.width) {
+      return;
+    }
+
+    const ratio = (event.clientX - rect.left) / rect.width;
+    seekToRatio(ratio);
+  }, [seekToRatio]);
 
   // Handle escape key and cleanup
   useEffect(() => {
@@ -420,10 +495,12 @@ export function VideoModal({ isOpen, onClose, videoUrl, title, downloadUrl }) {
   useEffect(() => {
     if (!isOpen) {
       setCurrentPlaybackSeconds(0);
+      setVideoDurationSeconds(0);
       return;
     }
 
     setCurrentPlaybackSeconds(0);
+    setVideoDurationSeconds(0);
   }, [isOpen, videoUrl]);
 
   // Extract recording ID from URL
@@ -630,7 +707,14 @@ export function VideoModal({ isOpen, onClose, videoUrl, title, downloadUrl }) {
     const video = videoRef.current;
 
     const handleLoadedMetadata = () => {
+      const nextDuration = Number.isFinite(video.duration) ? Math.max(0, Math.floor(video.duration)) : 0;
+      setVideoDurationSeconds(nextDuration);
       updatePlaybackSeconds(video);
+    };
+
+    const handleDurationChange = () => {
+      const nextDuration = Number.isFinite(video.duration) ? Math.max(0, Math.floor(video.duration)) : 0;
+      setVideoDurationSeconds(nextDuration);
     };
 
     const handlePlay = () => {
@@ -661,12 +745,14 @@ export function VideoModal({ isOpen, onClose, videoUrl, title, downloadUrl }) {
     };
 
     video.addEventListener('loadedmetadata', handleLoadedMetadata);
+    video.addEventListener('durationchange', handleDurationChange);
     video.addEventListener('play', handlePlay);
     video.addEventListener('seeked', handleSeeked);
     video.addEventListener('timeupdate', handleTimeUpdate);
 
     return () => {
       video.removeEventListener('loadedmetadata', handleLoadedMetadata);
+      video.removeEventListener('durationchange', handleDurationChange);
       video.removeEventListener('play', handlePlay);
       video.removeEventListener('seeked', handleSeeked);
       video.removeEventListener('timeupdate', handleTimeUpdate);
@@ -807,6 +893,52 @@ export function VideoModal({ isOpen, onClose, videoUrl, title, downloadUrl }) {
     }
   };
 
+  const handlePlaybackTimelinePointerDown = (event) => {
+    if (event.button !== 0 && event.pointerType !== 'touch') {
+      return;
+    }
+
+    event.preventDefault();
+    playbackScrubStateRef.current.isDragging = true;
+    playbackScrubStateRef.current.pointerId = event.pointerId;
+
+    if (typeof event.currentTarget.setPointerCapture === 'function') {
+      try {
+        event.currentTarget.setPointerCapture(event.pointerId);
+      } catch (error) {
+        // Ignore capture errors and continue with direct pointer handling.
+      }
+    }
+
+    updateSeekFromPointer(event);
+  };
+
+  const handlePlaybackTimelinePointerMove = (event) => {
+    if (!playbackScrubStateRef.current.isDragging) {
+      return;
+    }
+
+    event.preventDefault();
+    updateSeekFromPointer(event);
+  };
+
+  const endPlaybackTimelineScrub = (event) => {
+    if (!playbackScrubStateRef.current.isDragging) {
+      return;
+    }
+
+    playbackScrubStateRef.current.isDragging = false;
+    playbackScrubStateRef.current.pointerId = null;
+
+    if (event?.currentTarget && typeof event.currentTarget.releasePointerCapture === 'function') {
+      try {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      } catch (error) {
+        // Ignore release errors.
+      }
+    }
+  };
+
   // Handle modal animation after the portal is mounted.
   useEffect(() => {
     let animationTimeout;
@@ -895,6 +1027,76 @@ export function VideoModal({ isOpen, onClose, videoUrl, title, downloadUrl }) {
               className="text-center text-sm font-medium text-foreground tabular-nums"
             >
               {playbackPositionLabel}
+            </div>
+          </div>
+
+          <div className="mx-3 mb-3 overflow-hidden rounded-xl border border-white/10 bg-[#05070d]/96 shadow-[0_12px_36px_rgba(0,0,0,0.32)]">
+            <div className="flex items-center justify-between gap-2 border-b border-white/10 px-3 py-2">
+              <div className="min-w-0">
+                <div className="font-mono text-[12px] font-semibold tabular-nums tracking-[0.12em] text-sky-200">
+                  {formatUtils.formatDuration(currentPlaybackSeconds)}
+                  {absolutePlaybackTimestamp > 0 ? ` • ${formatPlaybackClockLabel(absolutePlaybackTimestamp)}` : ''}
+                </div>
+                <div className="text-[10px] uppercase tracking-[0.22em] text-white/35">
+                  Recording timeline
+                </div>
+              </div>
+              <div className="text-[10px] uppercase tracking-[0.22em] text-white/55">
+                {formatUtils.formatDuration(totalDurationSeconds)}
+              </div>
+            </div>
+
+            <div className="px-3 py-2">
+              <div
+                ref={playbackTimelineRef}
+                className="relative h-11 overflow-hidden rounded-xl border border-white/10 bg-gradient-to-b from-[#121417] via-[#0d0f12] to-[#07080a] shadow-inner touch-none"
+                onPointerDown={handlePlaybackTimelinePointerDown}
+                onPointerMove={handlePlaybackTimelinePointerMove}
+                onPointerUp={endPlaybackTimelineScrub}
+                onPointerCancel={endPlaybackTimelineScrub}
+              >
+                <div
+                  className="absolute inset-0 opacity-45"
+                  style={{
+                    backgroundImage: 'repeating-linear-gradient(90deg, rgba(255,255,255,0.03) 0 1px, transparent 1px 3.125%)'
+                  }}
+                />
+
+                <div
+                  className="absolute inset-y-0 left-0 bg-gradient-to-r from-emerald-500/18 via-sky-400/20 to-sky-300/22"
+                  style={{ width: `${playbackProgressPercent}%` }}
+                />
+
+                <div className="absolute inset-x-0 bottom-0 h-[2px] bg-gradient-to-r from-emerald-500/40 via-emerald-300/70 to-emerald-500/40" />
+
+                {timelineDetectionMarkers.map((marker) => (
+                  <div
+                    key={marker.key}
+                    className="absolute top-1/2 z-10 h-5 w-[2px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-amber-300 shadow-[0_0_8px_rgba(252,211,77,0.55)]"
+                    style={{ left: `${marker.left}%` }}
+                    title={marker.label}
+                  />
+                ))}
+
+                <div
+                  className="absolute top-[-4px] z-20"
+                  style={{
+                    left: `${playbackProgressPercent}%`,
+                    transform: 'translateX(-50%)'
+                  }}
+                >
+                  <div className="mx-auto h-4 w-[2px] rounded-full bg-amber-400 shadow-[0_0_10px_rgba(251,191,36,0.75)]" />
+                  <div className="mt-0.5 -translate-x-1/2 rounded-sm border border-amber-300/30 bg-amber-500/90 px-1.5 py-0.5 text-[9px] font-semibold tracking-[0.12em] text-black shadow-lg">
+                    {formatUtils.formatDuration(currentPlaybackSeconds)}
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-2 flex items-center justify-between gap-2 text-[10px] uppercase tracking-[0.22em] text-white/45">
+                <span>{recordingStartTimestamp > 0 ? formatPlaybackClockLabel(recordingStartTimestamp) : 'Start'}</span>
+                <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-white/65">Click or drag to seek</span>
+                <span>{recordingEndTimestamp > 0 ? formatPlaybackClockLabel(recordingEndTimestamp) : 'End'}</span>
+              </div>
             </div>
           </div>
 

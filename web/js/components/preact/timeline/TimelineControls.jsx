@@ -254,146 +254,161 @@ export function TimelineControls() {
   };
 
   return (
-    <div className="timeline-controls flex flex-wrap justify-between items-center gap-2 mb-1">
-      <div className="flex items-center gap-1.5">
-        <button
-          id="play-button"
-          data-keyboard-nav-preserve
-          className={`w-7 h-7 rounded-full flex items-center justify-center focus:outline-none transition-colors shadow-sm ${
-            isPlaying
-              ? 'bg-red-600 hover:bg-red-700'
-              : 'bg-green-600 hover:bg-green-700'
-          }`}
-          onClick={togglePlayback}
-          title={isPlaying ? t('timeline.pause') : t('timeline.playFromCurrentPosition')}
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            {isPlaying ? (
-              <>
-                <rect x="6" y="6" width="4" height="12" rx="1" fill="white" />
-                <rect x="14" y="6" width="4" height="12" rx="1" fill="white" />
-              </>
-            ) : (
-              <path d="M8 5.14v14l11-7-11-7z" fill="white" />
-            )}
-          </svg>
-        </button>
-        <span className="text-[11px] text-muted-foreground">{t('timeline.playFromCursor')}</span>
-      </div>
-
-      {/* Current time display */}
-      <div className="flex items-center gap-1">
-        <button
-          type="button"
-          data-keyboard-nav-preserve
-          className="w-6 h-6 rounded bg-secondary text-secondary-foreground hover:bg-secondary/80 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center focus:outline-none focus:ring-1 focus:ring-primary transition-colors"
-          onClick={() => jumpToAdjacentSegment(-1)}
-          title={t('timeline.previousRecording')}
-          aria-label={t('timeline.previousRecording')}
-          disabled={!canJumpBackward}
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7" />
-          </svg>
-        </button>
-        <div id="time-display"
-          data-keyboard-nav-preserve
-          className="timeline-time-display bg-secondary text-foreground px-2 py-0.5 rounded font-mono text-xs tabular-nums border border-border min-w-[140px] text-center">
-          {timeDisplayText}
-        </div>
-        {currentRecordingId && (
-          <button
-            type="button"
-            data-keyboard-nav-preserve
-            className={`w-6 h-6 rounded border flex items-center justify-center focus:outline-none focus:ring-1 focus:ring-primary transition-colors ${
-              isProtected
-                ? 'border-yellow-500 bg-yellow-500 text-white hover:bg-yellow-600'
-                : 'border-border bg-secondary text-secondary-foreground hover:bg-secondary/80'
-            }`}
-            onClick={handleToggleProtection}
-            title={isProtected ? t('recordings.unprotect') : t('recordings.protect')}
-            aria-label={isProtected ? t('recordings.unprotect') : t('recordings.protect')}
-            aria-pressed={isProtected}
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 3l7 4v5c0 4.3-2.9 8.2-7 9-4.1-.8-7-4.7-7-9V7l7-4z" />
-            </svg>
-          </button>
-        )}
-        {currentRecordingId && (
-          <div className="relative inline-block">
+    <div className="mb-2 overflow-hidden rounded-t-2xl rounded-b-none border border-white/10 bg-[#05070d]/96 shadow-[0_-24px_60px_rgba(0,0,0,0.2)]">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/10 px-2 py-2 sm:px-3">
+        <div className="min-w-0 flex items-center gap-3">
+          <div className="flex items-center gap-1 rounded-md border border-white/10 bg-black/25 p-1">
+            <button
+              type="button"
+              id="zoom-out-button"
+              data-keyboard-nav-preserve
+              className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-white/10 bg-black/25 text-white/75 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+              onClick={zoomOut}
+              title={t('timeline.zoomOut')}
+              disabled={!canZoomOut}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              id="zoom-in-button"
+              data-keyboard-nav-preserve
+              className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-white/10 bg-black/25 text-white/75 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+              onClick={zoomIn}
+              title={t('timeline.zoomIn')}
+              disabled={!canZoomIn}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+              </svg>
+            </button>
             <button
               type="button"
               data-keyboard-nav-preserve
-              className="w-6 h-6 rounded bg-secondary text-secondary-foreground hover:bg-secondary/80 flex items-center justify-center focus:outline-none focus:ring-1 focus:ring-primary transition-colors"
-              onClick={() => setShowTagsOverlay(!showTagsOverlay)}
-              title={t('recordings.manageTags')}
-              aria-label={recordingTags.length > 0 ? t('timeline.manageRecordingTagsCount', { count: recordingTags.length }) : t('recordings.manageTags')}
+              className="inline-flex h-7 items-center rounded-full border border-white/10 bg-white/5 px-2 text-[10px] font-semibold uppercase tracking-[0.22em] text-white/75 transition-colors hover:bg-white/10 hover:text-white"
+              onClick={fitToSegments}
+              title={t('timeline.fitToRecordings')}
             >
-              <TagIcon className="w-3.5 h-3.5" />
-              {recordingTags.length > 0 && (
-                <span className="absolute -top-1 -right-1 min-w-[14px] h-[14px] px-0.5 rounded-full bg-primary text-primary-foreground text-[9px] leading-[14px] text-center">
-                  {recordingTags.length}
-                </span>
+              {t('timeline.fit')}
+            </button>
+          </div>
+
+          <div className="min-w-0">
+            <div
+              id="time-display"
+              data-keyboard-nav-preserve
+              className="font-mono text-[12px] font-semibold tabular-nums tracking-[0.12em] text-sky-200 sm:text-[13px]"
+            >
+              {timeDisplayText}
+            </div>
+            <div className="text-[10px] uppercase tracking-[0.22em] text-white/30">
+              {t('timeline.playFromCursor')}
+            </div>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center justify-end gap-2 sm:gap-3">
+          <div className="hidden min-[700px]:flex items-center gap-1 rounded-md border border-white/10 bg-black/25 p-1">
+            <button
+              type="button"
+              data-keyboard-nav-preserve
+              className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-white/10 bg-black/25 text-white/75 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+              onClick={() => jumpToAdjacentSegment(-1)}
+              title={t('timeline.previousRecording')}
+              aria-label={t('timeline.previousRecording')}
+              disabled={!canJumpBackward}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M11 12 20 5v14l-9-7Zm-1 0 9-7v14l-9-7ZM4 5h2v14H4z" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              id="play-button"
+              data-keyboard-nav-preserve
+              className={`inline-flex h-7 w-7 items-center justify-center rounded-md border transition-colors ${
+                isPlaying
+                  ? 'border-white/20 bg-white/15 text-white'
+                  : 'border-white/10 bg-black/25 text-white/75 hover:bg-white/10 hover:text-white'
+              }`}
+              onClick={togglePlayback}
+              title={isPlaying ? t('timeline.pause') : t('timeline.playFromCurrentPosition')}
+            >
+              {isPlaying ? (
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="currentColor">
+                  <rect x="6" y="5" width="4" height="14" rx="1" />
+                  <rect x="14" y="5" width="4" height="14" rx="1" />
+                </svg>
+              ) : (
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M8 5.1v13.8l11-6.9-11-6.9Z" />
+                </svg>
               )}
             </button>
-            {showTagsOverlay && (
-              <TagsOverlay
-                recording={{ id: currentRecordingId, tags: recordingTags }}
-                onClose={() => setShowTagsOverlay(false)}
-                onTagsChanged={handleTagsChanged}
-              />
-            )}
+            <button
+              type="button"
+              data-keyboard-nav-preserve
+              className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-white/10 bg-black/25 text-white/75 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+              onClick={() => jumpToAdjacentSegment(1)}
+              title={t('timeline.nextRecording')}
+              aria-label={t('timeline.nextRecording')}
+              disabled={!canJumpForward}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M13 12 4 5v14l9-7Zm1 0-9-7v14l9-7ZM20 5h-2v14h2z" />
+              </svg>
+            </button>
           </div>
-        )}
-        <button
-          type="button"
-          data-keyboard-nav-preserve
-          className="w-6 h-6 rounded bg-secondary text-secondary-foreground hover:bg-secondary/80 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center focus:outline-none focus:ring-1 focus:ring-primary transition-colors"
-          onClick={() => jumpToAdjacentSegment(1)}
-          title={t('timeline.nextRecording')}
-          aria-label={t('timeline.nextRecording')}
-          disabled={!canJumpForward}
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7" />
-          </svg>
-        </button>
-      </div>
 
-      <div className="flex items-center gap-1">
-        <button
-          data-keyboard-nav-preserve
-          className="px-2 h-6 rounded text-xs bg-secondary text-secondary-foreground hover:bg-secondary/80 focus:outline-none focus:ring-1 focus:ring-primary transition-colors"
-          onClick={fitToSegments}
-          title={t('timeline.fitToRecordings')}
-        >
-          {t('timeline.fit')}
-        </button>
-        <button
-          id="zoom-out-button"
-          data-keyboard-nav-preserve
-          className="w-6 h-6 rounded bg-secondary text-secondary-foreground hover:bg-secondary/80 flex items-center justify-center focus:outline-none focus:ring-1 focus:ring-primary transition-colors"
-          onClick={zoomOut}
-          title={t('timeline.zoomOut')}
-          disabled={!canZoomOut}
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-        </button>
-        <button
-          id="zoom-in-button"
-          data-keyboard-nav-preserve
-          className="w-6 h-6 rounded bg-secondary text-secondary-foreground hover:bg-secondary/80 flex items-center justify-center focus:outline-none focus:ring-1 focus:ring-primary transition-colors"
-          onClick={zoomIn}
-          title={t('timeline.zoomIn')}
-          disabled={!canZoomIn}
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v3m0 0v3m0-3h3m-3 0H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-        </button>
+          {currentRecordingId && (
+            <button
+              type="button"
+              data-keyboard-nav-preserve
+              className={`inline-flex h-7 w-7 items-center justify-center rounded-md border transition-colors ${
+                isProtected
+                  ? 'border-amber-300/30 bg-amber-500/90 text-black'
+                  : 'border-white/10 bg-black/25 text-white/75 hover:bg-white/10 hover:text-white'
+              }`}
+              onClick={handleToggleProtection}
+              title={isProtected ? t('recordings.unprotect') : t('recordings.protect')}
+              aria-label={isProtected ? t('recordings.unprotect') : t('recordings.protect')}
+              aria-pressed={isProtected}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 3l7 4v5c0 4.3-2.9 8.2-7 9-4.1-.8-7-4.7-7-9V7l7-4z" />
+              </svg>
+            </button>
+          )}
+
+          {currentRecordingId && (
+            <div className="relative inline-block">
+              <button
+                type="button"
+                data-keyboard-nav-preserve
+                className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-white/10 bg-black/25 text-white/75 transition-colors hover:bg-white/10 hover:text-white"
+                onClick={() => setShowTagsOverlay(!showTagsOverlay)}
+                title={t('recordings.manageTags')}
+                aria-label={recordingTags.length > 0 ? t('timeline.manageRecordingTagsCount', { count: recordingTags.length }) : t('recordings.manageTags')}
+              >
+                <TagIcon className="h-3.5 w-3.5" />
+                {recordingTags.length > 0 && (
+                  <span className="absolute -top-1 -right-1 min-w-[14px] h-[14px] rounded-full bg-sky-300 px-0.5 text-[9px] leading-[14px] text-black text-center">
+                    {recordingTags.length}
+                  </span>
+                )}
+              </button>
+              {showTagsOverlay && (
+                <TagsOverlay
+                  recording={{ id: currentRecordingId, tags: recordingTags }}
+                  onClose={() => setShowTagsOverlay(false)}
+                  onTagsChanged={handleTagsChanged}
+                />
+              )}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

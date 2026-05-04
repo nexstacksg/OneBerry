@@ -19,6 +19,7 @@ import { useQueryClient } from '../../query-client.js';
 import { createPlayerTelemetry } from '../../utils/player-telemetry.js';
 import { StreamQualitySelector } from './StreamQualitySelector.jsx';
 import { useStreamQuality } from './useStreamQuality.js';
+import { updateStreamRecordingQuality } from '../../utils/stream-quality-utils.js';
 import Hls from 'hls.js';
 
 /**
@@ -51,6 +52,7 @@ export function HLSVideoCell({
 
   // Component state
   const [isLoading, setIsLoading] = useState(true);
+  const [isUpdatingQuality, setIsUpdatingQuality] = useState(false);
   const [error, setError] = useState(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
@@ -71,16 +73,26 @@ export function HLSVideoCell({
     return stream && stream.go2rtc_hls_available ? 'go2rtc' : 'native';
   });
 
-  const handleStreamQualityChange = (quality) => {
-    if (quality === streamQuality) {
+  const handleStreamQualityChange = async (quality) => {
+    if (quality === streamQuality || isUpdatingQuality) {
       return;
     }
 
-    setStreamQuality(quality);
-    setError(null);
-    setIsLoading(true);
-    setIsPlaying(false);
-    setRetryCount((value) => value + 1);
+    setIsUpdatingQuality(true);
+    try {
+      const normalizedQuality = await updateStreamRecordingQuality(stream, quality);
+      setStreamQuality(normalizedQuality);
+      queryClient.invalidateQueries({ queryKey: ['streams'] });
+      setError(null);
+      setIsLoading(true);
+      setIsPlaying(false);
+      setRetryCount((value) => value + 1);
+    } catch (err) {
+      console.error(`Failed to update recording quality for ${stream?.name}:`, err);
+      showStatusMessage(err?.message || 'Failed to update recording quality');
+    } finally {
+      setIsUpdatingQuality(false);
+    }
   };
 
   // PTZ controls state
@@ -747,10 +759,11 @@ export function HLSVideoCell({
         }}
       >
         {hasLowQuality && hlsMode === 'go2rtc' && (
-          <StreamQualitySelector
-            value={streamQuality}
-            onChange={handleStreamQualityChange}
-          />
+            <StreamQualitySelector
+              disabled={isUpdatingQuality}
+              value={streamQuality}
+              onChange={handleStreamQualityChange}
+            />
         )}
         <div
           style={{

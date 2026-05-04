@@ -26,6 +26,7 @@ typedef struct {
     char name[MAX_STREAM_NAME];
     char url[MAX_URL_LENGTH];
     char secondary_url[MAX_URL_LENGTH]; // Optional secondary/substream/fallback RTSP URL
+    char recording_quality[8]; // "high" (primary URL) or "low" (secondary URL)
     bool enabled;
     int width;
     int height;

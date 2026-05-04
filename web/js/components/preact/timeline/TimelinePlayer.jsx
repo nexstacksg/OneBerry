@@ -123,8 +123,10 @@ export function TimelinePlayer({ videoElementRef = null, autoFullscreen = false 
     // Only update the video if:
     // 1. We need to load a new segment, OR
     // 2. The user is dragging the cursor (indicated by a significant time change)
-    const timeChanged = state.prevCurrentTime !== null &&
-                        Math.abs(state.currentTime - state.prevCurrentTime) > 1;
+    const requestedSeek = state.prevCurrentTime !== null &&
+                          Math.abs(state.currentTime - state.prevCurrentTime) > 0.001;
+    const seekDrift = Math.abs((video.currentTime || 0) - relativeTime);
+    const timeChanged = requestedSeek && (segmentChanged || seekDrift > 0.35 || !state.isPlaying);
 
     // Update last segment ID
     if (segmentChanged) {

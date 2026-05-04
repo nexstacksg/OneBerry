@@ -5,12 +5,11 @@
 
 import { useState, useEffect, useRef, useCallback, useMemo } from 'preact/hooks';
 import { TimelineControls } from './TimelineControls.jsx';
-import { TimelineRuler } from './TimelineRuler.jsx';
 import { TimelineSegments } from './TimelineSegments.jsx';
 import { TimelineCursor } from './TimelineCursor.jsx';
 import { TimelinePlayer } from './TimelinePlayer.jsx';
 import { CalendarPicker } from './CalendarPicker.jsx';
-import { TimelinePreviewStrip } from './TimelinePreviewStrip.jsx';
+import { TimelineBarBody } from './TimelineBarBody.jsx';
 import { BatchDownloadModal } from '../BatchDownloadModal.jsx';
 import { showStatusMessage } from '../ToastContainer.jsx';
 import { LoadingIndicator } from '../LoadingIndicator.jsx';
@@ -273,6 +272,10 @@ export function TimelinePage() {
   const [keyboardNavigationMode, setKeyboardNavigationMode] = useState(
     urlParams.nav === 'fine' ? 'fine' : 'broad'
   );
+  const [timelineStartHourView, setTimelineStartHourView] = useState(timelineState.timelineStartHour ?? 0);
+  const [timelineEndHourView, setTimelineEndHourView] = useState(
+    timelineState.timelineEndHour ?? getTimelineDayLengthHours(urlParams.date)
+  );
 
   // Refs
   const timelineContainerRef = useRef(null);
@@ -283,10 +286,21 @@ export function TimelinePage() {
   const selectedDateRef = useRef(urlParams.date);
   const videoElementRef = useRef(null);
   const pointerDownTimerRef = useRef(null);
+  const timelineTrackRef = useRef(null);
+  const timelineScrubStateRef = useRef({ isDragging: false, pointerId: null });
 
   useEffect(() => {
     selectedDateRef.current = selectedDate;
   }, [selectedDate]);
+
+  useEffect(() => {
+    const unsubscribe = timelineState.subscribe((state) => {
+      setTimelineStartHourView(state.timelineStartHour ?? 0);
+      setTimelineEndHourView(state.timelineEndHour ?? getTimelineDayLengthHours(state.selectedDate));
+    });
+
+    return () => unsubscribe();
+  }, []);
 
   const jumpToAdjacentSegment = useCallback((direction) => {
     const activeIndex = resolveActiveSegmentIndex(
@@ -314,6 +328,96 @@ export function TimelinePage() {
     });
     return true;
   }, []);
+
+  const applyTimelineTimestamp = useCallback((timestamp) => {
+    if (!Number.isFinite(timestamp) || !Array.isArray(timelineState.timelineSegments) || timelineState.timelineSegments.length === 0) {
+      return;
+    }
+
+    const containingIndex = findContainingSegmentIndex(timelineState.timelineSegments, timestamp);
+    const nextSegmentIndex = containingIndex !== -1
+      ? containingIndex
+      : findNearestSegmentIndex(timelineState.timelineSegments, timestamp);
+
+    timelineState.setState({
+      currentTime: timestamp,
+      prevCurrentTime: timelineState.currentTime,
+      isPlaying: false,
+      currentSegmentIndex: nextSegmentIndex
+    });
+  }, []);
+
+  const updateTimelineFromPointer = useCallback((event) => {
+    const trackElement = timelineTrackRef.current;
+    if (!trackElement) {
+      return;
+    }
+
+    const rect = trackElement.getBoundingClientRect();
+    if (!rect.width) {
+      return;
+    }
+
+    const visibleRange = Math.max(timelineEndHourView - timelineStartHourView, 0.001);
+    const ratio = Math.max(0, Math.min((event.clientX - rect.left) / rect.width, 1));
+    const clickHour = timelineStartHourView + (ratio * visibleRange);
+    const timestamp = timelineState.timelineHourToTimestamp(clickHour, timelineState.selectedDate);
+    applyTimelineTimestamp(timestamp);
+  }, [applyTimelineTimestamp, timelineEndHourView, timelineStartHourView]);
+
+  const handleTimelineTrackPointerDown = useCallback((event) => {
+    if (event.button !== 0 && event.pointerType !== 'touch') {
+      return;
+    }
+
+    event.preventDefault();
+    timelineScrubStateRef.current.isDragging = true;
+    timelineScrubStateRef.current.pointerId = event.pointerId;
+
+    if (typeof event.currentTarget.setPointerCapture === 'function') {
+      try {
+        event.currentTarget.setPointerCapture(event.pointerId);
+      } catch (error) {
+        // Ignore capture errors and continue with direct pointer handling.
+      }
+    }
+
+    updateTimelineFromPointer(event);
+  }, [updateTimelineFromPointer]);
+
+  const handleTimelineTrackPointerMove = useCallback((event) => {
+    if (!timelineScrubStateRef.current.isDragging) {
+      return;
+    }
+
+    event.preventDefault();
+    updateTimelineFromPointer(event);
+  }, [updateTimelineFromPointer]);
+
+  const endTimelineTrackScrub = useCallback((event) => {
+    if (!timelineScrubStateRef.current.isDragging) {
+      return;
+    }
+
+    timelineScrubStateRef.current.isDragging = false;
+    timelineScrubStateRef.current.pointerId = null;
+
+    if (event?.currentTarget && typeof event.currentTarget.releasePointerCapture === 'function') {
+      try {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      } catch (error) {
+        // Ignore release errors.
+      }
+    }
+  }, []);
+
+  const handleTimelinePreviewSelect = useCallback((sample) => {
+    if (!sample || !Number.isFinite(sample.timestamp)) {
+      return;
+    }
+
+    applyTimelineTimestamp(sample.timestamp);
+  }, [applyTimelineTimestamp]);
 
   const seekCurrentVideo = useCallback((directionSeconds) => {
     const videoPlayer = videoElementRef.current;
@@ -1155,7 +1259,7 @@ export function TimelinePage() {
         <div className="mb-2 flex justify-end">
           <span
             data-testid="timeline-keyboard-nav-mode"
-            className="rounded border border-border bg-secondary px-2 py-1 text-[11px] text-muted-foreground"
+            className="rounded-full border border-white/10 bg-black/55 px-2 py-1 text-[10px] uppercase tracking-[0.22em] text-white/55"
             title={t('timeline.arrowKeysHelpTitle')}
           >
             {t('timeline.arrowKeys')}: {keyboardNavigationMode === 'fine' ? t('timeline.seekOneSecond') : t('timeline.jumpRecordings')}
@@ -1166,18 +1270,39 @@ export function TimelinePage() {
         <div
           id="timeline-container"
           data-keyboard-nav-preserve
-          className="relative w-full bg-secondary border border-input rounded-lg mb-2 overflow-hidden shadow-sm"
+          className="relative mb-2 w-full overflow-hidden rounded-b-2xl rounded-t-none border border-t-0 border-white/10 bg-[#05070d]/96 shadow-2xl"
           ref={timelineContainerRef}
         >
-          <TimelinePreviewStrip segments={segments} />
-          <TimelineRuler />
-          <TimelineSegments segments={segments} />
-          <TimelineCursor />
-
-          {/* Inline hint */}
-          <div className="absolute bottom-1 right-2 text-[10px] text-muted-foreground bg-card/75 px-1.5 py-0.5 rounded">
-            {t('timeline.inlineHint')}
-          </div>
+          <TimelineBarBody
+            segments={segments}
+            selectedDate={selectedDate}
+            startHour={timelineStartHourView}
+            endHour={timelineEndHourView}
+            dateLabel={formatDisplayDate(selectedDate)}
+            onPreviewSelect={handleTimelinePreviewSelect}
+            renderTrackContent={() => (
+              <div
+                ref={timelineTrackRef}
+                className="relative"
+                onPointerDown={handleTimelineTrackPointerDown}
+                onPointerMove={handleTimelineTrackPointerMove}
+                onPointerUp={endTimelineTrackScrub}
+                onPointerCancel={endTimelineTrackScrub}
+              >
+                <TimelineSegments segments={segments} interactive={false} />
+                <div className="absolute inset-0">
+                  <TimelineCursor />
+                </div>
+              </div>
+            )}
+            footerContent={(
+              <div className="flex items-center justify-end gap-2 px-1 text-[10px] uppercase tracking-[0.22em] text-white/35">
+                <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-white/65">
+                  {t('timeline.inlineHint')}
+                </span>
+              </div>
+            )}
+          />
         </div>
       </>
     );

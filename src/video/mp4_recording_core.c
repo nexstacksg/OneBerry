@@ -39,6 +39,7 @@
 #include "video/mp4_segment_recorder.h"
 #include "video/stream_packet_processor.h"
 #include "video/thread_utils.h"
+#include "video/go2rtc/go2rtc_stream.h"
 
 
 // Hash map for tracking running MP4 recording contexts
@@ -53,6 +54,68 @@ volatile sig_atomic_t shutdown_in_progress = 0;
 
 // Forward declarations
 static void *mp4_recording_thread(void *arg);
+
+#define RECORDING_QUALITY_HIGH "high"
+#define RECORDING_QUALITY_LOW  "low"
+#define GO2RTC_LOW_QUALITY_SUFFIX "__low"
+
+static bool stream_uses_low_quality_recording(const stream_config_t *config) {
+    return config &&
+           config->secondary_url[0] != '\0' &&
+           strcmp(config->recording_quality, RECORDING_QUALITY_LOW) == 0;
+}
+
+static const char *get_recording_quality_dir(const stream_config_t *config) {
+    return stream_uses_low_quality_recording(config) ? RECORDING_QUALITY_LOW : RECORDING_QUALITY_HIGH;
+}
+
+static void get_recording_input_source_name(const stream_config_t *config,
+                                            char *buffer,
+                                            size_t buffer_size) {
+    if (!config || !buffer || buffer_size == 0) {
+        return;
+    }
+
+    if (stream_uses_low_quality_recording(config)) {
+        snprintf(buffer, buffer_size, "%s%s", config->name, GO2RTC_LOW_QUALITY_SUFFIX);
+    } else {
+        strncpy(buffer, config->name, buffer_size - 1);
+        buffer[buffer_size - 1] = '\0';
+    }
+}
+
+static void get_recording_input_url(const stream_config_t *config,
+                                    char *buffer,
+                                    size_t buffer_size) {
+    const char *source_url = NULL;
+
+    if (!config || !buffer || buffer_size == 0) {
+        return;
+    }
+
+    source_url = stream_uses_low_quality_recording(config) ? config->secondary_url : config->url;
+    strncpy(buffer, source_url, buffer_size - 1);
+    buffer[buffer_size - 1] = '\0';
+}
+
+static void build_mp4_output_dir(const char *stream_name,
+                                 const stream_config_t *config,
+                                 const config_t *global_config,
+                                 char *mp4_dir,
+                                 size_t mp4_dir_size) {
+    char encoded_name[MAX_STREAM_NAME];
+    const char *quality_dir = get_recording_quality_dir(config);
+
+    sanitize_stream_name(stream_name, encoded_name, MAX_STREAM_NAME);
+
+    if (global_config->record_mp4_directly && global_config->mp4_storage_path[0] != '\0') {
+        snprintf(mp4_dir, mp4_dir_size, "%s/%s/%s",
+                 global_config->mp4_storage_path, encoded_name, quality_dir);
+    } else {
+        snprintf(mp4_dir, mp4_dir_size, "%s/mp4/%s/%s",
+                 global_config->storage_path, encoded_name, quality_dir);
+    }
+}
 
 /**
  * Join and free a dead recording context that has already been extracted from
@@ -207,11 +270,13 @@ static void *mp4_recording_thread(void *arg) {
 
     // Check if this stream is using go2rtc for recording
     char actual_url[MAX_PATH_LENGTH];
+    char recording_source_name[MAX_STREAM_NAME + sizeof(GO2RTC_LOW_QUALITY_SUFFIX)];
     bool using_go2rtc = false;
 
     // Forward declarations for go2rtc integration
     extern bool go2rtc_integration_is_using_go2rtc_for_recording(const char *stream_name);
-    extern bool go2rtc_get_rtsp_url(const char *stream_name, char *url, size_t url_size);
+
+    get_recording_input_source_name(&ctx->config, recording_source_name, sizeof(recording_source_name));
 
     // Try to get the go2rtc RTSP URL for this stream
     if (go2rtc_integration_is_using_go2rtc_for_recording(stream_name)) {
@@ -220,23 +285,23 @@ static void *mp4_recording_thread(void *arg) {
         bool success = false;
 
         while (retries > 0 && !success) {
-            if (go2rtc_get_rtsp_url(stream_name, actual_url, sizeof(actual_url))) {
-                log_info("Using go2rtc RTSP URL for MP4 recording on stream %s", stream_name);
+            if (go2rtc_stream_get_rtsp_url(recording_source_name, actual_url, sizeof(actual_url))) {
+                log_info("Using go2rtc RTSP URL for MP4 recording on stream %s from source %s",
+                         stream_name, recording_source_name);
                 using_go2rtc = true;
                 success = true;
             } else {
-                log_warn("Failed to get go2rtc RTSP URL for stream %s, retrying in 2 seconds (%d retries left)",
-                        stream_name, retries);
+                log_warn("Failed to get go2rtc RTSP URL for stream %s source %s, retrying in 2 seconds (%d retries left)",
+                        stream_name, recording_source_name, retries);
                 sleep(2);
                 retries--;
             }
         }
 
         if (!success) {
-            log_error("Failed to get go2rtc RTSP URL for stream %s after multiple retries, falling back to original URL",
-                     stream_name);
-            strncpy(actual_url, ctx->config.url, sizeof(actual_url) - 1);
-            actual_url[sizeof(actual_url) - 1] = '\0';
+            log_error("Failed to get go2rtc RTSP URL for stream %s source %s after multiple retries, falling back to direct camera URL",
+                     stream_name, recording_source_name);
+            get_recording_input_url(&ctx->config, actual_url, sizeof(actual_url));
         }
 
         // Keep go2rtc URLs clean (without query selectors). This avoids 404s from
@@ -250,14 +315,17 @@ static void *mp4_recording_thread(void *arg) {
             }
         }
     } else {
-        // Use the original URL, injecting ONVIF credentials if available
-        if (url_apply_credentials(ctx->config.url,
+        char recording_input_url[MAX_URL_LENGTH];
+        get_recording_input_url(&ctx->config, recording_input_url, sizeof(recording_input_url));
+
+        // Use the configured recording URL, injecting ONVIF credentials if available
+        if (url_apply_credentials(recording_input_url,
                                   ctx->config.onvif_username[0] ? ctx->config.onvif_username : NULL,
                                   ctx->config.onvif_password[0] ? ctx->config.onvif_password : NULL,
                                   actual_url, sizeof(actual_url)) != 0) {
-            log_warn("Failed to inject credentials into URL for stream %s, using original URL",
+            log_warn("Failed to inject credentials into recording URL for stream %s, using raw URL",
                      stream_name);
-            strncpy(actual_url, ctx->config.url, sizeof(actual_url) - 1);
+            strncpy(actual_url, recording_input_url, sizeof(actual_url) - 1);
             actual_url[sizeof(actual_url) - 1] = '\0';
         }
     }
@@ -349,11 +417,11 @@ static void *mp4_recording_thread(void *arg) {
 
                         if (using_go2rtc) {
                             char fresh_url[MAX_PATH_LENGTH];
-                            if (go2rtc_get_rtsp_url(stream_name, fresh_url, sizeof(fresh_url))) {
+                            if (go2rtc_stream_get_rtsp_url(recording_source_name, fresh_url, sizeof(fresh_url))) {
                                 strncpy(restart_url, fresh_url, sizeof(restart_url) - 1);
                                 restart_url[sizeof(restart_url) - 1] = '\0';
-                                log_info("Refreshed go2rtc URL for stream %s after cooldown",
-                                         stream_name);
+                                log_info("Refreshed go2rtc URL for stream %s source %s after cooldown",
+                                         stream_name, recording_source_name);
                             }
                         }
 
@@ -379,10 +447,11 @@ static void *mp4_recording_thread(void *arg) {
                     // Try to get a fresh go2rtc URL — go2rtc may have restarted
                     if (using_go2rtc) {
                         char fresh_url[MAX_PATH_LENGTH];
-                        if (go2rtc_get_rtsp_url(stream_name, fresh_url, sizeof(fresh_url))) {
+                        if (go2rtc_stream_get_rtsp_url(recording_source_name, fresh_url, sizeof(fresh_url))) {
                             strncpy(restart_url, fresh_url, sizeof(restart_url) - 1);
                             restart_url[sizeof(restart_url) - 1] = '\0';
-                            log_info("Refreshed go2rtc URL for stream %s", stream_name);
+                            log_info("Refreshed go2rtc URL for stream %s source %s",
+                                     stream_name, recording_source_name);
                         }
                     }
 
@@ -646,21 +715,8 @@ int start_mp4_recording(const char *stream_name) {
     const struct tm *tm_info = localtime_r(&now, &tm_buf);
     strftime(timestamp_str, sizeof(timestamp_str), "%Y%m%d_%H%M%S", tm_info);
 
-    // Sanitize the stream name so that names with spaces work correctly.
-    char encoded_name[MAX_STREAM_NAME];
-    sanitize_stream_name(stream_name, encoded_name, MAX_STREAM_NAME);
-
-    // Create MP4 directory path
     char mp4_dir[MAX_PATH_LENGTH];
-    if (global_config->record_mp4_directly && global_config->mp4_storage_path[0] != '\0') {
-        // Use configured MP4 storage path if available
-        snprintf(mp4_dir, MAX_PATH_LENGTH, "%s/%s",
-                global_config->mp4_storage_path, encoded_name);
-    } else {
-        // Use mp4 directory parallel to hls, NOT inside it
-        snprintf(mp4_dir, MAX_PATH_LENGTH, "%s/mp4/%s",
-                global_config->storage_path, encoded_name);
-    }
+    build_mp4_output_dir(stream_name, &config, global_config, mp4_dir, sizeof(mp4_dir));
 
     // Create MP4 directory if it doesn't exist
     int ret = mkdir_recursive(mp4_dir);
@@ -817,21 +873,8 @@ int start_mp4_recording_with_url(const char *stream_name, const char *url) {
     const struct tm *tm_info = localtime_r(&now, &tm_buf);
     strftime(timestamp_str, sizeof(timestamp_str), "%Y%m%d_%H%M%S", tm_info);
 
-    // Sanitize the stream name so that names with spaces work correctly.
-    char encoded_name[MAX_STREAM_NAME];
-    sanitize_stream_name(stream_name, encoded_name, MAX_STREAM_NAME);
-
-    // Create MP4 directory path
     char mp4_dir[MAX_PATH_LENGTH];
-    if (global_config->record_mp4_directly && global_config->mp4_storage_path[0] != '\0') {
-        // Use configured MP4 storage path if available
-        snprintf(mp4_dir, MAX_PATH_LENGTH, "%s/%s",
-                global_config->mp4_storage_path, encoded_name);
-    } else {
-        // Use mp4 directory parallel to hls, NOT inside it
-        snprintf(mp4_dir, MAX_PATH_LENGTH, "%s/mp4/%s",
-                global_config->storage_path, encoded_name);
-    }
+    build_mp4_output_dir(stream_name, &config, global_config, mp4_dir, sizeof(mp4_dir));
 
     // Create MP4 directory if it doesn't exist
     int ret = mkdir_recursive(mp4_dir);
@@ -1057,19 +1100,8 @@ int start_mp4_recording_with_trigger(const char *stream_name, const char *trigge
     const struct tm *tm_info = localtime_r(&now, &tm_buf);
     strftime(timestamp_str, sizeof(timestamp_str), "%Y%m%d_%H%M%S", tm_info);
 
-    // Sanitize the stream name so that names with spaces work correctly.
-    char encoded_name[MAX_STREAM_NAME];
-    sanitize_stream_name(stream_name, encoded_name, MAX_STREAM_NAME);
-
-    // Create MP4 directory path
     char mp4_dir[MAX_PATH_LENGTH];
-    if (global_config->record_mp4_directly && global_config->mp4_storage_path[0] != '\0') {
-        snprintf(mp4_dir, MAX_PATH_LENGTH, "%s/%s",
-                global_config->mp4_storage_path, encoded_name);
-    } else {
-        snprintf(mp4_dir, MAX_PATH_LENGTH, "%s/mp4/%s",
-                global_config->storage_path, encoded_name);
-    }
+    build_mp4_output_dir(stream_name, &config, global_config, mp4_dir, sizeof(mp4_dir));
 
     // Create MP4 directory if it doesn't exist
     int ret = mkdir_recursive(mp4_dir);
@@ -1214,19 +1246,8 @@ int start_mp4_recording_with_url_and_trigger(const char *stream_name, const char
     const struct tm *tm_info = localtime_r(&now, &tm_buf);
     strftime(timestamp_str, sizeof(timestamp_str), "%Y%m%d_%H%M%S", tm_info);
 
-    // Sanitize the stream name so that names with spaces work correctly.
-    char encoded_name[MAX_STREAM_NAME];
-    sanitize_stream_name(stream_name, encoded_name, MAX_STREAM_NAME);
-
-    // Create MP4 directory path
     char mp4_dir[MAX_PATH_LENGTH];
-    if (global_config->record_mp4_directly && global_config->mp4_storage_path[0] != '\0') {
-        snprintf(mp4_dir, MAX_PATH_LENGTH, "%s/%s",
-                global_config->mp4_storage_path, encoded_name);
-    } else {
-        snprintf(mp4_dir, MAX_PATH_LENGTH, "%s/mp4/%s",
-                global_config->storage_path, encoded_name);
-    }
+    build_mp4_output_dir(stream_name, &config, global_config, mp4_dir, sizeof(mp4_dir));
 
     // Create MP4 directory if it doesn't exist
     int ret = mkdir_recursive(mp4_dir);

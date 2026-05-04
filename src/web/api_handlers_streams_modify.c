@@ -56,6 +56,7 @@ typedef struct {
     bool has_streaming_enabled;                // Whether streaming_enabled flag was provided
     bool non_dynamic_config_changed;           // Whether non-dynamic fields changed
     bool credentials_changed;                  // Whether ONVIF credentials changed
+    bool recording_quality_changed;            // Whether recording source quality changed
 } put_stream_task_t;
 
 static void format_stream_capacity_error(char *buf, size_t buf_size,
@@ -148,6 +149,42 @@ static void redact_url_for_log(const char *url, char *out_url, size_t out_size) 
     }
 }
 
+static void normalize_recording_quality_value(const char *input,
+                                              const char *secondary_url,
+                                              char *output,
+                                              size_t output_size) {
+    const bool has_secondary = secondary_url && secondary_url[0] != '\0';
+    const bool wants_low = input && strcmp(input, "low") == 0;
+    const char *normalized = (has_secondary && wants_low) ? "low" : "high";
+
+    if (!output || output_size == 0) {
+        return;
+    }
+
+    strncpy(output, normalized, output_size - 1);
+    output[output_size - 1] = '\0';
+}
+
+static bool normalize_stream_recording_quality(stream_config_t *config) {
+    if (!config) {
+        return false;
+    }
+
+    char normalized[sizeof(config->recording_quality)];
+    normalize_recording_quality_value(config->recording_quality,
+                                      config->secondary_url,
+                                      normalized,
+                                      sizeof(normalized));
+
+    if (strcmp(config->recording_quality, normalized) == 0) {
+        return false;
+    }
+
+    strncpy(config->recording_quality, normalized, sizeof(config->recording_quality) - 1);
+    config->recording_quality[sizeof(config->recording_quality) - 1] = '\0';
+    return true;
+}
+
 /**
  * @brief Worker function for PUT stream update
  *
@@ -180,6 +217,10 @@ static void put_stream_worker(put_stream_task_t *task) {
         state->config.fps = task->config.fps;
         strncpy(state->config.codec, task->config.codec, sizeof(state->config.codec) - 1);
         state->config.codec[sizeof(state->config.codec) - 1] = '\0';
+        strncpy(state->config.recording_quality,
+                task->config.recording_quality,
+                sizeof(state->config.recording_quality) - 1);
+        state->config.recording_quality[sizeof(state->config.recording_quality) - 1] = '\0';
         pthread_mutex_unlock(&state->mutex);
     }
 
@@ -325,7 +366,9 @@ static void put_stream_worker(put_stream_task_t *task) {
     // Note: record and streaming_enabled can be toggled dynamically without restart
     // Note: retention and PTZ settings are metadata only and don't require restart
 
-    if (task->config_changed && (task->requires_restart || (task->is_running && task->non_dynamic_config_changed))) {
+    bool stream_restart_requested =
+        task->config_changed && (task->requires_restart || (task->is_running && task->non_dynamic_config_changed));
+    if (stream_restart_requested) {
         log_info("Restarting stream %s (requires_restart=%s, is_running=%s, non_dynamic_changed=%s)",
                 task->config.name,
                 task->requires_restart ? "true" : "false",
@@ -404,6 +447,23 @@ static void put_stream_worker(put_stream_task_t *task) {
         }
     } else if (task->config_changed) {
         log_info("Configuration changed for stream %s but restart not required", task->config.name);
+    }
+
+    if (task->recording_quality_changed &&
+        !stream_restart_requested &&
+        task->is_running &&
+        task->config.enabled &&
+        task->config.record) {
+        log_info("Recording quality changed for stream %s, restarting recorder only", task->config.name);
+        if (go2rtc_integration_stop_recording(task->config.name) != 0) {
+            log_warn("Failed to stop recorder for stream %s before quality switch", task->config.name);
+        }
+        if (go2rtc_integration_start_recording(task->config.name) != 0) {
+            log_error("Failed to restart recorder for stream %s after quality switch", task->config.name);
+        } else {
+            log_info("Recorder restarted for stream %s using %s quality",
+                     task->config.name, task->config.recording_quality);
+        }
     }
 
     log_info("Successfully completed stream update for: %s", task->stream_id);
@@ -490,6 +550,8 @@ void handle_post_stream(const http_request_t *req, http_response_t *res) {
     config.priority = 5;
     config.record = true;
     config.segment_duration = 60;
+    strncpy(config.recording_quality, "high", sizeof(config.recording_quality) - 1);
+    config.recording_quality[sizeof(config.recording_quality) - 1] = '\0';
     config.detection_based_recording = false;
     config.detection_interval = 10;
     config.detection_threshold = 0.5f;
@@ -538,6 +600,12 @@ void handle_post_stream(const http_request_t *req, http_response_t *res) {
     cJSON *record = cJSON_GetObjectItem(stream_json, "record");
     if (record && cJSON_IsBool(record)) {
         config.record = cJSON_IsTrue(record);
+    }
+
+    cJSON *recording_quality = cJSON_GetObjectItem(stream_json, "recording_quality");
+    if (recording_quality && cJSON_IsString(recording_quality)) {
+        strncpy(config.recording_quality, recording_quality->valuestring, sizeof(config.recording_quality) - 1);
+        config.recording_quality[sizeof(config.recording_quality) - 1] = '\0';
     }
 
     cJSON *segment_duration = cJSON_GetObjectItem(stream_json, "segment_duration");
@@ -719,6 +787,8 @@ void handle_post_stream(const http_request_t *req, http_response_t *res) {
     } else {
         config.motion_trigger_source[0] = '\0';
     }
+
+    normalize_stream_recording_quality(&config);
 
     // Check if isOnvif flag is set in the request
     cJSON *is_onvif = cJSON_GetObjectItem(stream_json, "isOnvif");
@@ -957,9 +1027,17 @@ void handle_put_stream(const http_request_t *req, http_response_t *res) {
     char original_secondary_url[MAX_URL_LENGTH];
     strncpy(original_secondary_url, config.secondary_url, MAX_URL_LENGTH - 1);
     original_secondary_url[MAX_URL_LENGTH - 1] = '\0';
+    char original_recording_quality[sizeof(config.recording_quality)];
+    strncpy(original_recording_quality, config.recording_quality, sizeof(original_recording_quality) - 1);
+    original_recording_quality[sizeof(original_recording_quality) - 1] = '\0';
+    normalize_recording_quality_value(original_recording_quality,
+                                      config.secondary_url,
+                                      original_recording_quality,
+                                      sizeof(original_recording_quality));
 
     stream_protocol_t original_protocol = config.protocol;
     bool original_record_audio = config.record_audio;
+    bool recording_quality_changed = false;
 
     cJSON *url = cJSON_GetObjectItem(stream_json, "url");
     if (url && cJSON_IsString(url)) {
@@ -997,6 +1075,21 @@ void handle_put_stream(const http_request_t *req, http_response_t *res) {
             requires_restart = true;
             log_info("Secondary URL cleared - restart required");
         }
+    }
+
+    cJSON *recording_quality_json = cJSON_GetObjectItem(stream_json, "recording_quality");
+    if (recording_quality_json && cJSON_IsString(recording_quality_json)) {
+        strncpy(config.recording_quality, recording_quality_json->valuestring, sizeof(config.recording_quality) - 1);
+        config.recording_quality[sizeof(config.recording_quality) - 1] = '\0';
+    }
+    normalize_stream_recording_quality(&config);
+    if (strcmp(original_recording_quality, config.recording_quality) != 0) {
+        config_changed = true;
+        recording_quality_changed = true;
+        log_info("Recording quality changed from %s to %s for stream %s",
+                 original_recording_quality[0] ? original_recording_quality : "high",
+                 config.recording_quality[0] ? config.recording_quality : "high",
+                 config.name);
     }
 
     cJSON *enabled = cJSON_GetObjectItem(stream_json, "enabled");
@@ -1641,6 +1734,7 @@ void handle_put_stream(const http_request_t *req, http_response_t *res) {
     task->has_streaming_enabled = has_streaming_enabled;
     task->non_dynamic_config_changed = non_dynamic_config_changed;
     task->credentials_changed = credentials_changed;
+    task->recording_quality_changed = recording_quality_changed;
 
     log_info("Detection settings before update - Model: %s, Threshold: %.2f, Interval: %d, Pre-buffer: %d, Post-buffer: %d",
              config.detection_model, config.detection_threshold, config.detection_interval,

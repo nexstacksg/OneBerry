@@ -18,7 +18,7 @@ import { formatLocalTime } from '../../../utils/date-utils.js';
  * @param {Array} props.segments Array of timeline segments
  * @returns {JSX.Element} TimelineSegments component
  */
-export function TimelineSegments({ segments: propSegments }) {
+export function TimelineSegments({ segments: propSegments, interactive = true }) {
   // Local state
   const [segments, setSegments] = useState(propSegments || []);
   const [startHour, setStartHour] = useState(0);
@@ -69,6 +69,10 @@ export function TimelineSegments({ segments: propSegments }) {
 
   // Set up drag handling
   useEffect(() => {
+    if (!interactive) {
+      return undefined;
+    }
+
     const container = containerRef.current;
     if (!container) return;
 
@@ -109,7 +113,7 @@ export function TimelineSegments({ segments: propSegments }) {
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [startHour, endHour, segments]);
+  }, [endHour, interactive, segments, startHour]);
 
   // Handle click on timeline for seeking
   const handleTimelineClick = (event) => {
@@ -148,7 +152,7 @@ export function TimelineSegments({ segments: propSegments }) {
   const renderSegments = () => {
     if (!segments || segments.length === 0) {
       return (
-        <div className="absolute inset-0 flex items-center justify-center text-muted-foreground text-sm">
+        <div className="absolute inset-0 flex items-center justify-center text-sm text-white/45">
           No segments to display
         </div>
       );
@@ -205,10 +209,15 @@ export function TimelineSegments({ segments: propSegments }) {
       rendered.push(
         <div
           key={`seg-${i}`}
-          className={`timeline-segment ${seg.has_detection ? 'has-detection' : ''}`}
+          className="absolute top-1/2 -translate-y-1/2 rounded-sm"
           style={{
             left: `${leftPct}%`,
             width: `${Math.max(widthPct, 0.15)}%`,   // min width so tiny segments stay visible
+            height: '8px',
+            background: seg.has_detection
+              ? 'linear-gradient(180deg, rgba(245, 158, 11, 0.98) 0%, rgba(34, 197, 94, 0.95) 100%)'
+              : 'linear-gradient(180deg, rgba(100, 220, 118, 0.95) 0%, rgba(58, 181, 74, 0.92) 100%)',
+            boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.08)'
           }}
           title={`${t0} – ${t1}  (${durLabel})`}
         />
@@ -220,10 +229,18 @@ export function TimelineSegments({ segments: propSegments }) {
 
   return (
     <div
-      className="timeline-segments relative w-full h-16"
+      className="timeline-segments relative h-11 w-full overflow-hidden rounded-xl border border-white/10 bg-gradient-to-b from-[#121417] via-[#0d0f12] to-[#07080a] shadow-inner"
       ref={containerRef}
       aria-label="Recording timeline"
+      style={{ pointerEvents: interactive ? 'auto' : 'none' }}
     >
+      <div
+        className="absolute inset-0 opacity-45"
+        style={{
+          backgroundImage: 'repeating-linear-gradient(90deg, rgba(255,255,255,0.03) 0 1px, transparent 1px 3.125%)'
+        }}
+      />
+      <div className="absolute inset-x-0 bottom-0 h-[2px] bg-gradient-to-r from-emerald-500/40 via-emerald-300/70 to-emerald-500/40" />
       {renderSegments()}
     </div>
   );
