@@ -21,6 +21,7 @@ import { useQueryClient } from '../../query-client.js';
 import { createPlayerTelemetry } from '../../utils/player-telemetry.js';
 import { StreamQualitySelector } from './StreamQualitySelector.jsx';
 import { useStreamQuality } from './useStreamQuality.js';
+import { updateStreamRecordingQuality } from '../../utils/stream-quality-utils.js';
 import 'webrtc-adapter';
 
 // Retry configuration for sending WebRTC offers to go2rtc.
@@ -100,6 +101,7 @@ export function WebRTCVideoCell({
 
     return true;
   });
+  const [isUpdatingQuality, setIsUpdatingQuality] = useState(false);
   const [error, setError] = useState(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [connectionQuality, setConnectionQuality] = useState('unknown'); // 'unknown', 'good', 'fair', 'poor', 'bad'
@@ -110,17 +112,29 @@ export function WebRTCVideoCell({
   const [fullscreenPlaybackTimestamp, setFullscreenPlaybackTimestamp] = useState(null);
 
   const handleStreamQualityChange = useCallback((quality) => {
-    if (quality === streamQuality) {
+    if (quality === streamQuality || isUpdatingQuality) {
       return;
     }
 
-    setStreamQuality(quality);
-    setError(null);
-    setIsLoading(true);
-    setIsPlaying(false);
-    setConnectionQuality('unknown');
-    setRetryCount((value) => value + 1);
-  }, [setStreamQuality, streamQuality]);
+    setIsUpdatingQuality(true);
+    updateStreamRecordingQuality(stream, quality)
+      .then((normalizedQuality) => {
+        setStreamQuality(normalizedQuality);
+        queryClient.invalidateQueries({ queryKey: ['streams'] });
+        setError(null);
+        setIsLoading(true);
+        setIsPlaying(false);
+        setConnectionQuality('unknown');
+        setRetryCount((value) => value + 1);
+      })
+      .catch((err) => {
+        console.error(`Failed to update recording quality for ${stream?.name}:`, err);
+        showStatusMessage(err?.message || 'Failed to update recording quality');
+      })
+      .finally(() => {
+        setIsUpdatingQuality(false);
+      });
+  }, [isUpdatingQuality, queryClient, setStreamQuality, stream, streamQuality]);
 
   // Backchannel (two-way audio) state
   const [isTalking, setIsTalking] = useState(false);
@@ -1403,10 +1417,11 @@ export function WebRTCVideoCell({
         }}
       >
         {hasLowQuality && (
-          <StreamQualitySelector
-            value={streamQuality}
-            onChange={handleStreamQualityChange}
-          />
+            <StreamQualitySelector
+              disabled={isUpdatingQuality}
+              value={streamQuality}
+              onChange={handleStreamQualityChange}
+            />
         )}
         <div
           style={{

@@ -11,10 +11,9 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { useQuery } from '../../query-client.js';
 import { useI18n } from '../../i18n.js';
 import { currentDateInputValue, getLocalDayIsoRange } from '../../utils/date-utils.js';
-import { Priority } from '../../request-queue.js';
 import { forceNavigation } from '../../utils/navigation-utils.js';
 import { formatUtils } from './recordings/formatUtils.js';
-import { TimelineThumbnailTile } from './timeline/TimelineThumbnailTile.jsx';
+import { TimelineBarBody } from './timeline/TimelineBarBody.jsx';
 import {
   findContainingSegmentIndex,
   findNearestSegmentIndex,
@@ -162,9 +161,7 @@ export function FullscreenTimelineOverlay({
   const [isExpanded, setIsExpanded] = useState(true);
   const [startHour, setStartHour] = useState(0);
   const [endHour, setEndHour] = useState(() => getTimelineDayLengthHours(selectedDate));
-  const [previewStripWidth, setPreviewStripWidth] = useState(0);
   const [scrubTimestamp, setScrubTimestamp] = useState(null);
-  const previewStripRef = useRef(null);
   const trackRef = useRef(null);
   const scrubStateRef = useRef({ isDragging: false, pointerId: null });
   const isDocked = mode === 'dock';
@@ -237,53 +234,6 @@ export function FullscreenTimelineOverlay({
     setIsFollowingLive(false);
   };
 
-  const previewSamples = useMemo(() => {
-    if (!isExpanded || !segments.length) {
-      return [];
-    }
-
-    const bounds = getLocalDayBounds(selectedDate);
-    if (!bounds) {
-      return [];
-    }
-
-    const visibleRange = Math.max(endHour - startHour, 0.001);
-    const desiredTileWidth = visibleRange <= 0.05
-      ? 28
-      : visibleRange <= 0.25
-        ? 34
-        : visibleRange <= 1
-          ? 42
-          : visibleRange <= 6
-            ? 54
-            : visibleRange <= 12
-              ? 60
-              : 66;
-    const measuredWidth = previewStripWidth > 0 ? previewStripWidth : 1200;
-    const sampleCount = clamp(Math.round(measuredWidth / desiredTileWidth), visibleRange <= 1 ? 16 : 10, visibleRange <= 0.25 ? 40 : 28);
-
-    return Array.from({ length: sampleCount }, (_, index) => {
-      const ratio = (index + 0.5) / sampleCount;
-      const sampleHour = startHour + (ratio * visibleRange);
-      const sampleTimestamp = Math.round(bounds.startTimestamp + (sampleHour * 3600));
-      const containingIndex = findContainingSegmentIndex(segments, sampleTimestamp);
-      const nearestIndex = containingIndex !== -1
-        ? containingIndex
-        : findNearestSegmentIndex(segments, sampleTimestamp);
-      const segment = nearestIndex !== -1 ? segments[nearestIndex] : null;
-
-      return {
-        key: `preview-${index}`,
-        thumbUrl: segment ? `/api/recordings/thumbnail/${segment.id}/${getPreviewFrameIndex(segment, sampleTimestamp)}` : null,
-        timestamp: sampleTimestamp,
-        segmentId: segment?.id ?? null,
-        offsetSeconds: segment ? Math.max(0, sampleTimestamp - segment.start_timestamp) : 0,
-        playbackUrl: segment ? `/api/recordings/play/${segment.id}?v=${sampleTimestamp}` : null,
-        href: segment ? formatUtils.getTimelineUrl(streamName, sampleTimestamp, true) : null
-      };
-    });
-  }, [endHour, isExpanded, previewStripWidth, selectedDate, segments, startHour, streamName]);
-
   const buildPlaybackSample = (segment, timestamp) => {
     if (!segment) {
       return null;
@@ -321,27 +271,6 @@ export function FullscreenTimelineOverlay({
   };
 
   useEffect(() => {
-    if (!isExpanded) {
-      return undefined;
-    }
-
-    const element = previewStripRef.current;
-    if (!element || typeof ResizeObserver === 'undefined') {
-      return undefined;
-    }
-
-    const observer = new ResizeObserver((entries) => {
-      const nextWidth = entries[0]?.contentRect?.width || 0;
-      setPreviewStripWidth(nextWidth);
-    });
-
-    observer.observe(element);
-    setPreviewStripWidth(element.getBoundingClientRect().width || 0);
-
-    return () => observer.disconnect();
-  }, [isExpanded]);
-
-  useEffect(() => {
     if (!isVisible || !streamName) {
       return undefined;
     }
@@ -357,48 +286,6 @@ export function FullscreenTimelineOverlay({
 
     return () => clearInterval(midnightTick);
   }, [isVisible, streamName]);
-
-  const visibleMarkers = useMemo(() => {
-    const markers = [];
-    const visibleRange = Math.max(endHour - startHour, 0.001);
-    const visibleSeconds = visibleRange * 3600;
-    let stepSeconds = 3600;
-    if (visibleSeconds <= 30) {
-      stepSeconds = 1;
-    } else if (visibleSeconds <= 120) {
-      stepSeconds = 5;
-    } else if (visibleSeconds <= 600) {
-      stepSeconds = 15;
-    } else if (visibleSeconds <= 1800) {
-      stepSeconds = 60;
-    } else if (visibleSeconds <= 7200) {
-      stepSeconds = 300;
-    } else if (visibleSeconds <= 21600) {
-      stepSeconds = 900;
-    }
-    const step = stepSeconds / 3600;
-    const firstMarker = Math.ceil(startHour / step) * step;
-
-    for (let hour = firstMarker; hour <= endHour + 0.001; hour += step) {
-      const position = ((hour - startHour) / visibleRange) * 100;
-      const isMajorTick = stepSeconds >= 3600;
-
-      markers.push(
-        <div
-          key={`marker-${hour.toFixed(2)}`}
-          className="absolute top-0 flex flex-col items-center"
-          style={{ left: `${position}%`, transform: 'translateX(-50%)' }}
-        >
-          <div className={`w-px ${isMajorTick ? 'h-[12px] bg-white/35' : 'h-[8px] bg-white/20'}`} />
-          <div className={`mt-[-1px] whitespace-nowrap ${isMajorTick ? 'text-[10px] text-white/70' : 'text-[9px] text-white/45'}`}>
-            {formatTickLabel(hour, selectedDate, stepSeconds)}
-          </div>
-        </div>
-      );
-    }
-
-    return markers;
-  }, [endHour, selectedDate, startHour]);
 
   useEffect(() => {
     if (!isVisible || !streamName) {
@@ -556,16 +443,20 @@ export function FullscreenTimelineOverlay({
   const handlePreviewSelect = (sample, event) => {
     if (!sample) return;
 
-    setCursorTimestamp(sample.timestamp);
+    const resolvedSample = sample.segment
+      ? (buildPlaybackSample(sample.segment, sample.timestamp) || sample)
+      : sample;
+
+    setCursorTimestamp(resolvedSample.timestamp);
     setIsFollowingLive(false);
 
     if (typeof onPreviewSelect === 'function') {
-      onPreviewSelect(sample, event);
+      onPreviewSelect(resolvedSample, event);
       return;
     }
 
-    if (sample.href) {
-      forceNavigation(sample.href, event);
+    if (resolvedSample.href) {
+      forceNavigation(resolvedSample.href, event);
     }
   };
 
@@ -715,63 +606,20 @@ export function FullscreenTimelineOverlay({
               </div>
             </div>
 
-            {previewSamples.length > 0 && (
-              <div className="border-b border-white/10 bg-black/30 px-2 py-1 sm:px-3">
-                <div
-                  ref={previewStripRef}
-                  className="grid gap-0.5"
-                  style={{ gridTemplateColumns: `repeat(${previewSamples.length}, minmax(0, 1fr))` }}
-                >
-                  {previewSamples.map((sample) => (
-                    <button
-                      type="button"
-                      key={sample.key}
-                      title={sample.timestamp ? formatClockLabel(sample.timestamp) : 'Open recording'}
-                      aria-label={sample.timestamp ? `Open recording at ${formatClockLabel(sample.timestamp)}` : 'Open recording'}
-                      onClick={(event) => handlePreviewSelect(sample, event)}
-                      className="relative aspect-video overflow-hidden rounded-[3px] border border-white/10 bg-[#10151f] transition-colors hover:border-sky-300/40 hover:bg-[#18202d]"
-                    >
-                      {sample.thumbUrl ? (
-                        <TimelineThumbnailTile
-                          thumbUrl={sample.thumbUrl}
-                          alt="Timeline preview"
-                          priority={Priority.HIGH}
-                          imgClassName="h-full w-full object-cover"
-                        />
-                      ) : (
-                        <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-slate-800 to-slate-950 text-[9px] text-white/35">
-                          No preview
-                        </div>
-                      )}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            <div className="border-b border-white/10 bg-black/40 px-2 py-1 text-center text-[11px] uppercase tracking-[0.24em] text-white/55 sm:px-3">
-              {fullDateLabel}
-            </div>
-
-            <div className="px-2 pb-2 pt-2 sm:px-3">
-              {isLoading ? (
-                <div className="flex h-20 items-center justify-center px-3 text-sm text-white/55">
-                  {t('common.loading')}
-                </div>
-              ) : error ? (
-                <div className="flex h-20 items-center justify-center px-3 text-sm text-red-200">
-                  {t('timeline.reloadTimelineData')}
-                </div>
-              ) : visibleSegments.length === 0 ? (
-                <div className="flex h-20 items-center justify-center px-3 text-sm text-white/45">
-                  {t('recordings.noRecordingsFound')}
-                </div>
-              ) : (
-                <div className="space-y-2" onWheel={handleWheelZoom}>
-                  <div className="relative h-6">
-                    {visibleMarkers}
-                  </div>
-
+            <TimelineBarBody
+              segments={segments}
+              selectedDate={selectedDate}
+              startHour={startHour}
+              endHour={endHour}
+              dateLabel={fullDateLabel}
+              isLoading={isLoading}
+              error={error}
+              loadingText={t('common.loading')}
+              errorText={t('timeline.reloadTimelineData')}
+              emptyText={t('recordings.noRecordingsFound')}
+              onPreviewSelect={handlePreviewSelect}
+              onWheel={handleWheelZoom}
+              renderTrackContent={() => (
                 <div
                   ref={trackRef}
                   className="relative h-11 overflow-hidden rounded-xl border border-white/10 bg-gradient-to-b from-[#121417] via-[#0d0f12] to-[#07080a] shadow-inner"
@@ -829,16 +677,16 @@ export function FullscreenTimelineOverlay({
                     </div>
                   )}
                 </div>
-                  <div className="flex items-center justify-end gap-2 px-1 text-[10px] uppercase tracking-[0.22em] text-white/35">
-                    <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-white/65">Click to seek</span>
-                    <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-white/65">
-                      {isFollowingLive ? 'Live sync' : 'Paused'}
-                    </span>
-                  </div>
-                </div>
-
               )}
-            </div>
+              footerContent={(
+                <div className="flex items-center justify-end gap-2 px-1 text-[10px] uppercase tracking-[0.22em] text-white/35">
+                  <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-white/65">Click to seek</span>
+                  <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-white/65">
+                    {isFollowingLive ? 'Live sync' : 'Paused'}
+                  </span>
+                </div>
+              )}
+            />
           </div>
         </div>
       )}

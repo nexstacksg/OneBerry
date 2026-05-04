@@ -4,6 +4,7 @@ import {
   getStoredStreamQuality,
   getStreamQualitySource,
   hasLowQualityStream,
+  normalizeStreamQuality,
   persistStreamQuality,
 } from '../../utils/stream-quality-utils.js';
 
@@ -13,16 +14,14 @@ export function useStreamQuality(stream) {
 
   useEffect(() => {
     setStreamQualityState(getStoredStreamQuality(stream));
-  }, [stream?.name, stream?.secondary_url, stream?.secondaryUrl]);
+  }, [stream?.name, stream?.secondary_url, stream?.secondaryUrl, stream?.recording_quality, stream?.recordingQuality]);
 
   const setStreamQuality = useCallback((quality) => {
-    const normalizedQuality = quality === STREAM_QUALITY.LOW && hasLowQuality
-      ? STREAM_QUALITY.LOW
-      : STREAM_QUALITY.HIGH;
+    const normalizedQuality = normalizeStreamQuality(quality, stream);
 
     setStreamQualityState(normalizedQuality);
     persistStreamQuality(stream?.name, normalizedQuality);
-  }, [hasLowQuality, stream?.name]);
+  }, [stream, stream?.name]);
 
   const selectedStreamSource = useMemo(
     () => getStreamQualitySource(stream, streamQuality),

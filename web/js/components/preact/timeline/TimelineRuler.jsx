@@ -86,7 +86,7 @@ export function TimelineRuler() {
       markers.push(
         <div
           key={`tick-${timestamp}`}
-          className={`absolute top-0 w-px ${isMajorTick ? 'h-5 bg-foreground/90' : 'h-3 bg-muted-foreground/80'}`}
+          className={`absolute top-0 w-px ${isMajorTick ? 'h-[12px] bg-white/35' : 'h-[8px] bg-white/20'}`}
           style={{ left: `${position}%` }}
         />
       );
@@ -95,7 +95,7 @@ export function TimelineRuler() {
         markers.push(
           <div
             key={`label-${timestamp}`}
-            className="absolute top-0 text-xs text-muted-foreground transform -translate-x-1/2 whitespace-nowrap"
+            className={`absolute top-0 -translate-x-1/2 whitespace-nowrap ${isMajorTick ? 'text-[10px] text-white/70' : 'text-[9px] text-white/45'}`}
             style={{ left: `${position}%` }}
           >
             {formattedTime}
@@ -108,9 +108,9 @@ export function TimelineRuler() {
   };
 
   return (
-    <div className="timeline-ruler relative w-full h-8 bg-muted border-b border-border">
+    <div className="timeline-ruler relative w-full h-7 border-b border-white/10 bg-black/40 px-2 sm:px-3">
       {generateHourMarkers()}
-      <div className="absolute bottom-0 left-0 text-xs text-muted-foreground px-1">
+      <div className="absolute bottom-0 left-2 text-[10px] uppercase tracking-[0.22em] text-white/35">
         {formatTimelineWindowLabel(endHour - startHour)}
       </div>
     </div>

@@ -63,6 +63,22 @@ static void deserialize_recording_schedule(const char *text, uint8_t *schedule) 
     }
 }
 
+static void normalize_recording_quality_value(const char *input,
+                                              const char *secondary_url,
+                                              char *output,
+                                              size_t output_size) {
+    const bool has_secondary = secondary_url && secondary_url[0] != '\0';
+    const bool wants_low = input && strcmp(input, "low") == 0;
+    const char *normalized = (has_secondary && wants_low) ? "low" : "high";
+
+    if (!output || output_size == 0) {
+        return;
+    }
+
+    strncpy(output, normalized, output_size - 1);
+    output[output_size - 1] = '\0';
+}
+
 /**
  * Add a stream configuration to the database
  *
@@ -121,7 +137,7 @@ uint64_t add_stream_config(const stream_config_t *stream) {
         }
 
         const char *update_sql = "UPDATE streams SET "
-                                "url = ?, secondary_url = ?, enabled = ?, streaming_enabled = ?, width = ?, height = ?, "
+                                "url = ?, secondary_url = ?, recording_quality = ?, enabled = ?, streaming_enabled = ?, width = ?, height = ?, "
                                 "fps = ?, codec = ?, priority = ?, record = ?, segment_duration = ?, "
                                 "detection_based_recording = ?, detection_model = ?, detection_threshold = ?, "
                                 "detection_interval = ?, pre_detection_buffer = ?, post_detection_buffer = ?, "
@@ -147,6 +163,12 @@ uint64_t add_stream_config(const stream_config_t *stream) {
         // Bind parameters for basic stream settings
         sqlite3_bind_text(stmt, bind_idx++, stream->url, -1, SQLITE_STATIC);
         sqlite3_bind_text(stmt, bind_idx++, stream->secondary_url, -1, SQLITE_STATIC);
+        char normalized_recording_quality[sizeof(stream->recording_quality)];
+        normalize_recording_quality_value(stream->recording_quality,
+                                          stream->secondary_url,
+                                          normalized_recording_quality,
+                                          sizeof(normalized_recording_quality));
+        sqlite3_bind_text(stmt, bind_idx++, normalized_recording_quality, -1, SQLITE_TRANSIENT);
         sqlite3_bind_int(stmt, bind_idx++, stream->enabled ? 1 : 0);
         sqlite3_bind_int(stmt, bind_idx++, stream->streaming_enabled ? 1 : 0);
         sqlite3_bind_int(stmt, bind_idx++, stream->width);
@@ -252,7 +274,7 @@ uint64_t add_stream_config(const stream_config_t *stream) {
     }
 
     // No disabled stream found, insert a new one
-    const char *sql = "INSERT INTO streams (name, url, secondary_url, enabled, streaming_enabled, width, height, fps, codec, priority, record, segment_duration, "
+    const char *sql = "INSERT INTO streams (name, url, secondary_url, recording_quality, enabled, streaming_enabled, width, height, fps, codec, priority, record, segment_duration, "
           "detection_based_recording, detection_model, detection_threshold, detection_interval, "
           "pre_detection_buffer, post_detection_buffer, detection_api_url, "
           "detection_object_filter, detection_object_filter_list, "
@@ -277,6 +299,12 @@ uint64_t add_stream_config(const stream_config_t *stream) {
     sqlite3_bind_text(stmt, insert_bind_idx++, stream->name, -1, SQLITE_STATIC);
     sqlite3_bind_text(stmt, insert_bind_idx++, stream->url, -1, SQLITE_STATIC);
     sqlite3_bind_text(stmt, insert_bind_idx++, stream->secondary_url, -1, SQLITE_STATIC);
+    char normalized_recording_quality_insert[sizeof(stream->recording_quality)];
+    normalize_recording_quality_value(stream->recording_quality,
+                                      stream->secondary_url,
+                                      normalized_recording_quality_insert,
+                                      sizeof(normalized_recording_quality_insert));
+    sqlite3_bind_text(stmt, insert_bind_idx++, normalized_recording_quality_insert, -1, SQLITE_TRANSIENT);
     sqlite3_bind_int(stmt, insert_bind_idx++, stream->enabled ? 1 : 0);
     sqlite3_bind_int(stmt, insert_bind_idx++, stream->streaming_enabled ? 1 : 0);
     sqlite3_bind_int(stmt, insert_bind_idx++, stream->width);
@@ -400,7 +428,7 @@ int update_stream_config(const char *name, const stream_config_t *stream) {
 
     // Now update the stream with all fields including detection settings, protocol, is_onvif, record_audio, backchannel_enabled, retention settings, PTZ, ONVIF credentials, recording schedule, tags, and privacy_mode
     const char *sql = "UPDATE streams SET "
-                      "name = ?, url = ?, secondary_url = ?, enabled = ?, streaming_enabled = ?, width = ?, height = ?, "
+                      "name = ?, url = ?, secondary_url = ?, recording_quality = ?, enabled = ?, streaming_enabled = ?, width = ?, height = ?, "
                       "fps = ?, codec = ?, priority = ?, record = ?, segment_duration = ?, "
                       "detection_based_recording = ?, detection_model = ?, detection_threshold = ?, "
                       "detection_interval = ?, pre_detection_buffer = ?, post_detection_buffer = ?, "
@@ -427,6 +455,12 @@ int update_stream_config(const char *name, const stream_config_t *stream) {
     sqlite3_bind_text(stmt, update_bind_idx++, stream->name, -1, SQLITE_STATIC);
     sqlite3_bind_text(stmt, update_bind_idx++, stream->url, -1, SQLITE_STATIC);
     sqlite3_bind_text(stmt, update_bind_idx++, stream->secondary_url, -1, SQLITE_STATIC);
+    char normalized_recording_quality_update[sizeof(stream->recording_quality)];
+    normalize_recording_quality_value(stream->recording_quality,
+                                      stream->secondary_url,
+                                      normalized_recording_quality_update,
+                                      sizeof(normalized_recording_quality_update));
+    sqlite3_bind_text(stmt, update_bind_idx++, normalized_recording_quality_update, -1, SQLITE_TRANSIENT);
     sqlite3_bind_int(stmt, update_bind_idx++, stream->enabled ? 1 : 0);
     sqlite3_bind_int(stmt, update_bind_idx++, stream->streaming_enabled ? 1 : 0);
     sqlite3_bind_int(stmt, update_bind_idx++, stream->width);
@@ -756,7 +790,7 @@ int get_stream_config_by_name(const char *name, stream_config_t *stream) {
     // After migrations, all columns are guaranteed to exist
     // Use a single query with all columns - column indices are fixed
     const char *sql =
-        "SELECT name, url, secondary_url, enabled, streaming_enabled, width, height, fps, codec, priority, record, segment_duration, "
+        "SELECT name, url, secondary_url, recording_quality, enabled, streaming_enabled, width, height, fps, codec, priority, record, segment_duration, "
         "detection_based_recording, detection_model, detection_threshold, detection_interval, "
         "pre_detection_buffer, post_detection_buffer, detection_api_url, "
         "detection_object_filter, detection_object_filter_list, "
@@ -770,7 +804,7 @@ int get_stream_config_by_name(const char *name, stream_config_t *stream) {
 
     // Column index constants for readability
     enum {
-        COL_NAME = 0, COL_URL, COL_SECONDARY_URL, COL_ENABLED, COL_STREAMING_ENABLED,
+        COL_NAME = 0, COL_URL, COL_SECONDARY_URL, COL_RECORDING_QUALITY, COL_ENABLED, COL_STREAMING_ENABLED,
         COL_WIDTH, COL_HEIGHT, COL_FPS, COL_CODEC, COL_PRIORITY, COL_RECORD, COL_SEGMENT_DURATION,
         COL_DETECTION_BASED_RECORDING, COL_DETECTION_MODEL, COL_DETECTION_THRESHOLD, COL_DETECTION_INTERVAL,
         COL_PRE_DETECTION_BUFFER, COL_POST_DETECTION_BUFFER, COL_DETECTION_API_URL,
@@ -814,6 +848,12 @@ int get_stream_config_by_name(const char *name, stream_config_t *stream) {
             strncpy(stream->secondary_url, secondary_url, MAX_URL_LENGTH - 1);
             stream->secondary_url[MAX_URL_LENGTH - 1] = '\0';
         }
+
+        const char *recording_quality = (const char *)sqlite3_column_text(stmt, COL_RECORDING_QUALITY);
+        normalize_recording_quality_value(recording_quality,
+                                          stream->secondary_url,
+                                          stream->recording_quality,
+                                          sizeof(stream->recording_quality));
 
         stream->enabled = sqlite3_column_int(stmt, COL_ENABLED) != 0;
         stream->streaming_enabled = sqlite3_column_int(stmt, COL_STREAMING_ENABLED) != 0;
@@ -1003,7 +1043,7 @@ int get_all_stream_configs(stream_config_t *streams, int max_count) {
 
     // After migrations, all columns are guaranteed to exist
     const char *sql =
-        "SELECT name, url, secondary_url, enabled, streaming_enabled, width, height, fps, codec, priority, record, segment_duration, "
+        "SELECT name, url, secondary_url, recording_quality, enabled, streaming_enabled, width, height, fps, codec, priority, record, segment_duration, "
         "detection_based_recording, detection_model, detection_threshold, detection_interval, "
         "pre_detection_buffer, post_detection_buffer, detection_api_url, "
         "detection_object_filter, detection_object_filter_list, "
@@ -1017,7 +1057,7 @@ int get_all_stream_configs(stream_config_t *streams, int max_count) {
 
     // Column index constants (same as get_stream_config_by_name)
     enum {
-        COL_NAME = 0, COL_URL, COL_SECONDARY_URL, COL_ENABLED, COL_STREAMING_ENABLED,
+        COL_NAME = 0, COL_URL, COL_SECONDARY_URL, COL_RECORDING_QUALITY, COL_ENABLED, COL_STREAMING_ENABLED,
         COL_WIDTH, COL_HEIGHT, COL_FPS, COL_CODEC, COL_PRIORITY, COL_RECORD, COL_SEGMENT_DURATION,
         COL_DETECTION_BASED_RECORDING, COL_DETECTION_MODEL, COL_DETECTION_THRESHOLD, COL_DETECTION_INTERVAL,
         COL_PRE_DETECTION_BUFFER, COL_POST_DETECTION_BUFFER, COL_DETECTION_API_URL,
@@ -1060,6 +1100,12 @@ int get_all_stream_configs(stream_config_t *streams, int max_count) {
             strncpy(s->secondary_url, secondary_url, MAX_URL_LENGTH - 1);
             s->secondary_url[MAX_URL_LENGTH - 1] = '\0';
         }
+
+        const char *recording_quality = (const char *)sqlite3_column_text(stmt, COL_RECORDING_QUALITY);
+        normalize_recording_quality_value(recording_quality,
+                                          s->secondary_url,
+                                          s->recording_quality,
+                                          sizeof(s->recording_quality));
 
         s->enabled = sqlite3_column_int(stmt, COL_ENABLED) != 0;
         s->streaming_enabled = sqlite3_column_int(stmt, COL_STREAMING_ENABLED) != 0;

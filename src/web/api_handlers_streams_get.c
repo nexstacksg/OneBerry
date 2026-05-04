@@ -197,6 +197,8 @@ void handle_get_streams(const http_request_t *req, http_response_t *res) {
         cJSON_AddStringToObject(stream_obj, "name", db_streams[i].name);
         cJSON_AddStringToObject(stream_obj, "url", safe_url);
         cJSON_AddStringToObject(stream_obj, "secondary_url", safe_secondary_url);
+        cJSON_AddStringToObject(stream_obj, "recording_quality",
+                                db_streams[i].recording_quality[0] ? db_streams[i].recording_quality : "high");
         cJSON_AddBoolToObject(stream_obj, "enabled", db_streams[i].enabled);
         cJSON_AddBoolToObject(stream_obj, "streaming_enabled", db_streams[i].streaming_enabled);
         cJSON_AddNumberToObject(stream_obj, "width", db_streams[i].width);
@@ -356,6 +358,8 @@ void handle_get_stream(const http_request_t *req, http_response_t *res) {
     cJSON_AddStringToObject(stream_obj, "name", config.name);
     cJSON_AddStringToObject(stream_obj, "url", safe_url);
     cJSON_AddStringToObject(stream_obj, "secondary_url", safe_secondary_url);
+    cJSON_AddStringToObject(stream_obj, "recording_quality",
+                            config.recording_quality[0] ? config.recording_quality : "high");
     cJSON_AddBoolToObject(stream_obj, "enabled", config.enabled);
     cJSON_AddBoolToObject(stream_obj, "streaming_enabled", config.streaming_enabled);
     cJSON_AddNumberToObject(stream_obj, "width", config.width);
@@ -512,6 +516,8 @@ void handle_get_stream_full(const http_request_t *req, http_response_t *res) {
     cJSON_AddStringToObject(stream_obj, "name", config.name);
     cJSON_AddStringToObject(stream_obj, "url", safe_url_full);
     cJSON_AddStringToObject(stream_obj, "secondary_url", safe_secondary_url_full);
+    cJSON_AddStringToObject(stream_obj, "recording_quality",
+                            config.recording_quality[0] ? config.recording_quality : "high");
     cJSON_AddBoolToObject(stream_obj, "enabled", config.enabled);
     cJSON_AddBoolToObject(stream_obj, "streaming_enabled", config.streaming_enabled);
     cJSON_AddNumberToObject(stream_obj, "width", config.width);
