@@ -411,14 +411,6 @@ export function TimelinePage() {
     }
   }, []);
 
-  const handleTimelinePreviewSelect = useCallback((sample) => {
-    if (!sample || !Number.isFinite(sample.timestamp)) {
-      return;
-    }
-
-    applyTimelineTimestamp(sample.timestamp);
-  }, [applyTimelineTimestamp]);
-
   const seekCurrentVideo = useCallback((directionSeconds) => {
     const videoPlayer = videoElementRef.current;
     if (!(videoPlayer instanceof HTMLVideoElement)) {
@@ -1256,16 +1248,6 @@ export function TimelinePage() {
         {/* Playback controls (includes time display) */}
         <TimelineControls />
 
-        <div className="mb-2 flex justify-end">
-          <span
-            data-testid="timeline-keyboard-nav-mode"
-            className="rounded-full border border-white/10 bg-black/55 px-2 py-1 text-[10px] uppercase tracking-[0.22em] text-white/55"
-            title={t('timeline.arrowKeysHelpTitle')}
-          >
-            {t('timeline.arrowKeys')}: {keyboardNavigationMode === 'fine' ? t('timeline.seekOneSecond') : t('timeline.jumpRecordings')}
-          </span>
-        </div>
-
         {/* Timeline — clicking anywhere on it should not change the keyboard-nav mode */}
         <div
           id="timeline-container"
@@ -1279,7 +1261,6 @@ export function TimelinePage() {
             startHour={timelineStartHourView}
             endHour={timelineEndHourView}
             dateLabel={formatDisplayDate(selectedDate)}
-            onPreviewSelect={handleTimelinePreviewSelect}
             renderTrackContent={() => (
               <div
                 ref={timelineTrackRef}

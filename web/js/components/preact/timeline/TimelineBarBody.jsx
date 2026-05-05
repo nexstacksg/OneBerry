@@ -1,41 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
-import { Priority } from '../../../request-queue.js';
-import { TimelineThumbnailTile } from './TimelineThumbnailTile.jsx';
-import {
-  findContainingSegmentIndex,
-  findNearestSegmentIndex,
-  getLocalDayBounds
-} from './timelineUtils.js';
-
-function clamp(value, min, max) {
-  return Math.min(Math.max(value, min), max);
-}
-
-function getPreviewFrameIndex(segment, sampleTimestamp) {
-  const start = Number(segment?.start_timestamp);
-  const end = Number(segment?.end_timestamp);
-  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
-    return 1;
-  }
-
-  const ratio = clamp((sampleTimestamp - start) / (end - start), 0, 1);
-  if (ratio < 0.33) return 0;
-  if (ratio < 0.66) return 1;
-  return 2;
-}
-
-function formatClockLabel(timestamp) {
-  if (!Number.isFinite(timestamp)) {
-    return '';
-  }
-
-  return new Intl.DateTimeFormat(undefined, {
-    hour: 'numeric',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: true
-  }).format(new Date(timestamp * 1000));
-}
+import { useMemo } from 'preact/hooks';
+import { getLocalDayBounds } from './timelineUtils.js';
 
 function formatTickLabel(offsetHours, selectedDate, stepSeconds = 3600) {
   const bounds = getLocalDayBounds(selectedDate);
@@ -73,82 +37,10 @@ export function TimelineBarBody({
   loadingText = 'Loading...',
   errorText = 'Failed to load timeline',
   emptyText = 'No recordings found',
-  onPreviewSelect,
   onWheel,
-  previewPriority = Priority.HIGH,
-  previewStripClassName = 'border-b border-white/10 bg-black/30 px-2 py-1 sm:px-3',
   renderTrackContent,
   footerContent = null
 }) {
-  const [previewStripWidth, setPreviewStripWidth] = useState(0);
-  const previewStripRef = useRef(null);
-
-  useEffect(() => {
-    const element = previewStripRef.current;
-    if (!element || typeof ResizeObserver === 'undefined') {
-      return undefined;
-    }
-
-    const observer = new ResizeObserver((entries) => {
-      const nextWidth = entries[0]?.contentRect?.width || 0;
-      setPreviewStripWidth(nextWidth);
-    });
-
-    observer.observe(element);
-    setPreviewStripWidth(element.getBoundingClientRect().width || 0);
-
-    return () => observer.disconnect();
-  }, []);
-
-  const previewSamples = useMemo(() => {
-    if (!segments.length) {
-      return [];
-    }
-
-    const bounds = getLocalDayBounds(selectedDate);
-    if (!bounds) {
-      return [];
-    }
-
-    const visibleRange = Math.max(endHour - startHour, 0.001);
-    const desiredTileWidth = visibleRange <= 0.05
-      ? 28
-      : visibleRange <= 0.25
-        ? 34
-        : visibleRange <= 1
-          ? 42
-          : visibleRange <= 6
-            ? 54
-            : visibleRange <= 12
-              ? 60
-              : 66;
-    const measuredWidth = previewStripWidth > 0 ? previewStripWidth : 1200;
-    const sampleCount = clamp(
-      Math.round(measuredWidth / desiredTileWidth),
-      visibleRange <= 1 ? 16 : 10,
-      visibleRange <= 0.25 ? 40 : 28
-    );
-
-    return Array.from({ length: sampleCount }, (_, index) => {
-      const ratio = (index + 0.5) / sampleCount;
-      const sampleHour = startHour + (ratio * visibleRange);
-      const sampleTimestamp = Math.round(bounds.startTimestamp + (sampleHour * 3600));
-      const containingIndex = findContainingSegmentIndex(segments, sampleTimestamp);
-      const nearestIndex = containingIndex !== -1
-        ? containingIndex
-        : findNearestSegmentIndex(segments, sampleTimestamp);
-      const segment = nearestIndex !== -1 ? segments[nearestIndex] : null;
-
-      return {
-        key: `preview-${index}`,
-        thumbUrl: segment ? `/api/recordings/thumbnail/${segment.id}/${getPreviewFrameIndex(segment, sampleTimestamp)}` : null,
-        timestamp: sampleTimestamp,
-        segmentId: segment?.id ?? null,
-        segment
-      };
-    });
-  }, [endHour, previewStripWidth, segments, selectedDate, startHour]);
-
   const visibleMarkers = useMemo(() => {
     const markers = [];
     const visibleRange = Math.max(endHour - startHour, 0.001);
@@ -193,40 +85,6 @@ export function TimelineBarBody({
 
   return (
     <>
-      {previewSamples.length > 0 && (
-        <div className={previewStripClassName}>
-          <div
-            ref={previewStripRef}
-            className="grid gap-0.5"
-            style={{ gridTemplateColumns: `repeat(${previewSamples.length}, minmax(0, 1fr))` }}
-          >
-            {previewSamples.map((sample) => (
-              <button
-                type="button"
-                key={sample.key}
-                title={sample.timestamp ? formatClockLabel(sample.timestamp) : 'Open recording'}
-                aria-label={sample.timestamp ? `Open recording at ${formatClockLabel(sample.timestamp)}` : 'Open recording'}
-                onClick={(event) => onPreviewSelect?.(sample, event)}
-                className="relative aspect-video overflow-hidden rounded-[3px] border border-white/10 bg-[#10151f] transition-colors hover:border-sky-300/40 hover:bg-[#18202d]"
-              >
-                {sample.thumbUrl ? (
-                  <TimelineThumbnailTile
-                    thumbUrl={sample.thumbUrl}
-                    alt="Timeline preview"
-                    priority={previewPriority}
-                    imgClassName="h-full w-full object-cover"
-                  />
-                ) : (
-                  <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-slate-800 to-slate-950 text-[9px] text-white/35">
-                    No preview
-                  </div>
-                )}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
       <div className="border-b border-white/10 bg-black/40 px-2 py-1 text-center text-[11px] uppercase tracking-[0.24em] text-white/55 sm:px-3">
         {dateLabel}
       </div>

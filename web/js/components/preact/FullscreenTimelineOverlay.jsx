@@ -10,13 +10,14 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { useQuery } from '../../query-client.js';
 import { useI18n } from '../../i18n.js';
-import { currentDateInputValue, getLocalDayIsoRange } from '../../utils/date-utils.js';
+import { currentDateInputValue, getLocalDayIsoRange, shiftDateInputValue } from '../../utils/date-utils.js';
 import { forceNavigation } from '../../utils/navigation-utils.js';
 import { formatUtils } from './recordings/formatUtils.js';
 import { TimelineBarBody } from './timeline/TimelineBarBody.jsx';
 import {
   findContainingSegmentIndex,
   findNearestSegmentIndex,
+  formatTimestampAsLocalDate,
   getClippedSegmentHourRange,
   getLocalDayBounds,
   getTimelineDayLengthHours,
@@ -194,6 +195,36 @@ export function FullscreenTimelineOverlay({
     return [...rawSegments].sort((a, b) => a.start_timestamp - b.start_timestamp);
   }, [timelineData]);
 
+  const changeSelectedDate = (nextDate) => {
+    if (!nextDate || !/^\d{4}-\d{2}-\d{2}$/.test(nextDate)) {
+      return;
+    }
+
+    const today = currentDateInputValue();
+    const safeNextDate = nextDate > today ? today : nextDate;
+    const currentHour = timestampToTimelineOffset(scrubTimestamp ?? cursorTimestamp, selectedDate);
+    const nextDayLengthHours = getTimelineDayLengthHours(safeNextDate);
+    const nextBounds = getLocalDayBounds(safeNextDate);
+    const nextHour = Number.isFinite(currentHour)
+      ? clamp(currentHour, 0, nextDayLengthHours)
+      : 0;
+
+    setSelectedDate(safeNextDate);
+    setStartHour(0);
+    setEndHour(nextDayLengthHours);
+    setScrubTimestamp(null);
+    setIsFollowingLive(false);
+
+    if (nextBounds) {
+      setCursorTimestamp(Math.round(nextBounds.startTimestamp + (nextHour * 3600)));
+    }
+  };
+
+  const shiftSelectedDate = (amount) => {
+    const nextDate = shiftDateInputValue(selectedDate, amount, 'day');
+    changeSelectedDate(nextDate);
+  };
+
   const visibleSegments = useMemo(() => {
     if (!segments.length) {
       return [];
@@ -275,8 +306,12 @@ export function FullscreenTimelineOverlay({
       return undefined;
     }
 
-    // Keep the live-day label aligned to the user's local midnight boundary.
+    // Keep the live-day label aligned to the user's local midnight boundary
+    // only while following live. Historical browsing should keep its date.
     const syncSelectedDate = () => {
+      if (!isFollowingLive) {
+        return;
+      }
       const nextDate = currentDateInputValue();
       setSelectedDate(nextDate);
     };
@@ -285,7 +320,23 @@ export function FullscreenTimelineOverlay({
     syncSelectedDate();
 
     return () => clearInterval(midnightTick);
-  }, [isVisible, streamName]);
+  }, [isFollowingLive, isVisible, streamName]);
+
+  useEffect(() => {
+    if (!isVisible || !streamName || !Number.isFinite(playbackTimestamp)) {
+      return;
+    }
+
+    const playbackDate = formatTimestampAsLocalDate(playbackTimestamp);
+    if (playbackDate && playbackDate !== selectedDate) {
+      setSelectedDate(playbackDate);
+      setStartHour(0);
+      setEndHour(getTimelineDayLengthHours(playbackDate));
+    }
+
+    setCursorTimestamp(playbackTimestamp);
+    setIsFollowingLive(false);
+  }, [isVisible, playbackTimestamp, selectedDate, streamName]);
 
   useEffect(() => {
     if (!isVisible || !streamName) {
@@ -340,8 +391,11 @@ export function FullscreenTimelineOverlay({
 
   const jumpToLive = () => {
     const now = Math.floor(Date.now() / 1000);
+    const today = currentDateInputValue();
+    const todayLengthHours = getTimelineDayLengthHours(today);
+    setSelectedDate(today);
     setStartHour(0);
-    setEndHour(dayLengthHours);
+    setEndHour(todayLengthHours);
     setCursorTimestamp(now);
     setIsFollowingLive(true);
     setIsExpanded(true);
@@ -470,6 +524,9 @@ export function FullscreenTimelineOverlay({
 
   const currentTimeLabel = formatClockLabel(clockNow);
   const fullDateLabel = formatOverlayDate(selectedDate);
+  const dateInputId = `fullscreen-timeline-date-${String(streamName).replace(/[^a-zA-Z0-9_-]/g, '-')}`;
+  const todayDate = currentDateInputValue();
+  const isTodaySelected = selectedDate >= todayDate;
   const activeCursorTimestamp = playbackTimestamp ?? scrubTimestamp ?? cursorTimestamp;
   const activeCursorHour = timestampToTimelineOffset(activeCursorTimestamp, selectedDate);
   const cursorPosition = Number.isFinite(activeCursorHour)
@@ -518,8 +575,29 @@ export function FullscreenTimelineOverlay({
                   <div className="font-mono text-[12px] font-semibold tabular-nums tracking-[0.12em] text-sky-200 sm:text-[13px]">
                     {currentTimeLabel}
                   </div>
-                  <div className="text-[10px] uppercase tracking-[0.22em] text-white/30">
-                    {fullDateLabel}
+                  <div className="mt-1 flex items-center gap-1">
+                    <IconButton title="Previous day" onClick={() => shiftSelectedDate(-1)}>
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="m15 18-6-6 6-6" />
+                      </svg>
+                    </IconButton>
+                    <label className="sr-only" htmlFor={dateInputId}>
+                      Timeline date
+                    </label>
+                    <input
+                      id={dateInputId}
+                      type="date"
+                      value={selectedDate}
+                      max={todayDate}
+                      onChange={(event) => changeSelectedDate(event.currentTarget.value)}
+                      className="h-7 rounded-md border border-white/10 bg-black/25 px-2 text-[11px] uppercase tracking-[0.08em] text-white/75 outline-none transition-colors hover:bg-white/10 focus:border-sky-300/50 focus:text-white"
+                      title={fullDateLabel}
+                    />
+                    <IconButton title="Next day" onClick={() => shiftSelectedDate(1)} disabled={isTodaySelected}>
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="m9 18 6-6-6-6" />
+                      </svg>
+                    </IconButton>
                   </div>
                 </div>
               </div>

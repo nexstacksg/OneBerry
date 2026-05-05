@@ -158,7 +158,6 @@ test.describe('Timeline boundary flows @ui @timeline', () => {
 
     const timelinePage = new TimelinePage(page);
     await expect(timelinePage.timelineContainer).toBeVisible();
-    await expect(timelinePage.previewStrip).toBeVisible();
 
     const beforeContainer = await timelinePage.timelineContainer.boundingBox();
     const beforePlayhead = await timelinePage.playhead.boundingBox();
