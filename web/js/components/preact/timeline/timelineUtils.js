@@ -336,6 +336,30 @@ export function segmentContainsTimestamp(segment, timestamp) {
   return timestamp >= segment.start_timestamp && timestamp <= segment.end_timestamp;
 }
 
+export function getPlayableSegmentTimestamp(segment, timestamp) {
+  if (!segment ||
+      !Number.isFinite(segment.start_timestamp) ||
+      !Number.isFinite(segment.end_timestamp)) {
+    return timestamp;
+  }
+
+  const start = segment.start_timestamp;
+  const end = segment.end_timestamp;
+  const duration = end - start;
+  if (duration <= 0) {
+    return start;
+  }
+
+  const maxPlayableTime = duration > 0.25 ? end - 0.25 : start;
+  if (!Number.isFinite(timestamp) || timestamp <= start) {
+    return start;
+  }
+  if (timestamp >= maxPlayableTime) {
+    return maxPlayableTime;
+  }
+  return timestamp;
+}
+
 export function findContainingSegmentIndex(segments, timestamp) {
   if (!Array.isArray(segments) || segments.length === 0) return -1;
 

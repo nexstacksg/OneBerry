@@ -22,10 +22,12 @@ export function SpeedControls() {
 
   // Subscribe to timeline state changes
   useEffect(() => {
-    const unsubscribe = timelineState.subscribe(state => {
+    const syncSpeedState = (state) => {
       setCurrentSpeed(state.playbackSpeed);
-    });
+    };
 
+    syncSpeedState(timelineState);
+    const unsubscribe = timelineState.subscribe(syncSpeedState);
     return () => unsubscribe();
   }, []);
 
@@ -46,15 +48,16 @@ export function SpeedControls() {
   };
 
   return (
-    <div className="flex items-center gap-0.5">
-      <span className="text-[10px] text-muted-foreground mr-0.5">{t('timeline.speed')}</span>
+    <div className="flex items-center gap-1">
+      <span className="mr-0.5 text-[10px] font-medium uppercase tracking-[0.08em] text-slate-500">{t('timeline.speed')}</span>
       {speeds.map(speed => (
         <button
           key={`speed-${speed}`}
-          className={`px-1.5 py-0.5 text-[11px] rounded ${speed === currentSpeed
-            ? 'bg-primary text-primary-foreground'
-            : 'bg-secondary text-secondary-foreground hover:bg-secondary/80'}
-            font-medium transition-all focus:outline-none`}
+          className={`h-6 rounded px-2 text-[11px] font-medium transition-colors focus:outline-none ${
+            speed === currentSpeed
+              ? 'bg-red-600 text-white shadow-sm'
+              : 'border border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100'
+          }`}
           data-speed={speed}
           data-keyboard-nav-preserve
           onClick={() => setPlaybackSpeed(speed)}
