@@ -104,6 +104,7 @@ export function TimelinePlayer({ videoElementRef = null, autoFullscreen = false 
   const lastSegmentIdRef = useRef(null);
   const lastDetectionSegmentIdRef = useRef(null);
   const preloadedVideoCleanupRef = useRef(null);
+  const pendingAutoplayRef = useRef(false);
 
   const setVideoRefs = useCallback((node) => {
     videoRef.current = node;
@@ -138,6 +139,27 @@ export function TimelinePlayer({ videoElementRef = null, autoFullscreen = false 
     preloadedVideoCleanupRef.current = null;
   }, []);
 
+  const requestVideoPlay = useCallback((video) => {
+    if (!video) {
+      return Promise.resolve(false);
+    }
+
+    pendingAutoplayRef.current = true;
+    video.muted = true;
+
+    return video.play().then(() => {
+      pendingAutoplayRef.current = false;
+      return true;
+    }).catch(error => {
+      if (error.name !== 'AbortError') {
+        console.error('Error playing video:', error);
+        showStatusMessage(t('timeline.errorPlayingVideo', { message: error.message }), 'error');
+        timelineState.setState({ isPlaying: false });
+      }
+      return false;
+    });
+  }, [t]);
+
   // Handle video playback based on state changes
   const handleVideoPlayback = useCallback((state) => {
     const video = videoRef.current;
@@ -160,7 +182,7 @@ export function TimelinePlayer({ videoElementRef = null, autoFullscreen = false 
 
     // IMPORTANT: Only reload if the segment has actually changed
     // This prevents constant reloading
-    const needsReload = segmentChanged;
+    const needsReload = segmentChanged || state.forceReload;
 
     // Calculate relative time within the segment
     let relativeTime = 0;
@@ -201,22 +223,11 @@ export function TimelinePlayer({ videoElementRef = null, autoFullscreen = false 
       if (state.isPlaying && video.paused) {
         // A timeline click can land in the current segment; in that case we need
         // to resume playback after seeking instead of stopping at the new time.
-        video.play().catch(error => {
-          if (error.name === 'AbortError') {
-            return;
-          }
-          console.error('Error playing video:', error);
-        });
+        requestVideoPlay(video);
       }
     } else if (state.isPlaying && video.paused) {
       // Resume playback if needed
-      video.play().catch(error => {
-        if (error.name === 'AbortError') {
-          // play() was interrupted by a new load or pause — expected when clicking around the timeline
-          return;
-        }
-        console.error('Error playing video:', error);
-      });
+      requestVideoPlay(video);
     } else if (!state.isPlaying && !video.paused) {
       // Pause playback if needed
       video.pause();
@@ -229,6 +240,7 @@ export function TimelinePlayer({ videoElementRef = null, autoFullscreen = false 
   }, [
     cleanupPreloadedVideo,
     releaseDirectVideoControl,
+    requestVideoPlay,
   ]);
 
   // Subscribe to timeline state changes
@@ -259,7 +271,19 @@ export function TimelinePlayer({ videoElementRef = null, autoFullscreen = false 
     const video = videoRef.current;
     if (!video) return;
 
-    // Pause current playback
+    let releasedDirectControl = false;
+    const releaseLoadControl = (stateUpdate = {}) => {
+      if (releasedDirectControl) {
+        return;
+      }
+      releasedDirectControl = true;
+      timelineState.directVideoControl = false;
+      timelineState.setState(stateUpdate);
+    };
+
+    // Pause current playback while suppressing the native pause event from
+    // cancelling the app's requested playing state.
+    timelineState.directVideoControl = true;
     video.pause();
 
     // Set new source using a deterministic version to allow caching of identical segments
@@ -320,26 +344,39 @@ export function TimelinePlayer({ videoElementRef = null, autoFullscreen = false 
 
       // Play if needed
       if (autoplay) {
-        video.play().catch(error => {
-          if (error.name === 'AbortError') {
-            return;
+        requestVideoPlay(video).then((played) => {
+          if (!played && timelineState.isPlaying && video.paused) {
+            window.setTimeout(() => {
+              if (timelineState.isPlaying && videoRef.current === video && video.paused) {
+                requestVideoPlay(video);
+              }
+            }, 50);
           }
-          console.error('Error playing video:', error);
-          showStatusMessage(t('timeline.errorPlayingVideo', { message: error.message }), 'error');
+          releaseLoadControl();
         });
+      } else {
+        releaseLoadControl();
       }
 
       // Remove event listener
       video.removeEventListener('loadedmetadata', onLoadedMetadata);
+      video.removeEventListener('error', onLoadError);
+    };
+
+    const onLoadError = () => {
+      releaseLoadControl({ isPlaying: false });
+      video.removeEventListener('loadedmetadata', onLoadedMetadata);
+      video.removeEventListener('error', onLoadError);
     };
 
     // Add event listener for metadata loaded
     video.addEventListener('loadedmetadata', onLoadedMetadata);
+    video.addEventListener('error', onLoadError);
 
     // Set new source
     video.src = recordingUrl;
     video.load();
-  }, [playbackSpeed]);
+  }, [playbackSpeed, requestVideoPlay]);
 
   // Handle video ended event
   const handleEnded = () => {
@@ -410,7 +447,11 @@ export function TimelinePlayer({ videoElementRef = null, autoFullscreen = false 
   // Handle native video pause event (user pressed pause inside the browser video controls)
   const handlePause = () => {
     // Only sync if our own code didn't trigger the pause (e.g. during segment load)
-    if (timelineState.isPlaying && !timelineState.directVideoControl) {
+    if (pendingAutoplayRef.current) {
+      return;
+    }
+
+    if (timelineState.isPlaying && !timelineState.directVideoControl && !videoRef.current?.ended) {
       timelineState.setState({ isPlaying: false });
     }
   };
@@ -861,8 +902,8 @@ export function TimelinePlayer({ videoElementRef = null, autoFullscreen = false 
   return (
     <>
       {/* Top playback toolbar: actions on the left, speed on the right. */}
-      <div className="flex items-center flex-wrap gap-2 rounded-t-xl border border-b-0 border-slate-200 bg-white px-3 py-2 shadow-sm">
-        <label className="flex h-8 items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-2.5 text-xs text-slate-700 cursor-pointer" data-keyboard-nav-preserve>
+      <div className="flex items-center flex-nowrap gap-2 overflow-x-auto rounded-t-xl border border-b-0 border-slate-200 bg-white px-3 py-2 shadow-sm">
+        <label className="flex h-8 shrink-0 items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-2.5 text-xs text-slate-700 cursor-pointer" data-keyboard-nav-preserve>
           <input
             type="checkbox"
             id="timeline-detection-overlay"
@@ -878,7 +919,7 @@ export function TimelinePlayer({ videoElementRef = null, autoFullscreen = false 
         <button
           type="button"
           data-keyboard-nav-preserve
-          className="inline-flex h-8 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 text-xs font-medium text-slate-700 transition-colors hover:border-slate-300 hover:bg-slate-50"
+          className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 text-xs font-medium text-slate-700 transition-colors hover:border-slate-300 hover:bg-slate-50"
           onClick={handleToggleFullscreen}
           title={isFullscreen ? t('timeline.exitFullscreen') : t('timeline.enterFullscreen')}
         >
@@ -887,7 +928,7 @@ export function TimelinePlayer({ videoElementRef = null, autoFullscreen = false 
         </button>
 
         {currentSegmentId && (
-          <div className="flex items-center gap-1">
+          <div className="flex shrink-0 items-center gap-1">
             <button
               data-keyboard-nav-preserve
               className="inline-flex h-8 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 text-xs font-medium text-slate-700 transition-colors hover:border-slate-300 hover:bg-slate-50"
@@ -918,7 +959,7 @@ export function TimelinePlayer({ videoElementRef = null, autoFullscreen = false 
           </div>
         )}
 
-        <div className="ml-auto flex min-h-8 items-center">
+        <div className="ml-auto flex min-h-8 shrink-0 items-center">
           <SpeedControls />
         </div>
       </div>
@@ -935,8 +976,7 @@ export function TimelinePlayer({ videoElementRef = null, autoFullscreen = false 
               className="w-full h-full object-contain"
               controls
               controlsList="nofullscreen"
-              autoPlay={false}
-              muted={false}
+              muted
               playsInline
               onPlay={handlePlay}
               onPause={handlePause}

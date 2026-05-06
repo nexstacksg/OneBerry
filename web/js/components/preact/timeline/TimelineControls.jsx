@@ -11,6 +11,7 @@ import {
   findContainingSegmentIndex,
   findNearestSegmentIndex,
   formatPlaybackTimeLabel,
+  getPlayableSegmentTimestamp,
   getTimelineDayLengthHours,
   getTimelineRangeHours,
   MIN_TIMELINE_VIEW_HOURS,
@@ -117,7 +118,6 @@ export function TimelineControls() {
       if (containingIndex !== -1) {
         segmentIndex = containingIndex;
         segmentToPlay = timelineState.timelineSegments[containingIndex];
-        relativeTime = timelineState.currentTime - segmentToPlay.start_timestamp;
       } else {
         const closestIndex = findNearestSegmentIndex(
           timelineState.timelineSegments,
@@ -125,14 +125,13 @@ export function TimelineControls() {
         );
         segmentIndex = closestIndex;
         segmentToPlay = timelineState.timelineSegments[closestIndex];
-        relativeTime = Math.max(
-          0,
-          Math.min(
-            timelineState.currentTime - segmentToPlay.start_timestamp,
-            segmentToPlay.end_timestamp - segmentToPlay.start_timestamp
-          )
-        );
       }
+      if (!segmentToPlay) {
+        showStatusMessage(t('timeline.noActiveRecordingSelected'), 'warning');
+        return;
+      }
+      const playableTimestamp = getPlayableSegmentTimestamp(segmentToPlay, timelineState.currentTime);
+      relativeTime = playableTimestamp - segmentToPlay.start_timestamp;
     } else if (
       timelineState.currentSegmentIndex >= 0 &&
       timelineState.currentSegmentIndex < timelineState.timelineSegments.length

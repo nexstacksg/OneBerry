@@ -27,6 +27,7 @@ import {
   findFirstVisibleSegmentIndex,
   findContainingSegmentIndex,
   formatTimestampAsLocalDate,
+  getPlayableSegmentTimestamp,
   getSteppedVideoTime,
   getAvailableDatesForSegments,
   getClippedSegmentHourRange,
@@ -85,6 +86,7 @@ const timelineState = {
   prevCurrentTime: null,
   playbackSpeed: 1.0,
   forceReload: false,
+  directVideoControl: false,
   userControllingCursor: false, // New flag to track if user is controlling cursor
   preserveCursorPosition: false, // New flag to explicitly preserve cursor position
   cursorPositionLocked: false, // New flag to lock the cursor position during playback
@@ -125,10 +127,7 @@ const timelineState = {
     }
 
     Object.assign(this, newState);
-
-    if (newState.forceReload) {
-      this.forceReload = false;
-    }
+    const clearForceReloadAfterNotify = this.forceReload === true;
 
     const selectedDate = this.selectedDate;
     const dayLengthHours = getTimelineDayLengthHours(selectedDate);
@@ -160,6 +159,9 @@ const timelineState = {
       this.notifyListeners();
     } finally {
       this.isNotifying = false;
+      if (clearForceReloadAfterNotify) {
+        this.forceReload = false;
+      }
     }
   },
 
@@ -341,12 +343,17 @@ export function TimelinePage() {
     const nextSegmentIndex = containingIndex !== -1
       ? containingIndex
       : findNearestSegmentIndex(timelineState.timelineSegments, timestamp);
+    const nextSegment = nextSegmentIndex !== -1
+      ? timelineState.timelineSegments[nextSegmentIndex]
+      : null;
+    const playableTimestamp = getPlayableSegmentTimestamp(nextSegment, timestamp);
 
     timelineState.setState({
-      currentTime: timestamp,
+      currentTime: playableTimestamp,
       prevCurrentTime: timelineState.currentTime,
-      isPlaying: false,
-      currentSegmentIndex: nextSegmentIndex
+      isPlaying: true,
+      currentSegmentIndex: nextSegmentIndex,
+      forceReload: true
     });
   }, []);
 
@@ -819,11 +826,14 @@ export function TimelinePage() {
 
       if (nearestSegment) {
         initialSegmentIndex = nearestIndex;
-        initialTime = Math.min(
-          Math.max(nowTimestamp, nearestSegment.start_timestamp, dayBounds.startTimestamp),
-          nearestSegment.end_timestamp,
-          dayBounds.endTimestamp
-        );
+        if (nowTimestamp >= nearestSegment.start_timestamp && nowTimestamp < nearestSegment.end_timestamp) {
+          initialTime = getPlayableSegmentTimestamp(
+            nearestSegment,
+            Math.max(nowTimestamp, dayBounds.startTimestamp)
+          );
+        } else {
+          initialTime = Math.max(nearestSegment.start_timestamp, dayBounds.startTimestamp);
+        }
       }
     }
 
@@ -861,7 +871,7 @@ export function TimelinePage() {
     timelineState.prevCurrentTime = initialTime;
     timelineState.timelineWindowHours = fitWindowHours;
     if (!preserveExistingPlayback) {
-      timelineState.isPlaying = false;
+      timelineState.isPlaying = true;
     }
     timelineState.forceReload = !preserveExistingPlayback;
     timelineState.autoFitStartHour = fitStart;

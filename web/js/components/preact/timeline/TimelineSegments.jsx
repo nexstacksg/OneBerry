@@ -8,7 +8,8 @@ import { timelineState } from './TimelinePage.jsx';
 import {
   findContainingSegmentIndex,
   findNearestSegmentIndex,
-  getClippedSegmentHourRange
+  getClippedSegmentHourRange,
+  getPlayableSegmentTimestamp
 } from './timelineUtils.js';
 import { formatLocalTime } from '../../../utils/date-utils.js';
 
@@ -134,6 +135,8 @@ export function TimelineSegments({ segments: propSegments, interactive = true })
     const nextSegmentIndex = foundIndex !== -1
       ? foundIndex
       : findNearestSegmentIndex(segments, clickTimestamp);
+    const nextSegment = nextSegmentIndex !== -1 ? segments[nextSegmentIndex] : null;
+    const playableTimestamp = getPlayableSegmentTimestamp(nextSegment, clickTimestamp);
 
     // Move cursor to click position and update segment index in a single atomic setState so
     // that currentTime is never skipped by the "time-only update" batching logic.  When the
@@ -141,10 +144,11 @@ export function TimelineSegments({ segments: propSegments, interactive = true })
     // away within 250 ms of the previous notification, leaving the time display stale while
     // the segment index had already advanced to the newly-clicked segment.
     timelineState.setState({
-      currentTime: clickTimestamp,
+      currentTime: playableTimestamp,
       prevCurrentTime: timelineState.currentTime,
       isPlaying: true,
-      currentSegmentIndex: nextSegmentIndex
+      currentSegmentIndex: nextSegmentIndex,
+      forceReload: true
     });
   };
 
