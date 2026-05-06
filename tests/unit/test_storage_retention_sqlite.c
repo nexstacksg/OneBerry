@@ -164,6 +164,38 @@ void test_detection_recording_expired_detection_retention(void) {
     TEST_ASSERT_EQUAL_INT(1, n);
 }
 
+void test_old_incomplete_recording_is_returned_by_retention(void) {
+    time_t now = time(NULL);
+    recording_metadata_t m = make_recording("cam1", "/rec/incomplete-old.mp4",
+                                            now - 10 * 86400,
+                                            "scheduled", false);
+    m.is_complete = false;
+    m.end_time = 0;
+    uint64_t id = add_recording_metadata(&m);
+    TEST_ASSERT_NOT_EQUAL(0, id);
+
+    recording_metadata_t out[10];
+    int n = get_recordings_for_retention("cam1", 7, 14, out, 10);
+    TEST_ASSERT_EQUAL_INT(1, n);
+    TEST_ASSERT_FALSE(out[0].is_complete);
+    TEST_ASSERT_EQUAL_STRING("/rec/incomplete-old.mp4", out[0].file_path);
+}
+
+void test_recent_incomplete_recording_is_not_returned_by_retention(void) {
+    time_t now = time(NULL);
+    recording_metadata_t m = make_recording("cam1", "/rec/incomplete-recent.mp4",
+                                            now - 3 * 86400,
+                                            "scheduled", false);
+    m.is_complete = false;
+    m.end_time = 0;
+    uint64_t id = add_recording_metadata(&m);
+    TEST_ASSERT_NOT_EQUAL(0, id);
+
+    recording_metadata_t out[10];
+    int n = get_recordings_for_retention("cam1", 7, 14, out, 10);
+    TEST_ASSERT_EQUAL_INT(0, n);
+}
+
 void test_missing_stream_recordings_are_returned_for_cleanup(void) {
     time_t now = time(NULL);
 
@@ -182,17 +214,24 @@ void test_missing_stream_recordings_are_returned_for_cleanup(void) {
     uint64_t protected_id = add_recording_metadata(&protected_stale);
     TEST_ASSERT_EQUAL_INT(0, set_recording_protected(protected_id, true));
 
-    recording_metadata_t incomplete_stale = make_recording("cam_removed", "/rec/incomplete-removed.mp4",
-                                                           now - 2 * 86400, "scheduled", false);
-    incomplete_stale.is_complete = false;
-    incomplete_stale.end_time = 0;
-    add_recording_metadata(&incomplete_stale);
+    recording_metadata_t old_incomplete_stale = make_recording("cam_removed", "/rec/old-incomplete-removed.mp4",
+                                                               now - 10 * 86400, "scheduled", false);
+    old_incomplete_stale.is_complete = false;
+    old_incomplete_stale.end_time = 0;
+    add_recording_metadata(&old_incomplete_stale);
+
+    recording_metadata_t recent_incomplete_stale = make_recording("cam_removed", "/rec/recent-incomplete-removed.mp4",
+                                                                  now - 2 * 86400, "scheduled", false);
+    recent_incomplete_stale.is_complete = false;
+    recent_incomplete_stale.end_time = 0;
+    add_recording_metadata(&recent_incomplete_stale);
 
     recording_metadata_t out[10];
-    int n = get_recordings_for_missing_streams(out, 10);
-    TEST_ASSERT_EQUAL_INT(1, n);
+    int n = get_recordings_for_missing_streams(out, 10, 7);
+    TEST_ASSERT_EQUAL_INT(2, n);
     TEST_ASSERT_EQUAL_STRING("cam_removed", out[0].stream_name);
-    TEST_ASSERT_EQUAL_STRING("/rec/removed.mp4", out[0].file_path);
+    TEST_ASSERT_EQUAL_STRING("/rec/old-incomplete-removed.mp4", out[0].file_path);
+    TEST_ASSERT_EQUAL_STRING("/rec/removed.mp4", out[1].file_path);
 }
 
 void test_quota_enforcement_returns_oldest_first(void) {
@@ -469,6 +508,8 @@ int main(void) {
     RUN_TEST(test_protected_recording_is_never_returned);
     RUN_TEST(test_detection_recording_uses_longer_detection_retention);
     RUN_TEST(test_detection_recording_expired_detection_retention);
+    RUN_TEST(test_old_incomplete_recording_is_returned_by_retention);
+    RUN_TEST(test_recent_incomplete_recording_is_not_returned_by_retention);
     RUN_TEST(test_missing_stream_recordings_are_returned_for_cleanup);
     RUN_TEST(test_quota_enforcement_returns_oldest_first);
     RUN_TEST(test_quota_enforcement_deprioritizes_overrides_and_detection);

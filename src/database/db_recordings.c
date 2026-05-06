@@ -1420,6 +1420,7 @@ int get_recordings_for_retention(const char *stream_name,
     // Query for recordings past retention, ordered by priority (regular first, then detection)
     // and by start_time (oldest first)
     // Protected recordings are excluded
+    // Incomplete recordings are included once they are older than the same retention cutoff.
     // Also exclude recordings with retention_override_days that haven't expired yet
     const char *sql =
         "SELECT id, stream_name, file_path, start_time, end_time, "
@@ -1427,7 +1428,6 @@ int get_recordings_for_retention(const char *stream_name,
         "FROM recordings "
         "WHERE stream_name = ? "
         "AND protected = 0 "
-        "AND is_complete = 1 "
         "AND ("
         "  (trigger_type != 'detection' AND ? > 0 AND start_time < ?) "
         "  OR "
@@ -1524,10 +1524,11 @@ int get_recordings_for_retention(const char *stream_name,
 }
 
 /**
- * Get complete, unprotected recordings whose stream no longer exists.
+ * Get unprotected recordings whose stream no longer exists.
  */
 int get_recordings_for_missing_streams(recording_metadata_t *recordings,
-                                       int max_count) {
+                                       int max_count,
+                                       int incomplete_retention_days) {
     int rc;
     sqlite3_stmt *stmt;
     int count = 0;
@@ -1545,6 +1546,11 @@ int get_recordings_for_missing_streams(recording_metadata_t *recordings,
         return -1;
     }
 
+    time_t now = time(NULL);
+    time_t incomplete_cutoff = (incomplete_retention_days > 0)
+        ? now - ((time_t)incomplete_retention_days * 86400)
+        : 0;
+
     pthread_mutex_lock(db_mutex);
 
     const char *sql =
@@ -1554,7 +1560,7 @@ int get_recordings_for_missing_streams(recording_metadata_t *recordings,
         "r.retention_tier, r.disk_pressure_eligible "
         "FROM recordings r "
         "WHERE r.protected = 0 "
-        "AND r.is_complete = 1 "
+        "AND (r.is_complete = 1 OR (? > 0 AND r.start_time < ?)) "
         "AND NOT EXISTS (SELECT 1 FROM streams s WHERE s.name = r.stream_name) "
         "ORDER BY r.start_time ASC "
         "LIMIT ?;";
@@ -1566,7 +1572,9 @@ int get_recordings_for_missing_streams(recording_metadata_t *recordings,
         return -1;
     }
 
-    sqlite3_bind_int(stmt, 1, max_count);
+    sqlite3_bind_int(stmt, 1, incomplete_retention_days);
+    sqlite3_bind_int64(stmt, 2, (sqlite3_int64)incomplete_cutoff);
+    sqlite3_bind_int(stmt, 3, max_count);
 
     while (sqlite3_step(stmt) == SQLITE_ROW && count < max_count) {
         recordings[count].id = (uint64_t)sqlite3_column_int64(stmt, 0);

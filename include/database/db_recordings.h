@@ -188,14 +188,19 @@ int get_recordings_for_retention(const char *stream_name,
                                  int max_count);
 
 /**
- * Get complete, unprotected recordings whose stream no longer exists.
+ * Get unprotected recordings whose stream no longer exists.
+ *
+ * Complete recordings are returned immediately. Incomplete recordings are
+ * returned only after incomplete_retention_days has elapsed.
  *
  * @param recordings Array to fill with recording metadata
  * @param max_count Maximum number of recordings to return
+ * @param incomplete_retention_days Days before incomplete recordings are returned
  * @return Number of recordings found, or -1 on error
  */
 int get_recordings_for_missing_streams(recording_metadata_t *recordings,
-                                       int max_count);
+                                       int max_count,
+                                       int incomplete_retention_days);
 
 /**
  * Get count of protected recordings for a stream

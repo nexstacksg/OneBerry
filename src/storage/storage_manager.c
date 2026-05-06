@@ -412,7 +412,8 @@ int apply_retention_policy(void) {
     while (true) {
         recording_metadata_t stale_recordings[MAX_RECORDINGS_PER_STREAM];
         int stale_count = get_recordings_for_missing_streams(stale_recordings,
-                                                             MAX_RECORDINGS_PER_STREAM);
+                                                             MAX_RECORDINGS_PER_STREAM,
+                                                             storage_manager.retention_days);
 
         if (stale_count < 0) {
             log_warn("Failed to query recordings for missing streams");
