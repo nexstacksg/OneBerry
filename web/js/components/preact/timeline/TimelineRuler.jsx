@@ -19,13 +19,16 @@ export function TimelineRuler() {
   const [selectedDate, setSelectedDate] = useState(timelineState.selectedDate ?? null);
 
   useEffect(() => {
-    const unsubscribe = timelineState.subscribe(state => {
+    const syncRulerState = (state) => {
       const s = state.timelineStartHour ?? 0;
       const e = state.timelineEndHour ?? getTimelineDayLengthHours(state.selectedDate);
       setStartHour(s);
       setEndHour(e);
       setSelectedDate(state.selectedDate ?? null);
-    });
+    };
+
+    syncRulerState(timelineState);
+    const unsubscribe = timelineState.subscribe(syncRulerState);
     return () => unsubscribe();
   }, []);
 

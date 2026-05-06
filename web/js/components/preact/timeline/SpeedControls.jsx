@@ -22,10 +22,12 @@ export function SpeedControls() {
 
   // Subscribe to timeline state changes
   useEffect(() => {
-    const unsubscribe = timelineState.subscribe(state => {
+    const syncSpeedState = (state) => {
       setCurrentSpeed(state.playbackSpeed);
-    });
+    };
 
+    syncSpeedState(timelineState);
+    const unsubscribe = timelineState.subscribe(syncSpeedState);
     return () => unsubscribe();
   }, []);
 

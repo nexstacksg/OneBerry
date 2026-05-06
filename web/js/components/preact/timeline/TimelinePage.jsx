@@ -294,10 +294,13 @@ export function TimelinePage() {
   }, [selectedDate]);
 
   useEffect(() => {
-    const unsubscribe = timelineState.subscribe((state) => {
+    const syncTimelineWindow = (state) => {
       setTimelineStartHourView(state.timelineStartHour ?? 0);
       setTimelineEndHourView(state.timelineEndHour ?? getTimelineDayLengthHours(state.selectedDate));
-    });
+    };
+
+    syncTimelineWindow(timelineState);
+    const unsubscribe = timelineState.subscribe(syncTimelineWindow);
 
     return () => unsubscribe();
   }, []);
@@ -809,6 +812,21 @@ export function TimelinePage() {
       initialTimeRef.current = '';
     }
 
+    if (initialSegmentIndex === -1 && effectiveDate === currentDateInputValue()) {
+      const nowTimestamp = Math.floor(nowMilliseconds() / 1000);
+      const nearestIndex = findNearestVisibleIndex(nowTimestamp);
+      const nearestSegment = nearestIndex !== -1 ? segmentsCopy[nearestIndex] : null;
+
+      if (nearestSegment) {
+        initialSegmentIndex = nearestIndex;
+        initialTime = Math.min(
+          Math.max(nowTimestamp, nearestSegment.start_timestamp, dayBounds.startTimestamp),
+          nearestSegment.end_timestamp,
+          dayBounds.endTimestamp
+        );
+      }
+    }
+
     if (initialSegmentIndex === -1) {
       initialSegmentIndex = findFirstVisibleSegmentIndex(segmentsCopy, effectiveDate);
       if (initialSegmentIndex !== -1) {
@@ -1010,6 +1028,8 @@ export function TimelinePage() {
 
   // Update URL and global state when stream or date changes
   useEffect(() => {
+    processedDataRef.current = null;
+
     if (idsMode) {
       const url = new URL(window.location.href);
       url.searchParams.set('date', selectedDate);
@@ -1293,7 +1313,7 @@ export function TimelinePage() {
   const returnUrl = idsMode ? (sessionStorage.getItem(RECORDINGS_RETURN_URL_KEY) || 'recordings.html') : null;
 
   return (
-    <div className="timeline-page mx-auto w-full max-w-[1280px] pb-8">
+    <div className="timeline-page w-full pb-8">
       <div className="mb-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="min-w-0">

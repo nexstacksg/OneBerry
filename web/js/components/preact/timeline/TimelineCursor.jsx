@@ -37,20 +37,22 @@ export function TimelineCursor() {
 
   // Subscribe to timeline state changes
   useEffect(() => {
-    const unsubscribe = timelineState.subscribe(state => {
-      setStartHour(state.timelineStartHour || 0);
-      setEndHour(state.timelineEndHour || getTimelineDayLengthHours(state.selectedDate));
+    const syncCursorState = (state) => {
+      const nextStartHour = state.timelineStartHour || 0;
+      const nextEndHour = state.timelineEndHour || getTimelineDayLengthHours(state.selectedDate);
+
+      setStartHour(nextStartHour);
+      setEndHour(nextEndHour);
 
       // Only update current time if not dragging
       if (!isDraggingRef.current && !state.userControllingCursor) {
         updateTimeDisplay(state.currentTime);
-        updateCursorPosition(
-          state.currentTime,
-          state.timelineStartHour || 0,
-          state.timelineEndHour || getTimelineDayLengthHours(state.selectedDate)
-        );
+        updateCursorPosition(state.currentTime, nextStartHour, nextEndHour);
       }
-    });
+    };
+
+    syncCursorState(timelineState);
+    const unsubscribe = timelineState.subscribe(syncCursorState);
 
     return () => unsubscribe();
   }, []);
