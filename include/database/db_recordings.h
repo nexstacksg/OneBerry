@@ -188,6 +188,16 @@ int get_recordings_for_retention(const char *stream_name,
                                  int max_count);
 
 /**
+ * Get complete, unprotected recordings whose stream no longer exists.
+ *
+ * @param recordings Array to fill with recording metadata
+ * @param max_count Maximum number of recordings to return
+ * @return Number of recordings found, or -1 on error
+ */
+int get_recordings_for_missing_streams(recording_metadata_t *recordings,
+                                       int max_count);
+
+/**
  * Get count of protected recordings for a stream
  *
  * @param stream_name Stream name (NULL for all streams)

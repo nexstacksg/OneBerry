@@ -408,7 +408,41 @@ int apply_retention_policy(void) {
         }
     }
 
-    // Phase 3: Clean up orphaned database entries (files that no longer exist)
+    // Phase 3: Remove recordings for streams that no longer exist in the streams table.
+    while (true) {
+        recording_metadata_t stale_recordings[MAX_RECORDINGS_PER_STREAM];
+        int stale_count = get_recordings_for_missing_streams(stale_recordings,
+                                                             MAX_RECORDINGS_PER_STREAM);
+
+        if (stale_count < 0) {
+            log_warn("Failed to query recordings for missing streams");
+            break;
+        }
+
+        if (stale_count == 0) {
+            break;
+        }
+
+        log_info("Found %d recordings for streams no longer configured, deleting", stale_count);
+
+        int deleted_this_batch = 0;
+        for (int i = 0; i < stale_count; i++) {
+            uint64_t freed_bytes = 0;
+            if (delete_recording_file_and_metadata(&stale_recordings[i],
+                                                   "Missing stream cleanup",
+                                                   &freed_bytes)) {
+                total_freed += freed_bytes;
+                total_deleted++;
+                deleted_this_batch++;
+            }
+        }
+
+        if (stale_count < MAX_RECORDINGS_PER_STREAM || deleted_this_batch == 0) {
+            break;
+        }
+    }
+
+    // Phase 4: Clean up orphaned database entries (files that no longer exist)
     // Safety check: verify storage is actually accessible before orphan cleanup.
     // If storage is unavailable (mount lost, etc.), every recording looks "orphaned"
     // and we'd incorrectly wipe the entire database.

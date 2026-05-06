@@ -62,6 +62,18 @@ static recording_metadata_t make_recording(const char *stream,
 static void clear_recordings(void) {
     sqlite3 *db = get_db_handle();
     sqlite3_exec(db, "DELETE FROM recordings;", NULL, NULL, NULL);
+    sqlite3_exec(db, "DELETE FROM streams;", NULL, NULL, NULL);
+}
+
+static void exec_sql_or_fail(const char *sql) {
+    sqlite3 *db = get_db_handle();
+    char *err = NULL;
+    int rc = sqlite3_exec(db, sql, NULL, NULL, &err);
+    if (rc != SQLITE_OK) {
+        fprintf(stderr, "SQL failed: %s\n", err ? err : "unknown");
+        sqlite3_free(err);
+    }
+    TEST_ASSERT_EQUAL_INT(SQLITE_OK, rc);
 }
 
 /* ---- Unity boilerplate ---- */
@@ -150,6 +162,37 @@ void test_detection_recording_expired_detection_retention(void) {
     recording_metadata_t out[10];
     int n = get_recordings_for_retention("cam1", 7, 14, out, 10);
     TEST_ASSERT_EQUAL_INT(1, n);
+}
+
+void test_missing_stream_recordings_are_returned_for_cleanup(void) {
+    time_t now = time(NULL);
+
+    exec_sql_or_fail("INSERT INTO streams (name, url) VALUES ('cam_active', 'rtsp://camera/stream');");
+
+    recording_metadata_t keep = make_recording("cam_active", "/rec/active.mp4",
+                                               now - 2 * 86400, "scheduled", false);
+    add_recording_metadata(&keep);
+
+    recording_metadata_t stale = make_recording("cam_removed", "/rec/removed.mp4",
+                                                now - 2 * 86400, "scheduled", false);
+    add_recording_metadata(&stale);
+
+    recording_metadata_t protected_stale = make_recording("cam_removed", "/rec/protected-removed.mp4",
+                                                          now - 2 * 86400, "scheduled", true);
+    uint64_t protected_id = add_recording_metadata(&protected_stale);
+    TEST_ASSERT_EQUAL_INT(0, set_recording_protected(protected_id, true));
+
+    recording_metadata_t incomplete_stale = make_recording("cam_removed", "/rec/incomplete-removed.mp4",
+                                                           now - 2 * 86400, "scheduled", false);
+    incomplete_stale.is_complete = false;
+    incomplete_stale.end_time = 0;
+    add_recording_metadata(&incomplete_stale);
+
+    recording_metadata_t out[10];
+    int n = get_recordings_for_missing_streams(out, 10);
+    TEST_ASSERT_EQUAL_INT(1, n);
+    TEST_ASSERT_EQUAL_STRING("cam_removed", out[0].stream_name);
+    TEST_ASSERT_EQUAL_STRING("/rec/removed.mp4", out[0].file_path);
 }
 
 void test_quota_enforcement_returns_oldest_first(void) {
@@ -426,6 +469,7 @@ int main(void) {
     RUN_TEST(test_protected_recording_is_never_returned);
     RUN_TEST(test_detection_recording_uses_longer_detection_retention);
     RUN_TEST(test_detection_recording_expired_detection_retention);
+    RUN_TEST(test_missing_stream_recordings_are_returned_for_cleanup);
     RUN_TEST(test_quota_enforcement_returns_oldest_first);
     RUN_TEST(test_quota_enforcement_deprioritizes_overrides_and_detection);
     RUN_TEST(test_tiered_retention_orders_by_tier_then_age);
@@ -442,4 +486,3 @@ int main(void) {
 
     return result;
 }
-

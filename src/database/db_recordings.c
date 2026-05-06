@@ -1524,6 +1524,122 @@ int get_recordings_for_retention(const char *stream_name,
 }
 
 /**
+ * Get complete, unprotected recordings whose stream no longer exists.
+ */
+int get_recordings_for_missing_streams(recording_metadata_t *recordings,
+                                       int max_count) {
+    int rc;
+    sqlite3_stmt *stmt;
+    int count = 0;
+
+    sqlite3 *db = get_db_handle();
+    pthread_mutex_t *db_mutex = get_db_mutex();
+
+    if (!db) {
+        log_error("Database not initialized");
+        return -1;
+    }
+
+    if (!recordings || max_count <= 0) {
+        log_error("Invalid parameters for get_recordings_for_missing_streams");
+        return -1;
+    }
+
+    pthread_mutex_lock(db_mutex);
+
+    const char *sql =
+        "SELECT r.id, r.stream_name, r.file_path, r.start_time, r.end_time, "
+        "r.size_bytes, r.width, r.height, r.fps, r.codec, r.is_complete, "
+        "r.trigger_type, r.protected, r.retention_override_days, "
+        "r.retention_tier, r.disk_pressure_eligible "
+        "FROM recordings r "
+        "WHERE r.protected = 0 "
+        "AND r.is_complete = 1 "
+        "AND NOT EXISTS (SELECT 1 FROM streams s WHERE s.name = r.stream_name) "
+        "ORDER BY r.start_time ASC "
+        "LIMIT ?;";
+
+    rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        log_error("Failed to prepare missing-stream recordings query: %s", sqlite3_errmsg(db));
+        pthread_mutex_unlock(db_mutex);
+        return -1;
+    }
+
+    sqlite3_bind_int(stmt, 1, max_count);
+
+    while (sqlite3_step(stmt) == SQLITE_ROW && count < max_count) {
+        recordings[count].id = (uint64_t)sqlite3_column_int64(stmt, 0);
+
+        const char *stream = (const char *)sqlite3_column_text(stmt, 1);
+        if (stream) {
+            strncpy(recordings[count].stream_name, stream, sizeof(recordings[count].stream_name) - 1);
+            recordings[count].stream_name[sizeof(recordings[count].stream_name) - 1] = '\0';
+        } else {
+            recordings[count].stream_name[0] = '\0';
+        }
+
+        const char *path = (const char *)sqlite3_column_text(stmt, 2);
+        if (path) {
+            strncpy(recordings[count].file_path, path, sizeof(recordings[count].file_path) - 1);
+            recordings[count].file_path[sizeof(recordings[count].file_path) - 1] = '\0';
+        } else {
+            recordings[count].file_path[0] = '\0';
+        }
+
+        recordings[count].start_time = (time_t)sqlite3_column_int64(stmt, 3);
+
+        if (sqlite3_column_type(stmt, 4) != SQLITE_NULL) {
+            recordings[count].end_time = (time_t)sqlite3_column_int64(stmt, 4);
+        } else {
+            recordings[count].end_time = 0;
+        }
+
+        recordings[count].size_bytes = (uint64_t)sqlite3_column_int64(stmt, 5);
+        recordings[count].width = sqlite3_column_int(stmt, 6);
+        recordings[count].height = sqlite3_column_int(stmt, 7);
+        recordings[count].fps = sqlite3_column_int(stmt, 8);
+
+        const char *codec = (const char *)sqlite3_column_text(stmt, 9);
+        if (codec) {
+            strncpy(recordings[count].codec, codec, sizeof(recordings[count].codec) - 1);
+            recordings[count].codec[sizeof(recordings[count].codec) - 1] = '\0';
+        } else {
+            recordings[count].codec[0] = '\0';
+        }
+
+        recordings[count].is_complete = sqlite3_column_int(stmt, 10) != 0;
+
+        const char *trigger_type = (const char *)sqlite3_column_text(stmt, 11);
+        if (trigger_type) {
+            strncpy(recordings[count].trigger_type, trigger_type, sizeof(recordings[count].trigger_type) - 1);
+            recordings[count].trigger_type[sizeof(recordings[count].trigger_type) - 1] = '\0';
+        } else {
+            strncpy(recordings[count].trigger_type, "scheduled", sizeof(recordings[count].trigger_type) - 1);
+            recordings[count].trigger_type[sizeof(recordings[count].trigger_type) - 1] = '\0';
+        }
+
+        recordings[count].protected = sqlite3_column_int(stmt, 12) != 0;
+
+        if (sqlite3_column_type(stmt, 13) != SQLITE_NULL) {
+            recordings[count].retention_override_days = sqlite3_column_int(stmt, 13);
+        } else {
+            recordings[count].retention_override_days = -1;
+        }
+
+        recordings[count].retention_tier = sqlite3_column_int(stmt, 14);
+        recordings[count].disk_pressure_eligible = sqlite3_column_int(stmt, 15) != 0;
+
+        count++;
+    }
+
+    sqlite3_finalize(stmt);
+    pthread_mutex_unlock(db_mutex);
+
+    return count;
+}
+
+/**
  * Get recordings for quota enforcement.
  *
  * Returns lower-priority recordings first so quota cleanup preserves more
