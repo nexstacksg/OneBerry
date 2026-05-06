@@ -85,7 +85,11 @@ export function CalendarPicker({ value, onChange }) {
   };
 
   const prevDay = () => pick(parseLocal(selected).subtract(1, 'day').format('YYYY-MM-DD'));
-  const nextDay = () => pick(parseLocal(selected).add(1, 'day').format('YYYY-MM-DD'));
+  const selectedIsTodayOrFuture = !parseLocal(selected).isBefore(dayjs(), 'day');
+  const nextDay = () => {
+    if (selectedIsTodayOrFuture) return;
+    pick(parseLocal(selected).add(1, 'day').format('YYYY-MM-DD'));
+  };
 
   const pick = useCallback((dateStr) => {
     onChange(dateStr);
@@ -105,7 +109,7 @@ export function CalendarPicker({ value, onChange }) {
         <button
           type="button"
           onClick={prevDay}
-          className="p-2 rounded border border-border bg-secondary text-secondary-foreground hover:bg-accent transition-colors"
+          className="flex h-10 w-10 items-center justify-center rounded-md border border-slate-300 bg-white text-slate-700 shadow-sm transition-colors hover:bg-slate-50"
           title="Previous day"
         >
           <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
@@ -116,7 +120,7 @@ export function CalendarPicker({ value, onChange }) {
         <button
           type="button"
           onClick={() => setOpen(o => !o)}
-          className="flex-1 flex items-center justify-between gap-2 p-2 rounded border border-border bg-background text-foreground hover:bg-accent transition-colors text-sm"
+          className="flex h-10 flex-1 items-center justify-between gap-2 rounded-md border border-slate-300 bg-white px-3 text-sm text-slate-950 shadow-sm transition-colors hover:bg-slate-50"
           data-testid="date-display"
           data-value={selected}
         >
@@ -132,8 +136,9 @@ export function CalendarPicker({ value, onChange }) {
         <button
           type="button"
           onClick={nextDay}
-          className="p-2 rounded border border-border bg-secondary text-secondary-foreground hover:bg-accent transition-colors"
+          className="flex h-10 w-10 items-center justify-center rounded-md border border-slate-300 bg-white text-slate-700 shadow-sm transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
           title="Next day"
+          disabled={selectedIsTodayOrFuture}
         >
           <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
             <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
@@ -144,7 +149,7 @@ export function CalendarPicker({ value, onChange }) {
       {/* Dropdown calendar */}
       {open && (
         <div
-          className="absolute z-50 mt-1 rounded-lg border border-border bg-card text-card-foreground shadow-lg p-3 w-72"
+          className="absolute z-50 mt-1 w-72 rounded-lg border border-slate-200 bg-white p-3 text-slate-950 shadow-xl"
           style={{ left: 0 }}
         >
           {/* Month / Year header */}
@@ -184,19 +189,21 @@ export function CalendarPicker({ value, onChange }) {
               const cellDate = dayjs().year(viewYear).month(viewMonth).date(day).format('YYYY-MM-DD');
               const isToday = cellDate === today;
               const isSel = cellDate === selected;
+              const isFuture = dayjs(cellDate).isAfter(dayjs(), 'day');
 
               return (
                 <button
                   key={cellDate}
                   type="button"
                   onClick={() => pick(cellDate)}
+                  disabled={isFuture}
                   className={[
-                    'py-1 rounded-md transition-colors',
+                    'py-1 rounded-md transition-colors disabled:cursor-not-allowed disabled:text-slate-300',
                     isSel
-                      ? 'bg-primary text-primary-foreground font-bold'
+                      ? 'bg-red-600 text-white font-bold'
                       : isToday
-                        ? 'bg-accent text-accent-foreground font-medium'
-                        : 'hover:bg-accent/60 text-foreground',
+                        ? 'bg-slate-100 text-slate-950 font-medium'
+                        : 'text-slate-700 hover:bg-slate-100',
                   ].join(' ')}
                 >
                   {day}
@@ -220,4 +227,3 @@ export function CalendarPicker({ value, onChange }) {
     </div>
   );
 }
-

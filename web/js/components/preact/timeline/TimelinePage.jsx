@@ -1252,7 +1252,7 @@ export function TimelinePage() {
         <div
           id="timeline-container"
           data-keyboard-nav-preserve
-          className="relative mb-2 w-full overflow-hidden rounded-b-2xl rounded-t-none border border-t-0 border-white/10 bg-[#05070d]/96 shadow-2xl"
+          className="relative mb-2 w-full overflow-hidden rounded-b-xl rounded-t-none border-x border-b border-white/10 bg-[#070a12] shadow-[0_22px_60px_rgba(15,23,42,0.24)]"
           ref={timelineContainerRef}
         >
           <TimelineBarBody
@@ -1293,56 +1293,54 @@ export function TimelinePage() {
   const returnUrl = idsMode ? (sessionStorage.getItem(RECORDINGS_RETURN_URL_KEY) || 'recordings.html') : null;
 
   return (
-    <div className="timeline-page">
-      <div className="flex items-center mb-4">
-        <h1 className="text-2xl font-bold">
-          {idsMode ? t('timeline.selectedRecordingsTimeline') : t('timeline.timelinePlayback')}
-        </h1>
-        <div className="ml-4 flex">
+    <div className="timeline-page mx-auto w-full max-w-[1280px] pb-8">
+      <div className="mb-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="min-w-0">
+            <h1 className="text-xl font-semibold text-slate-950 sm:text-2xl">
+              {idsMode ? t('timeline.selectedRecordingsTimeline') : t('timeline.timelinePlayback')}
+            </h1>
+            <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+              <span>{formatDisplayDate(selectedDate)}</span>
+              {selectedStream && <span className="text-slate-300">/</span>}
+              {selectedStream && <span className="font-medium text-slate-700">{selectedStream}</span>}
+              {segments.length > 0 && <span className="text-slate-300">/</span>}
+              {segments.length > 0 && (
+                <span>{t('timeline.recordingsCount', { count: segments.length })}</span>
+              )}
+            </div>
+          </div>
+          <div className="flex rounded-lg border border-slate-200 bg-slate-100 p-1">
           <a
             href={returnUrl || 'recordings.html'}
-            className="px-3 py-1 rounded-l-md text-sm"
-            style={{
-              backgroundColor: 'hsl(var(--secondary))',
-              color: 'hsl(var(--secondary-foreground))'
-            }}
-            onMouseOver={(e) => e.currentTarget.style.backgroundColor = 'hsl(var(--secondary) / 0.8)'}
-            onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'hsl(var(--secondary))'}
+            className="rounded-md px-3 py-1.5 text-sm font-medium text-slate-600 transition-colors hover:bg-white hover:text-slate-950"
             onClick={() => { try { localStorage.setItem('recordings_view_mode', 'table'); } catch(e) {} }}
           >
             {t('recordings.table')}
           </a>
           <a
             href="recordings.html"
-            className="px-3 py-1 text-sm"
-            style={{
-              backgroundColor: 'hsl(var(--secondary))',
-              color: 'hsl(var(--secondary-foreground))'
-            }}
-            onMouseOver={(e) => e.currentTarget.style.backgroundColor = 'hsl(var(--secondary) / 0.8)'}
-            onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'hsl(var(--secondary))'}
+            className="rounded-md px-3 py-1.5 text-sm font-medium text-slate-600 transition-colors hover:bg-white hover:text-slate-950"
             onClick={() => { try { localStorage.setItem('recordings_view_mode', 'grid'); } catch(e) {} }}
           >
             {t('recordings.grid')}
           </a>
           <a
             href="timeline.html"
-            className="px-3 py-1 rounded-r-md text-sm"
-            style={{
-              backgroundColor: idsMode ? 'hsl(var(--secondary))' : 'hsl(var(--primary))',
-              color: idsMode ? 'hsl(var(--secondary-foreground))' : 'hsl(var(--primary-foreground))'
-            }}
-            onMouseOver={(e) => { if (idsMode) e.currentTarget.style.backgroundColor = 'hsl(var(--secondary) / 0.8)'; }}
-            onMouseOut={(e) => { if (idsMode) e.currentTarget.style.backgroundColor = 'hsl(var(--secondary))'; }}
+            className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+              idsMode
+                ? 'text-slate-600 hover:bg-white hover:text-slate-950'
+                : 'bg-red-600 text-white shadow-sm hover:bg-red-700'
+            }`}
           >
             {t('nav.timeline')}
           </a>
+          </div>
         </div>
-      </div>
 
       {idsMode ? (
         /* IDs mode: compact info bar */
-        <div className="flex flex-wrap items-center gap-3 mb-3 px-3 py-2 bg-secondary rounded-lg text-sm">
+        <div className="mt-4 flex flex-wrap items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
           <span className="font-medium">
             {t('timeline.recordingsCount', { count: segments.length })}
             {idsSegmentInfo?.multi_stream && ` · ${t('timeline.streamsCount', { count: [...new Set(segments.map(s => s.stream))].length })}`}
@@ -1394,12 +1392,12 @@ export function TimelinePage() {
             </div>
           )}
           <div className="ml-auto flex gap-2">
-            <a href={returnUrl || 'recordings.html'} data-keyboard-nav-preserve className="btn-secondary text-xs px-2 py-1">
+            <a href={returnUrl || 'recordings.html'} data-keyboard-nav-preserve className="rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50">
               ← {t('timeline.refineSelections')}
             </a>
             <button
               data-keyboard-nav-preserve
-              className="btn-primary text-xs px-2 py-1"
+              className="rounded-md bg-red-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
               onClick={() => setIsDownloadModalOpen(true)}
               disabled={selectedRecordingsForDownload.length === 0}
             >
@@ -1409,13 +1407,13 @@ export function TimelinePage() {
         </div>
       ) : (
         /* Normal mode: compact single-row stream + date selectors */
-        <div className="flex flex-wrap items-end gap-3 mb-3">
-          <div className="flex-grow min-w-[180px]">
-            <label htmlFor="stream-selector" className="block text-xs text-muted-foreground mb-1">{t('nav.streams')}</label>
+        <div className="mt-4 grid gap-3 md:grid-cols-[1fr_auto] md:items-end">
+          <div className="min-w-[180px]">
+            <label htmlFor="stream-selector" className="mb-1 block text-xs font-medium uppercase tracking-[0.08em] text-slate-500">{t('nav.streams')}</label>
             <select
               id="stream-selector"
               data-keyboard-nav-preserve
-              className="w-full p-1.5 text-sm border border-border rounded bg-background text-foreground"
+              className="h-10 w-full rounded-md border border-slate-300 bg-white px-3 text-sm text-slate-950 shadow-sm outline-none transition-colors focus:border-red-500 focus:ring-2 focus:ring-red-500/15"
               value={selectedStream || ''}
               onChange={handleStreamChange}
             >
@@ -1425,8 +1423,8 @@ export function TimelinePage() {
               ))}
             </select>
           </div>
-          <div className="min-w-[160px]" data-keyboard-nav-preserve>
-            <label className="block text-xs text-muted-foreground mb-1">{t('timeline.date')}</label>
+          <div className="min-w-[170px]" data-keyboard-nav-preserve>
+            <label className="mb-1 block text-xs font-medium uppercase tracking-[0.08em] text-slate-500">{t('timeline.date')}</label>
             <CalendarPicker value={selectedDate} onChange={handleDateChange} />
           </div>
           {isLoadingTimeline && (
@@ -1434,6 +1432,7 @@ export function TimelinePage() {
           )}
         </div>
       )}
+      </div>
 
       {/* Content */}
       {renderContent()}

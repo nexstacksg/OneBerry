@@ -254,8 +254,8 @@ export function TimelineControls() {
   };
 
   return (
-    <div className="mb-2 overflow-hidden rounded-t-2xl rounded-b-none border border-white/10 bg-[#05070d]/96 shadow-[0_-24px_60px_rgba(0,0,0,0.2)]">
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/10 px-2 py-2 sm:px-3">
+    <div className="overflow-hidden rounded-none border-x border-b border-white/10 bg-[#070a12] shadow-[0_18px_55px_rgba(15,23,42,0.24)]">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/10 px-3 py-2.5">
         <div className="min-w-0 flex items-center gap-3">
           <div className="flex items-center gap-1 rounded-md border border-white/10 bg-black/25 p-1">
             <button
@@ -287,7 +287,7 @@ export function TimelineControls() {
             <button
               type="button"
               data-keyboard-nav-preserve
-              className="inline-flex h-7 items-center rounded-full border border-white/10 bg-white/5 px-2 text-[10px] font-semibold uppercase tracking-[0.22em] text-white/75 transition-colors hover:bg-white/10 hover:text-white"
+              className="inline-flex h-7 items-center rounded-md border border-white/10 bg-white/5 px-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-white/75 transition-colors hover:bg-white/10 hover:text-white"
               onClick={fitToSegments}
               title={t('timeline.fitToRecordings')}
             >

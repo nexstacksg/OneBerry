@@ -17,6 +17,64 @@ const PRELOAD_CLEANUP_TIMEOUT_MS = 15000;
 const DETECTION_TIME_WINDOW_SECONDS = 2; // Time window (seconds) for filtering visible detections around current playback time
 const DETECTION_SCALE_BASE = 400; // Baseline display dimension (px) for detection overlay scaling
 
+function ControlIcon({ type, className = 'h-3.5 w-3.5' }) {
+  const common = {
+    xmlns: 'http://www.w3.org/2000/svg',
+    className,
+    viewBox: '0 0 24 24',
+    fill: 'none',
+    stroke: 'currentColor',
+    strokeWidth: '2',
+    strokeLinecap: 'round',
+    strokeLinejoin: 'round',
+    'aria-hidden': 'true'
+  };
+
+  if (type === 'fullscreen') {
+    return (
+      <svg {...common}>
+        <path d="M8 3H5a2 2 0 0 0-2 2v3" />
+        <path d="M16 3h3a2 2 0 0 1 2 2v3" />
+        <path d="M21 16v3a2 2 0 0 1-2 2h-3" />
+        <path d="M8 21H5a2 2 0 0 1-2-2v-3" />
+      </svg>
+    );
+  }
+
+  if (type === 'camera') {
+    return (
+      <svg {...common}>
+        <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3Z" />
+        <circle cx="12" cy="13" r="3" />
+      </svg>
+    );
+  }
+
+  if (type === 'download') {
+    return (
+      <svg {...common}>
+        <path d="M12 3v12" />
+        <path d="m7 10 5 5 5-5" />
+        <path d="M5 21h14" />
+      </svg>
+    );
+  }
+
+  if (type === 'trash') {
+    return (
+      <svg {...common}>
+        <path d="M3 6h18" />
+        <path d="M8 6V4h8v2" />
+        <path d="M19 6 18 20H6L5 6" />
+        <path d="M10 11v5" />
+        <path d="M14 11v5" />
+      </svg>
+    );
+  }
+
+  return null;
+}
+
 /**
  * TimelinePlayer component
  * @returns {JSX.Element} TimelinePlayer component
@@ -802,12 +860,75 @@ export function TimelinePlayer({ videoElementRef = null, autoFullscreen = false 
 
   return (
     <>
-      <div className="timeline-player-container mb-1" id="video-player">
+      {/* Top playback toolbar: actions on the left, speed on the right. */}
+      <div className="flex items-center flex-wrap gap-2 rounded-t-xl border border-b-0 border-slate-200 bg-white px-3 py-2 shadow-sm">
+        <label className="flex h-8 items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-2.5 text-xs text-slate-700 cursor-pointer" data-keyboard-nav-preserve>
+          <input
+            type="checkbox"
+            id="timeline-detection-overlay"
+            className="w-3.5 h-3.5 accent-red-600"
+            checked={detectionOverlayEnabled}
+            onChange={(e) => setDetectionOverlayEnabled(e.target.checked)}
+          />
+          <span>
+            {t('recordings.detections')}{detections.length > 0 ? ` (${detections.length})` : ''}
+          </span>
+        </label>
+
+        <button
+          type="button"
+          data-keyboard-nav-preserve
+          className="inline-flex h-8 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 text-xs font-medium text-slate-700 transition-colors hover:border-slate-300 hover:bg-slate-50"
+          onClick={handleToggleFullscreen}
+          title={isFullscreen ? t('timeline.exitFullscreen') : t('timeline.enterFullscreen')}
+        >
+          <ControlIcon type="fullscreen" />
+          {isFullscreen ? t('timeline.exitFullscreen') : t('timeline.fullscreen')}
+        </button>
+
+        {currentSegmentId && (
+          <div className="flex items-center gap-1">
+            <button
+              data-keyboard-nav-preserve
+              className="inline-flex h-8 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 text-xs font-medium text-slate-700 transition-colors hover:border-slate-300 hover:bg-slate-50"
+              onClick={handleSnapshot}
+              title={t('timeline.takeSnapshot')}
+            >
+              <ControlIcon type="camera" />
+              {t('timeline.snapshot')}
+            </button>
+            <a
+              data-keyboard-nav-preserve
+              className="inline-flex h-8 items-center gap-1.5 rounded-md bg-red-600 px-2.5 text-xs font-medium text-white transition-colors hover:bg-red-700"
+              href={`/api/recordings/download/${currentSegmentId}`}
+              download
+            >
+              <ControlIcon type="download" />
+              {t('recordings.download')}
+            </a>
+            <button
+              data-keyboard-nav-preserve
+              className="inline-flex h-8 items-center gap-1.5 rounded-md border border-red-200 bg-red-50 px-2.5 text-xs font-medium text-red-700 transition-colors hover:bg-red-100"
+              onClick={() => setShowDeleteConfirm(true)}
+              title={t('timeline.deleteRecording')}
+            >
+              <ControlIcon type="trash" />
+              {t('common.delete')}
+            </button>
+          </div>
+        )}
+
+        <div className="ml-auto flex min-h-8 items-center">
+          <SpeedControls />
+        </div>
+      </div>
+
+      <div className="timeline-player-container" id="video-player">
         <div
           ref={videoContainerRef}
           data-testid="timeline-video-container"
-          className="relative w-full bg-black rounded-lg shadow-md"
-          style={isFullscreen ? { width: '100vw', height: '100vh' } : { aspectRatio: '16/9' }}
+          className="relative w-full overflow-hidden rounded-none border border-slate-800 bg-black shadow-[0_24px_70px_rgba(15,23,42,0.28)]"
+          style={isFullscreen ? { width: '100vw', height: '100vh' } : { aspectRatio: '16/9', maxHeight: '66vh' }}
         >
           <video
               ref={setVideoRefs}
@@ -887,72 +1008,6 @@ export function TimelinePlayer({ videoElementRef = null, autoFullscreen = false 
               <p className="text-sm">{t('timeline.selectSegmentOrPlay')}</p>
             </div>
           </div>
-        </div>
-      </div>
-
-      {/* Compact toolbar: detections toggle | action buttons | speed */}
-      {/* Each individual control carries data-keyboard-nav-preserve so that clicking
-          a control does not exit 'fine' keyboard mode, while clicks on the empty
-          background area between controls (which land on the wrapper div itself)
-          are treated as page-background clicks and restore 'broad' mode. */}
-      <div className="flex items-center flex-wrap gap-x-3 gap-y-1 mb-1">
-        {/* Detection toggle */}
-        <label className="flex items-center gap-1.5 cursor-pointer" data-keyboard-nav-preserve>
-          <input
-            type="checkbox"
-            id="timeline-detection-overlay"
-            className="w-3.5 h-3.5 accent-primary"
-            checked={detectionOverlayEnabled}
-            onChange={(e) => setDetectionOverlayEnabled(e.target.checked)}
-          />
-          <span className="text-[11px] text-foreground">
-            {t('recordings.detections')}{detections.length > 0 ? ` (${detections.length})` : ''}
-          </span>
-        </label>
-
-        <button
-          type="button"
-          data-keyboard-nav-preserve
-          className="px-2 py-1 bg-secondary text-secondary-foreground rounded hover:bg-secondary/80 transition-colors flex items-center text-[11px]"
-          onClick={handleToggleFullscreen}
-          title={isFullscreen ? t('timeline.exitFullscreen') : t('timeline.enterFullscreen')}
-        >
-          {isFullscreen ? t('timeline.exitFullscreen') : t('timeline.fullscreen')}
-        </button>
-
-        {/* Action buttons — only when a segment is selected */}
-        {currentSegmentId && (
-          <div className="flex items-center gap-1">
-            <button
-              data-keyboard-nav-preserve
-              className="px-2 py-1 bg-secondary text-secondary-foreground rounded hover:bg-secondary/80 transition-colors flex items-center text-[11px]"
-              onClick={handleSnapshot}
-              title={t('timeline.takeSnapshot')}
-            >
-              📷 {t('timeline.snapshot')}
-            </button>
-            <a
-              data-keyboard-nav-preserve
-              className="px-2 py-1 bg-primary text-primary-foreground rounded hover:bg-primary/90 transition-colors flex items-center text-[11px]"
-              href={`/api/recordings/download/${currentSegmentId}`}
-              download
-            >
-              ↓ {t('recordings.download')}
-            </a>
-            <button
-              data-keyboard-nav-preserve
-              className="px-2 py-1 bg-red-600 text-white rounded hover:bg-red-700 transition-colors flex items-center text-[11px]"
-              onClick={() => setShowDeleteConfirm(true)}
-              title={t('timeline.deleteRecording')}
-            >
-              🗑 {t('common.delete')}
-            </button>
-          </div>
-        )}
-
-        {/* Speed controls — pushed right */}
-        <div className="ml-auto">
-          <SpeedControls />
         </div>
       </div>
 
