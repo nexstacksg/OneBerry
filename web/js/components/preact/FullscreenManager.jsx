@@ -224,6 +224,14 @@ export function useFullscreenGridNav(streamsToShow, cols, rows) {
         default: return;
       }
 
+      const fullscreenElement = document.fullscreenElement;
+      if (
+        (direction === 'ArrowLeft' || direction === 'ArrowRight') &&
+        fullscreenElement?.getAttribute('data-fullscreen-timeline-arrows') === 'seek'
+      ) {
+        return;
+      }
+
       // Prevent the browser from scrolling the page or seeking the video.
       e.preventDefault();
       navigateFullscreenGrid(direction, streamsRef.current, colsRef.current, rowsRef.current);
