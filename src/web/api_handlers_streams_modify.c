@@ -28,6 +28,7 @@
 #include "video/go2rtc/go2rtc_integration.h"
 #include "video/go2rtc/go2rtc_api.h"
 #include "video/mp4_recording.h"
+#include "storage/storage_manager.h"
 
 
 /**
@@ -57,6 +58,7 @@ typedef struct {
     bool non_dynamic_config_changed;           // Whether non-dynamic fields changed
     bool credentials_changed;                  // Whether ONVIF credentials changed
     bool recording_quality_changed;            // Whether recording source quality changed
+    bool retention_policy_changed;             // Whether retention/quota policy changed
 } put_stream_task_t;
 
 static void format_stream_capacity_error(char *buf, size_t buf_size,
@@ -464,6 +466,12 @@ static void put_stream_worker(put_stream_task_t *task) {
             log_info("Recorder restarted for stream %s using %s quality",
                      task->config.name, task->config.recording_quality);
         }
+    }
+
+    if (task->retention_policy_changed) {
+        trigger_storage_cleanup(false);
+        log_info("Triggered storage cleanup after retention policy change for stream %s",
+                 task->config.name);
     }
 
     log_info("Successfully completed stream update for: %s", task->stream_id);
@@ -1019,6 +1027,7 @@ void handle_put_stream(const http_request_t *req, http_response_t *res) {
     bool has_streaming_enabled = false;  // Track if streaming_enabled flag was provided
     bool non_dynamic_config_changed = false;  // Track if non-dynamic fields changed
     bool credentials_changed = false;  // Track if ONVIF credentials changed
+    bool retention_policy_changed = false;  // Track if retention/quota fields changed
 
     // Save original values for comparison
     char original_url[MAX_URL_LENGTH];
@@ -1262,6 +1271,7 @@ void handle_put_stream(const http_request_t *req, http_response_t *res) {
         if (config.retention_days != new_retention) {
             config.retention_days = new_retention;
             config_changed = true;
+            retention_policy_changed = true;
             // Retention is metadata only, doesn't require restart
             log_info("Retention days changed to %d for stream %s", new_retention, config.name);
         }
@@ -1273,6 +1283,7 @@ void handle_put_stream(const http_request_t *req, http_response_t *res) {
         if (config.detection_retention_days != new_detection_retention) {
             config.detection_retention_days = new_detection_retention;
             config_changed = true;
+            retention_policy_changed = true;
             // Retention is metadata only, doesn't require restart
             log_info("Detection retention days changed to %d for stream %s", new_detection_retention, config.name);
         }
@@ -1284,6 +1295,7 @@ void handle_put_stream(const http_request_t *req, http_response_t *res) {
         if (config.max_storage_mb != new_max_storage) {
             config.max_storage_mb = new_max_storage;
             config_changed = true;
+            retention_policy_changed = true;
             // Storage limit is metadata only, doesn't require restart
             log_info("Max storage MB changed to %d for stream %s", new_max_storage, config.name);
         }
@@ -1735,6 +1747,7 @@ void handle_put_stream(const http_request_t *req, http_response_t *res) {
     task->non_dynamic_config_changed = non_dynamic_config_changed;
     task->credentials_changed = credentials_changed;
     task->recording_quality_changed = recording_quality_changed;
+    task->retention_policy_changed = retention_policy_changed;
 
     log_info("Detection settings before update - Model: %s, Threshold: %.2f, Interval: %d, Pre-buffer: %d, Post-buffer: %d",
              config.detection_model, config.detection_threshold, config.detection_interval,

@@ -20,6 +20,7 @@ import {
   formatTimestampAsLocalDate,
   getClippedSegmentHourRange,
   getLocalDayBounds,
+  getPlayableSegmentTimestamp,
   getTimelineDayLengthHours,
   timestampToTimelineOffset,
   zoomTimelineRange
@@ -79,6 +80,21 @@ function clamp(value, min, max) {
 }
 
 const MIN_FULLSCREEN_TIMELINE_VIEW_HOURS = 1 / 3600;
+const PLAYBACK_SPEEDS = [0.25, 0.5, 1, 1.5, 2, 4];
+
+function formatDurationLabel(seconds) {
+  if (!Number.isFinite(seconds) || seconds <= 0) {
+    return '0s';
+  }
+
+  const rounded = Math.round(seconds);
+  const minutes = Math.floor(rounded / 60);
+  const remainingSeconds = rounded % 60;
+  if (minutes <= 0) {
+    return `${remainingSeconds}s`;
+  }
+  return `${minutes}m ${remainingSeconds.toString().padStart(2, '0')}s`;
+}
 
 function getPreviewFrameIndex(segment, sampleTimestamp) {
   const start = Number(segment?.start_timestamp);
@@ -151,6 +167,8 @@ export function FullscreenTimelineOverlay({
   isVisible,
   mode = 'floating',
   playbackTimestamp = null,
+  playbackSpeed = 1,
+  onPlaybackSpeedChange,
   onPreviewSelect,
   onReturnToLive
 }) {
@@ -164,13 +182,16 @@ export function FullscreenTimelineOverlay({
   const [endHour, setEndHour] = useState(() => getTimelineDayLengthHours(selectedDate));
   const [scrubTimestamp, setScrubTimestamp] = useState(null);
   const trackRef = useRef(null);
-  const scrubStateRef = useRef({ isDragging: false, pointerId: null });
+  const scrubStateRef = useRef({ isDragging: false, pointerId: null, lastTimestamp: null });
   const isDocked = mode === 'dock';
 
   const dayRange = useMemo(() => getLocalDayIsoRange(selectedDate), [selectedDate]);
   const dayLengthHours = useMemo(() => getTimelineDayLengthHours(selectedDate), [selectedDate]);
   const timelineUrl = streamName
     ? `/api/timeline/segments?stream=${encodeURIComponent(streamName)}&start=${encodeURIComponent(dayRange.startTime)}&end=${encodeURIComponent(dayRange.endTime)}`
+    : null;
+  const motionTimelineUrl = streamName
+    ? `${timelineUrl}&has_detection=1`
     : null;
 
   const {
@@ -190,10 +211,33 @@ export function FullscreenTimelineOverlay({
     }
   );
 
+  const {
+    data: motionTimelineData,
+    isLoading: isMotionLoading
+  } = useQuery(
+    ['fullscreen-motion-timeline-segments', streamName, selectedDate],
+    motionTimelineUrl,
+    {
+      timeout: 30000,
+      retries: 1,
+      retryDelay: 1000
+    },
+    {
+      enabled: !!streamName && isVisible,
+      refetchInterval: 5000,
+      staleTime: 0
+    }
+  );
+
   const segments = useMemo(() => {
     const rawSegments = Array.isArray(timelineData?.segments) ? timelineData.segments : [];
     return [...rawSegments].sort((a, b) => a.start_timestamp - b.start_timestamp);
   }, [timelineData]);
+
+  const motionSegments = useMemo(() => {
+    const rawSegments = Array.isArray(motionTimelineData?.segments) ? motionTimelineData.segments : [];
+    return [...rawSegments].sort((a, b) => Number(b.start_timestamp) - Number(a.start_timestamp));
+  }, [motionTimelineData]);
 
   const changeSelectedDate = (nextDate) => {
     if (!nextDate || !/^\d{4}-\d{2}-\d{2}$/.test(nextDate)) {
@@ -243,6 +287,20 @@ export function FullscreenTimelineOverlay({
       .filter(Boolean);
   }, [segments, selectedDate]);
 
+  const clampTimestampToSelectableRange = (timestamp, date = selectedDate) => {
+    const bounds = getLocalDayBounds(date);
+    if (!bounds || !Number.isFinite(timestamp)) {
+      return timestamp;
+    }
+
+    const today = currentDateInputValue();
+    const maxTimestamp = date >= today
+      ? Math.min(bounds.endTimestamp, Math.floor(Date.now() / 1000))
+      : bounds.endTimestamp;
+
+    return Math.max(bounds.startTimestamp, Math.min(timestamp, maxTimestamp));
+  };
+
   const updateCursorFromPointer = (event) => {
     const bounds = getLocalDayBounds(selectedDate);
     const trackElement = trackRef.current;
@@ -258,10 +316,11 @@ export function FullscreenTimelineOverlay({
     const visibleRange = Math.max(endHour - startHour, 0.001);
     const ratio = clamp((event.clientX - rect.left) / rect.width, 0, 1);
     const clickHour = startHour + (ratio * visibleRange);
-    const timestamp = Math.round(bounds.startTimestamp + (clickHour * 3600));
+    const timestamp = clampTimestampToSelectableRange(Math.round(bounds.startTimestamp + (clickHour * 3600)));
 
     setCursorTimestamp(timestamp);
     setScrubTimestamp(timestamp);
+    scrubStateRef.current.lastTimestamp = timestamp;
     setIsFollowingLive(false);
   };
 
@@ -270,13 +329,21 @@ export function FullscreenTimelineOverlay({
       return null;
     }
 
-    const safeTimestamp = Math.max(segment.start_timestamp, Math.min(timestamp, segment.end_timestamp));
-    const offsetSeconds = Math.max(0, safeTimestamp - segment.start_timestamp);
+    const segmentStart = Number(segment.start_timestamp);
+    const segmentEnd = Number(segment.end_timestamp);
+    if (!Number.isFinite(segmentStart) || !Number.isFinite(segmentEnd) || segmentEnd <= segmentStart) {
+      return null;
+    }
+
+    const safeTimestamp = getPlayableSegmentTimestamp(segment, timestamp);
+    const offsetSeconds = Math.max(0, safeTimestamp - segmentStart);
 
     return {
       key: `seek-${segment.id}-${safeTimestamp}`,
       timestamp: safeTimestamp,
       segmentId: segment.id,
+      segmentStartTimestamp: segmentStart,
+      segmentEndTimestamp: segmentEnd,
       offsetSeconds,
       thumbUrl: `/api/recordings/thumbnail/${segment.id}/${getPreviewFrameIndex(segment, safeTimestamp)}`,
       playbackUrl: `/api/recordings/play/${segment.id}?v=${safeTimestamp}`,
@@ -299,6 +366,19 @@ export function FullscreenTimelineOverlay({
     }
 
     return buildPlaybackSample(segments[segmentIndex], timestamp);
+  };
+
+  const seekToTimestamp = (timestamp, event = null) => {
+    const safeTimestamp = clampTimestampToSelectableRange(timestamp);
+    const sample = resolvePlaybackSampleAtTimestamp(safeTimestamp);
+    if (sample) {
+      handlePreviewSelect(sample, event);
+      return true;
+    }
+
+    setCursorTimestamp(safeTimestamp);
+    setIsFollowingLive(false);
+    return false;
   };
 
   useEffect(() => {
@@ -402,13 +482,30 @@ export function FullscreenTimelineOverlay({
   };
 
   const stepCursor = (seconds) => {
-    setCursorTimestamp((current) => {
-      const next = Math.max(current + seconds, 0);
-      const bounds = getLocalDayBounds(selectedDate);
-      if (!bounds) return next;
-      return Math.max(bounds.startTimestamp, Math.min(next, bounds.endTimestamp));
-    });
+    const current = Number.isFinite(playbackTimestamp)
+      ? playbackTimestamp
+      : Number.isFinite(cursorTimestamp)
+        ? cursorTimestamp
+        : Math.floor(Date.now() / 1000);
+    const next = clampTimestampToSelectableRange(Math.max(current + seconds, 0));
+    seekToTimestamp(next);
     setIsFollowingLive(false);
+  };
+
+  const handlePlayPauseButton = (event) => {
+    if (isFollowingLive) {
+      setIsFollowingLive(false);
+      return;
+    }
+
+    const targetTimestamp = Number.isFinite(scrubTimestamp)
+      ? scrubTimestamp
+      : Number.isFinite(cursorTimestamp)
+        ? cursorTimestamp
+        : playbackTimestamp;
+    if (Number.isFinite(targetTimestamp)) {
+      seekToTimestamp(targetTimestamp, event);
+    }
   };
 
   const handleTrackPointerDown = (event) => {
@@ -447,6 +544,8 @@ export function FullscreenTimelineOverlay({
 
     scrubStateRef.current.isDragging = false;
     scrubStateRef.current.pointerId = null;
+    const finalTimestamp = scrubStateRef.current.lastTimestamp;
+    scrubStateRef.current.lastTimestamp = null;
     setScrubTimestamp(null);
 
     if (event?.currentTarget && typeof event.currentTarget.releasePointerCapture === 'function') {
@@ -455,6 +554,10 @@ export function FullscreenTimelineOverlay({
       } catch (error) {
         // Ignore release errors.
       }
+    }
+
+    if (Number.isFinite(finalTimestamp)) {
+      seekToTimestamp(finalTimestamp, event);
     }
   };
 
@@ -467,16 +570,9 @@ export function FullscreenTimelineOverlay({
       ? Math.max(0, Math.min((event.clientX - rect.left) / rect.width, 1))
       : 0.5;
     const clickHour = startHour + (clickRatio * visibleRange);
-    const timestamp = Math.round(bounds.startTimestamp + (clickHour * 3600));
+    const timestamp = clampTimestampToSelectableRange(Math.round(bounds.startTimestamp + (clickHour * 3600)));
 
-    const sample = resolvePlaybackSampleAtTimestamp(timestamp);
-    if (sample) {
-      handlePreviewSelect(sample, event);
-      return;
-    }
-
-    setCursorTimestamp(timestamp);
-    setIsFollowingLive(false);
+    seekToTimestamp(timestamp, event);
   };
 
   const handleWheelZoom = (event) => {
@@ -569,7 +665,7 @@ export function FullscreenTimelineOverlay({
             ? 'overflow-hidden rounded-t-2xl rounded-b-none border border-white/10 bg-[#05070d]/96 shadow-[0_-24px_60px_rgba(0,0,0,0.48)]'
             : 'overflow-hidden rounded-2xl border border-white/10 bg-black/45 shadow-2xl'
           }>
-            <div className={`flex flex-wrap items-center justify-between gap-2 border-b border-white/10 px-2 py-2 sm:px-3 ${isDocked ? 'bg-black/35' : ''}`}>
+            <div className={`flex flex-nowrap items-center justify-between gap-2 overflow-x-auto border-b border-white/10 px-2 py-2 sm:px-3 ${isDocked ? 'bg-black/35' : ''}`}>
               <div className="min-w-0 flex items-center gap-3">
                 <div className="min-w-0">
                   <div className="font-mono text-[12px] font-semibold tabular-nums tracking-[0.12em] text-sky-200 sm:text-[13px]">
@@ -602,7 +698,25 @@ export function FullscreenTimelineOverlay({
                 </div>
               </div>
 
-              <div className="flex flex-wrap items-center justify-end gap-2 sm:gap-3">
+              <div className="flex shrink-0 flex-nowrap items-center justify-end gap-2 sm:gap-3">
+                <div className="flex items-center gap-1 rounded-md border border-white/10 bg-black/25 p-1">
+                  {PLAYBACK_SPEEDS.map((speed) => (
+                    <button
+                      key={`fullscreen-speed-${speed}`}
+                      type="button"
+                      title={`Playback speed ${speed}x`}
+                      onClick={() => onPlaybackSpeedChange?.(speed)}
+                      className={`h-6 min-w-[34px] rounded px-1.5 text-[10px] font-semibold tabular-nums transition-colors ${
+                        speed === playbackSpeed
+                          ? 'bg-sky-400 text-black'
+                          : 'text-white/65 hover:bg-white/10 hover:text-white'
+                      }`}
+                    >
+                      {speed}x
+                    </button>
+                  ))}
+                </div>
+
                 <div className="hidden min-[700px]:flex items-center gap-1 rounded-md border border-white/10 bg-black/25 p-1">
                   <IconButton title="Back 5m" onClick={() => stepCursor(-300)}>
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="currentColor">
@@ -617,13 +731,7 @@ export function FullscreenTimelineOverlay({
                   <IconButton
                     title={isFollowingLive ? t('timeline.pause') : t('timeline.playFromCurrentPosition')}
                     active={isFollowingLive}
-                    onClick={() => {
-                      if (isFollowingLive) {
-                        setIsFollowingLive(false);
-                      } else {
-                        jumpToLive();
-                      }
-                    }}
+                    onClick={handlePlayPauseButton}
                   >
                     {isFollowingLive ? (
                       <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="currentColor">
@@ -684,87 +792,121 @@ export function FullscreenTimelineOverlay({
               </div>
             </div>
 
-            <TimelineBarBody
-              segments={segments}
-              selectedDate={selectedDate}
-              startHour={startHour}
-              endHour={endHour}
-              dateLabel={fullDateLabel}
-              isLoading={isLoading}
-              error={error}
-              loadingText={t('common.loading')}
-              errorText={t('timeline.reloadTimelineData')}
-              emptyText={t('recordings.noRecordingsFound')}
-              onPreviewSelect={handlePreviewSelect}
-              onWheel={handleWheelZoom}
-              renderTrackContent={() => (
-                <div
-                  ref={trackRef}
-                  className="relative h-11 overflow-hidden rounded-xl border border-white/10 bg-gradient-to-b from-[#121417] via-[#0d0f12] to-[#07080a] shadow-inner"
-                  onPointerDown={handleTrackPointerDown}
-                  onPointerMove={handleTrackPointerMove}
-                  onPointerUp={endTrackScrub}
-                  onPointerCancel={endTrackScrub}
-                  onClick={handleStripClick}
-                >
-                  <div
-                    className="absolute inset-0 opacity-45"
-                    style={{
-                      backgroundImage: 'repeating-linear-gradient(90deg, rgba(255,255,255,0.03) 0 1px, transparent 1px 3.125%)'
-                    }}
-                  />
-
-                  <div
-                    className="absolute inset-x-0 bottom-0 h-[2px] bg-gradient-to-r from-emerald-500/40 via-emerald-300/70 to-emerald-500/40"
-                    style={{ opacity: isFollowingLive ? 0.7 : 0.35 }}
-                  />
-
-                  {visibleSegments.map((segment, index) => {
-                    const left = ((segment.startHour - startHour) / visibleRange) * 100;
-                    const width = Math.max(((segment.endHour - segment.startHour) / visibleRange) * 100, 0.12);
-
-                    return (
+            <div className="grid grid-cols-1 min-[980px]:grid-cols-[minmax(0,1fr)_230px]">
+              <div className="min-w-0">
+                <TimelineBarBody
+                  segments={segments}
+                  selectedDate={selectedDate}
+                  startHour={startHour}
+                  endHour={endHour}
+                  dateLabel={fullDateLabel}
+                  isLoading={isLoading}
+                  error={error}
+                  loadingText={t('common.loading')}
+                  errorText={t('timeline.reloadTimelineData')}
+                  emptyText={t('recordings.noRecordingsFound')}
+                  onPreviewSelect={handlePreviewSelect}
+                  onWheel={handleWheelZoom}
+                  renderTrackContent={() => (
+                    <div
+                      ref={trackRef}
+                      className="relative h-11 overflow-hidden rounded-xl border border-white/10 bg-gradient-to-b from-[#121417] via-[#0d0f12] to-[#07080a] shadow-inner"
+                      onPointerDown={handleTrackPointerDown}
+                      onPointerMove={handleTrackPointerMove}
+                      onPointerUp={endTrackScrub}
+                      onPointerCancel={endTrackScrub}
+                      onClick={handleStripClick}
+                    >
                       <div
-                        key={`${segment.id || index}-${segment.start_timestamp}`}
-                        className="absolute top-1/2 -translate-y-1/2 rounded-sm"
+                        className="absolute inset-0 opacity-45"
                         style={{
-                          left: `${left}%`,
-                          width: `${width}%`,
-                          height: '8px',
-                          background: segment.has_detection
-                            ? 'linear-gradient(180deg, rgba(245, 158, 11, 0.98) 0%, rgba(34, 197, 94, 0.95) 100%)'
-                            : 'linear-gradient(180deg, rgba(100, 220, 118, 0.95) 0%, rgba(58, 181, 74, 0.92) 100%)',
-                          boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.08)'
+                          backgroundImage: 'repeating-linear-gradient(90deg, rgba(255,255,255,0.03) 0 1px, transparent 1px 3.125%)'
                         }}
                       />
-                    );
-                  })}
 
-                  {showCursor && (
-                    <div
-                      className="absolute top-[-4px] z-20"
-                      style={{
-                        left: `${cursorPosition}%`,
-                        transform: 'translateX(-50%)'
-                      }}
-                    >
-                      <div className="mx-auto h-4 w-[2px] rounded-full bg-amber-400 shadow-[0_0_10px_rgba(251,191,36,0.75)]" />
-                      <div className="mt-0.5 -translate-x-1/2 rounded-sm border border-amber-300/30 bg-amber-500/90 px-1.5 py-0.5 text-[9px] font-semibold tracking-[0.12em] text-black shadow-lg">
-                        {formatClockLabel(activeCursorTimestamp)}
-                      </div>
+                      <div
+                        className="absolute inset-x-0 bottom-0 h-[2px] bg-gradient-to-r from-emerald-500/40 via-emerald-300/70 to-emerald-500/40"
+                        style={{ opacity: isFollowingLive ? 0.7 : 0.35 }}
+                      />
+
+                      {visibleSegments.map((segment, index) => {
+                        const left = ((segment.startHour - startHour) / visibleRange) * 100;
+                        const width = Math.max(((segment.endHour - segment.startHour) / visibleRange) * 100, 0.12);
+
+                        return (
+                          <div
+                            key={`${segment.id || index}-${segment.start_timestamp}`}
+                            className="absolute top-1/2 -translate-y-1/2 rounded-sm"
+                            style={{
+                              left: `${left}%`,
+                              width: `${width}%`,
+                              height: '8px',
+                              background: segment.has_detection
+                                ? 'linear-gradient(180deg, rgba(245, 158, 11, 0.98) 0%, rgba(34, 197, 94, 0.95) 100%)'
+                                : 'linear-gradient(180deg, rgba(100, 220, 118, 0.95) 0%, rgba(58, 181, 74, 0.92) 100%)',
+                              boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.08)'
+                            }}
+                          />
+                        );
+                      })}
+
+                      {showCursor && (
+                        <div
+                          className="absolute top-[-4px] z-20"
+                          style={{
+                            left: `${cursorPosition}%`,
+                            transform: 'translateX(-50%)'
+                          }}
+                        >
+                          <div className="mx-auto h-4 w-[2px] rounded-full bg-amber-400 shadow-[0_0_10px_rgba(251,191,36,0.75)]" />
+                          <div className="mt-0.5 -translate-x-1/2 rounded-sm border border-amber-300/30 bg-amber-500/90 px-1.5 py-0.5 text-[9px] font-semibold tracking-[0.12em] text-black shadow-lg">
+                            {formatClockLabel(activeCursorTimestamp)}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
+                  footerContent={(
+                    <div className="flex items-center justify-end gap-2 px-1 text-[10px] uppercase tracking-[0.22em] text-white/35">
+                      <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-white/65">Click to seek</span>
+                      <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-white/65">
+                        {isFollowingLive ? 'Live sync' : 'Paused'}
+                      </span>
+                    </div>
+                  )}
+                />
+              </div>
+
+              <aside className="border-t border-white/10 bg-black/30 p-2 min-[980px]:border-l min-[980px]:border-t-0">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-white/55">Motion clips</div>
+                  <div className="h-2 w-2 rounded-full bg-emerald-400 shadow-[0_0_10px_rgba(74,222,128,0.55)]" />
                 </div>
-              )}
-              footerContent={(
-                <div className="flex items-center justify-end gap-2 px-1 text-[10px] uppercase tracking-[0.22em] text-white/35">
-                  <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-white/65">Click to seek</span>
-                  <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-white/65">
-                    {isFollowingLive ? 'Live sync' : 'Paused'}
-                  </span>
+                <div className="max-h-28 space-y-1 overflow-y-auto pr-1 min-[980px]:max-h-36">
+                  {isMotionLoading && motionSegments.length === 0 ? (
+                    <div className="px-2 py-3 text-[11px] text-white/45">{t('common.loading')}</div>
+                  ) : motionSegments.length === 0 ? (
+                    <div className="px-2 py-3 text-[11px] text-white/40">No motion clips</div>
+                  ) : (
+                    motionSegments.map((segment) => (
+                      <button
+                        key={`motion-${segment.id}-${segment.start_timestamp}`}
+                        type="button"
+                        onClick={(event) => handlePreviewSelect(buildPlaybackSample(segment, segment.start_timestamp), event)}
+                        className="flex w-full items-center justify-between gap-2 rounded-md border border-white/10 bg-white/5 px-2 py-1.5 text-left transition-colors hover:border-amber-300/30 hover:bg-amber-300/10"
+                      >
+                        <span className="min-w-0 font-mono text-[11px] tabular-nums text-white/80">
+                          {formatClockLabel(segment.start_timestamp)}
+                        </span>
+                        <span className="shrink-0 text-[10px] text-white/45">
+                          {formatDurationLabel(Number(segment.end_timestamp) - Number(segment.start_timestamp))}
+                        </span>
+                      </button>
+                    ))
+                  )}
                 </div>
-              )}
-            />
+              </aside>
+            </div>
           </div>
         </div>
       )}

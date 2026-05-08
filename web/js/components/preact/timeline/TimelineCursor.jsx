@@ -62,15 +62,16 @@ export function TimelineCursor() {
     const cursor = cursorRef.current;
     if (!cursor) return;
 
-    const handleMouseDown = (e) => {
+  const handleMouseDown = (e) => {
       e.preventDefault();
       e.stopPropagation();
       isDraggingRef.current = true;
 
-      timelineState.userControllingCursor = true;
-      timelineState.preserveCursorPosition = true;
-      timelineState.cursorPositionLocked = true;
-      timelineState.setState({});
+      timelineState.setState({
+        userControllingCursor: true,
+        preserveCursorPosition: true,
+        cursorPositionLocked: true
+      });
 
       document.addEventListener('mousemove', handleMouseMove);
       document.addEventListener('mouseup', handleMouseUp);
@@ -211,9 +212,13 @@ export function TimelineCursor() {
       }
       if (timelineState.timelineSegments && timelineState.timelineSegments.length > 0) {
         const t = timelineState.timelineSegments[0].start_timestamp;
-        timelineState.currentTime = t;
-        timelineState.currentSegmentIndex = 0;
-        timelineState.setState({});
+        timelineState.setState({
+          currentTime: t,
+          currentSegmentIndex: 0,
+          isPlaying: timelineState.isPlaying,
+          forceReload: true,
+          prevCurrentTime: Number.isFinite(timelineState.currentTime) ? timelineState.currentTime : null
+        });
         setVisible(true);
         updateCursorPosition(
           t,

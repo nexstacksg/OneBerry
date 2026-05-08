@@ -20,6 +20,7 @@
 #include "core/config.h"
 #include "database/db_core.h"
 #include "database/db_streams.h"
+#include "storage/storage_manager.h"
 #include "database/db_auth.h"
 #include "video/stream_manager.h"
 #include "video/streams.h"
@@ -433,9 +434,13 @@ void handle_post_settings(const http_request_t *req, http_response_t *res) {
     bool restart_required = false;
     bool web_thread_pool_restart_required = false;
     bool max_streams_restart_required = false;
+    bool storage_manager_changed = false;
     bool go2rtc_config_changed = false;  // Track if go2rtc-related settings changed
     bool go2rtc_becoming_enabled = false;  // Track transition direction
     bool mqtt_config_changed = false;     // Track if MQTT-related settings changed
+
+    const uint64_t old_max_storage_size = g_config.max_storage_size;
+    const int old_retention_days = g_config.retention_days;
 
     // Snapshot current MQTT settings before parsing new values
     bool old_mqtt_enabled = g_config.mqtt_enabled;
@@ -647,6 +652,9 @@ void handle_post_settings(const http_request_t *req, http_response_t *res) {
     cJSON *max_storage_size = cJSON_GetObjectItem(settings, "max_storage_size");
     if (max_storage_size && cJSON_IsNumber(max_storage_size)) {
         g_config.max_storage_size = max_storage_size->valueint;
+        if (g_config.max_storage_size != old_max_storage_size) {
+            storage_manager_changed = true;
+        }
         settings_changed = true;
         log_info("Updated max_storage_size: %" PRIu64, g_config.max_storage_size);
     }
@@ -655,6 +663,9 @@ void handle_post_settings(const http_request_t *req, http_response_t *res) {
     cJSON *retention_days = cJSON_GetObjectItem(settings, "retention_days");
     if (retention_days && cJSON_IsNumber(retention_days)) {
         g_config.retention_days = retention_days->valueint;
+        if (g_config.retention_days != old_retention_days) {
+            storage_manager_changed = true;
+        }
         settings_changed = true;
         log_info("Updated retention_days: %d", g_config.retention_days);
     }
@@ -1593,6 +1604,26 @@ void handle_post_settings(const http_request_t *req, http_response_t *res) {
         free(active_streams);
 
         log_info("Database path changed successfully");
+    }
+
+    if (storage_manager_changed) {
+        if (set_max_storage_size(g_config.max_storage_size) != 0) {
+            log_warn("Failed to update storage manager max storage size");
+        } else {
+            log_info("Runtime max storage size updated to %" PRIu64, g_config.max_storage_size);
+        }
+
+        if (set_retention_days(g_config.retention_days) != 0) {
+            log_warn("Failed to update storage manager retention days");
+        } else {
+            log_info("Runtime retention days updated to %d", g_config.retention_days);
+        }
+
+        if (g_config.max_storage_size != old_max_storage_size ||
+            g_config.retention_days != old_retention_days) {
+            trigger_storage_cleanup(false);
+            log_info("Triggered storage cleanup after storage policy change");
+        }
     }
 
         // Save settings if changed

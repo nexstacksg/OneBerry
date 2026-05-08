@@ -353,49 +353,71 @@ int apply_retention_policy(void) {
 
         // Phase 1: Time-based retention cleanup
         if (config.retention_days > 0 || config.detection_retention_days > 0) {
-            recording_metadata_t recordings[MAX_RECORDINGS_PER_STREAM];
-            int count = get_recordings_for_retention(stream_name,
-                                                     config.retention_days,
-                                                     config.detection_retention_days,
-                                                     recordings,
-                                                     MAX_RECORDINGS_PER_STREAM);
+            while (true) {
+                recording_metadata_t recordings[MAX_RECORDINGS_PER_STREAM];
+                int count = get_recordings_for_retention(stream_name,
+                                                         config.retention_days,
+                                                         config.detection_retention_days,
+                                                         recordings,
+                                                         MAX_RECORDINGS_PER_STREAM);
 
-            if (count > 0) {
+                if (count < 0) {
+                    log_warn("Failed to query retention recordings for stream %s", stream_name);
+                    break;
+                }
+
+                if (count == 0) {
+                    break;
+                }
+
                 log_info("Stream %s: found %d recordings past retention", stream_name, count);
 
+                int deleted_this_batch = 0;
                 for (int i = 0; i < count; i++) {
                     uint64_t freed_bytes = 0;
                     if (delete_recording_file_and_metadata(&recordings[i],
-                                                          "Retention cleanup",
-                                                          &freed_bytes)) {
+                                                           "Retention cleanup",
+                                                           &freed_bytes)) {
                         total_freed += freed_bytes;
                         total_deleted++;
+                        deleted_this_batch++;
                     }
+                }
+
+                if (count < MAX_RECORDINGS_PER_STREAM || deleted_this_batch == 0) {
+                    break;
                 }
             }
         }
 
         // Phase 2: Storage quota enforcement
         if (config.max_storage_mb > 0) {
-            uint64_t current_usage = get_stream_storage_bytes(stream_name);
             uint64_t max_bytes = config.max_storage_mb * 1024 * 1024;
 
-            if (current_usage > max_bytes) {
+            while (true) {
+                uint64_t current_usage = get_stream_storage_bytes(stream_name);
+                if (current_usage <= max_bytes) {
+                    break;
+                }
+
                 uint64_t to_free = current_usage - max_bytes;
                 log_info("Stream %s: over quota by %lu bytes, need to free space",
-                        stream_name, (unsigned long)to_free);
+                         stream_name, (unsigned long)to_free);
 
                 recording_metadata_t recordings[MAX_RECORDINGS_PER_STREAM];
                 int count = get_recordings_for_quota_enforcement(stream_name,
                                                                   recordings,
                                                                   MAX_RECORDINGS_PER_STREAM);
+                if (count <= 0) {
+                    break;
+                }
 
                 uint64_t freed = 0;
                 for (int i = 0; i < count && freed < to_free; i++) {
                     uint64_t freed_bytes = 0;
                     if (delete_recording_file_and_metadata(&recordings[i],
-                                                          "Quota cleanup",
-                                                          &freed_bytes)) {
+                                                           "Quota cleanup",
+                                                           &freed_bytes)) {
                         freed += freed_bytes;
                         total_freed += freed_bytes;
                         total_deleted++;
@@ -403,7 +425,11 @@ int apply_retention_policy(void) {
                 }
 
                 log_info("Stream %s: freed %lu bytes for quota enforcement",
-                        stream_name, (unsigned long)freed);
+                         stream_name, (unsigned long)freed);
+
+                if (count < MAX_RECORDINGS_PER_STREAM || freed == 0) {
+                    break;
+                }
             }
         }
     }
@@ -443,7 +469,51 @@ int apply_retention_policy(void) {
         }
     }
 
-    // Phase 4: Clean up orphaned database entries (files that no longer exist)
+    // Phase 4: Apply global max-size policy across all streams (oldest recordings first)
+    if (storage_manager.max_size > 0) {
+        int64_t usage_bytes = get_stream_storage_bytes(NULL);
+        if (usage_bytes < 0) {
+            log_warn("Failed to read global stream storage usage for max-size policy");
+        } else if ((uint64_t)usage_bytes > storage_manager.max_size) {
+            uint64_t target_freed = ((uint64_t)usage_bytes - storage_manager.max_size);
+            uint64_t freed_so_far = 0;
+            int deleted_for_global = 0;
+
+            while (freed_so_far < target_freed) {
+                recording_metadata_t recordings[MAX_RECORDINGS_PER_STREAM];
+                int count = get_recordings_for_global_quota(recordings, MAX_RECORDINGS_PER_STREAM);
+                if (count <= 0) {
+                    break;
+                }
+
+                int deleted_this_round = 0;
+                for (int i = 0; i < count && freed_so_far < target_freed; i++) {
+                    uint64_t freed_bytes = 0;
+                    if (delete_recording_file_and_metadata(&recordings[i],
+                                                          "Global max-size cleanup",
+                                                          &freed_bytes)) {
+                        freed_so_far += freed_bytes;
+                        total_freed += freed_bytes;
+                        total_deleted++;
+                        deleted_for_global++;
+                        deleted_this_round++;
+                    }
+                }
+
+                if (count < MAX_RECORDINGS_PER_STREAM || deleted_this_round == 0) {
+                    break;
+                }
+            }
+
+            log_info("Global max-size policy deleted %d recordings and freed %lu bytes (target=%lu)",
+                     deleted_for_global, (unsigned long)freed_so_far, (unsigned long)target_freed);
+        } else {
+            log_debug("Global max-size policy not required (usage=%lu, limit=%lu)",
+                      (unsigned long)usage_bytes, (unsigned long)storage_manager.max_size);
+        }
+    }
+
+    // Phase 5: Clean up orphaned database entries (files that no longer exist)
     // Safety check: verify storage is actually accessible before orphan cleanup.
     // If storage is unavailable (mount lost, etc.), every recording looks "orphaned"
     // and we'd incorrectly wipe the entire database.

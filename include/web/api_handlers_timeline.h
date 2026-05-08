@@ -29,7 +29,7 @@ typedef struct {
  * @return Number of segments found, or -1 on error
  */
 int get_timeline_segments(const char *stream_name, time_t start_time, time_t end_time,
-                         timeline_segment_t *segments, int max_segments);
+                         timeline_segment_t *segments, int max_segments, int has_detection);
 
 /**
  * Handle GET request for timeline segments
