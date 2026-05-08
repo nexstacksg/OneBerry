@@ -182,7 +182,13 @@ export function FullscreenTimelineOverlay({
   const [endHour, setEndHour] = useState(() => getTimelineDayLengthHours(selectedDate));
   const [scrubTimestamp, setScrubTimestamp] = useState(null);
   const trackRef = useRef(null);
-  const scrubStateRef = useRef({ isDragging: false, pointerId: null, lastTimestamp: null });
+  const scrubStateRef = useRef({
+    isDragging: false,
+    pointerId: null,
+    lastTimestamp: null,
+    moved: false,
+    suppressNextClick: false
+  });
   const isDocked = mode === 'dock';
 
   const dayRange = useMemo(() => getLocalDayIsoRange(selectedDate), [selectedDate]);
@@ -516,6 +522,8 @@ export function FullscreenTimelineOverlay({
     event.preventDefault();
     scrubStateRef.current.isDragging = true;
     scrubStateRef.current.pointerId = event.pointerId;
+    scrubStateRef.current.moved = false;
+    scrubStateRef.current.suppressNextClick = false;
 
     if (typeof event.currentTarget.setPointerCapture === 'function') {
       try {
@@ -534,6 +542,7 @@ export function FullscreenTimelineOverlay({
     }
 
     event.preventDefault();
+    scrubStateRef.current.moved = true;
     updateCursorFromPointer(event);
   };
 
@@ -545,7 +554,9 @@ export function FullscreenTimelineOverlay({
     scrubStateRef.current.isDragging = false;
     scrubStateRef.current.pointerId = null;
     const finalTimestamp = scrubStateRef.current.lastTimestamp;
+    const didMove = scrubStateRef.current.moved;
     scrubStateRef.current.lastTimestamp = null;
+    scrubStateRef.current.moved = false;
     setScrubTimestamp(null);
 
     if (event?.currentTarget && typeof event.currentTarget.releasePointerCapture === 'function') {
@@ -556,12 +567,18 @@ export function FullscreenTimelineOverlay({
       }
     }
 
-    if (Number.isFinite(finalTimestamp)) {
+    if (didMove && Number.isFinite(finalTimestamp)) {
+      scrubStateRef.current.suppressNextClick = true;
       seekToTimestamp(finalTimestamp, event);
     }
   };
 
   const handleStripClick = (event) => {
+    if (scrubStateRef.current.suppressNextClick) {
+      scrubStateRef.current.suppressNextClick = false;
+      return;
+    }
+
     const bounds = getLocalDayBounds(selectedDate);
     if (!bounds) return;
 

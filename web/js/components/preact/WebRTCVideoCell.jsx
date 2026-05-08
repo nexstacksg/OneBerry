@@ -128,6 +128,24 @@ function getFullscreenPlaybackTimestampFromVideo(sample, video) {
   return startTimestamp + currentTime;
 }
 
+function getSafeFullscreenPlaybackSpeed(speed) {
+  return Number.isFinite(speed) && speed > 0 ? speed : 1;
+}
+
+function applyFullscreenPlaybackSpeed(video, speed) {
+  if (!video) {
+    return;
+  }
+
+  const safeSpeed = getSafeFullscreenPlaybackSpeed(speed);
+  try {
+    video.defaultPlaybackRate = safeSpeed;
+    video.playbackRate = safeSpeed;
+  } catch (error) {
+    console.warn('Unable to set fullscreen playback speed', error);
+  }
+}
+
 // Connection quality classification thresholds
 // Packet loss values are percentages (0-100), RTT and jitter are in seconds.
 const CONNECTION_QUALITY_THRESHOLDS = {
@@ -276,6 +294,37 @@ export function WebRTCVideoCell({
       return;
     }
 
+    const playbackVideo = playbackVideoRef.current;
+    if (fullscreenPlayback &&
+        playbackVideo &&
+        sample.segmentId === fullscreenPlayback.segmentId) {
+      const segmentDuration = Number.isFinite(playbackVideo.duration) ? playbackVideo.duration : Infinity;
+      const nextOffset = Number.isFinite(segmentDuration)
+        ? clamp(sample.offsetSeconds, 0, segmentDuration)
+        : sample.offsetSeconds;
+      const sampleStartTimestamp = getFullscreenPlaybackStartTimestamp(sample);
+      const nextTimestamp = Number.isFinite(sampleStartTimestamp)
+        ? sampleStartTimestamp + nextOffset
+        : sample.timestamp;
+
+      setFullscreenPlayback((current) => current
+        ? { ...current, timestamp: nextTimestamp, offsetSeconds: nextOffset }
+        : sample);
+      setFullscreenPlaybackTimestamp(nextTimestamp);
+      fullscreenPlaybackTimestampRef.current = nextTimestamp;
+      applyFullscreenPlaybackSpeed(playbackVideo, fullscreenPlaybackSpeed);
+      try {
+        playbackVideo.currentTime = nextOffset;
+        playbackVideo.play().catch((error) => {
+          console.debug('Fullscreen playback seek did not resume automatically', error);
+        });
+      } catch (error) {
+        console.warn('Unable to seek fullscreen playback sample', error);
+        setFullscreenPlayback(sample);
+      }
+      return;
+    }
+
     setFullscreenPlayback(sample);
     setFullscreenPlaybackTimestamp(sample.timestamp ?? null);
     fullscreenPlaybackTimestampRef.current = sample.timestamp ?? null;
@@ -284,6 +333,37 @@ export function WebRTCVideoCell({
     setFullscreenPlayback(null);
     setFullscreenPlaybackTimestamp(null);
     fullscreenPlaybackTimestampRef.current = null;
+  };
+
+  const handleFullscreenPlaybackEnded = () => {
+    if (!fullscreenPlayback) {
+      return;
+    }
+
+    const segmentEnd = Number(fullscreenPlayback.segmentEndTimestamp);
+    const fallbackTimestamp = Number.isFinite(segmentEnd)
+      ? segmentEnd
+      : fullscreenPlayback.timestamp ?? fullscreenPlaybackTimestampRef.current;
+
+    if (Number.isFinite(fallbackTimestamp)) {
+      setFullscreenPlaybackTimestamp(fallbackTimestamp);
+      fullscreenPlaybackTimestampRef.current = fallbackTimestamp;
+    }
+
+    if (!Number.isFinite(segmentEnd)) {
+      return;
+    }
+
+    resolveFullscreenPlaybackSample(segmentEnd + 1, {
+      mode: 'forward',
+      maxForwardGapSeconds: 5
+    }).then((sample) => {
+      if (!sample || sample.segmentId === fullscreenPlayback.segmentId) {
+        return;
+      }
+
+      handleFullscreenPreviewSelect(sample);
+    });
   };
 
 
@@ -336,17 +416,10 @@ export function WebRTCVideoCell({
       return undefined;
     }
 
-    const targetSpeed = Number.isFinite(fullscreenPlaybackSpeed) && fullscreenPlaybackSpeed > 0
-      ? fullscreenPlaybackSpeed
-      : 1;
+    const targetSpeed = getSafeFullscreenPlaybackSpeed(fullscreenPlaybackSpeed);
     const seekTo = Math.max(0, fullscreenPlayback.offsetSeconds || 0);
     const applySeek = () => {
-      try {
-        video.playbackRate = targetSpeed;
-      } catch (error) {
-        console.warn('Unable to set fullscreen playback speed', error);
-      }
-
+      applyFullscreenPlaybackSpeed(video, targetSpeed);
       video.muted = !audioEnabled;
       try {
         video.currentTime = seekTo;
@@ -390,22 +463,19 @@ export function WebRTCVideoCell({
       return;
     }
 
-    if (Number.isFinite(fullscreenPlaybackSpeed) && fullscreenPlaybackSpeed > 0) {
-      try {
-        video.playbackRate = fullscreenPlaybackSpeed;
-      } catch (error) {
-        console.warn('Unable to set fullscreen playback speed', error);
-      }
-    }
-
+    applyFullscreenPlaybackSpeed(video, fullscreenPlaybackSpeed);
     video.muted = !audioEnabled;
   }, [audioEnabled, fullscreenPlaybackSpeed, isFullscreenCell]);
 
-  const resolveFullscreenPlaybackSample = useCallback(async (targetTimestamp) => {
+  const resolveFullscreenPlaybackSample = useCallback(async (targetTimestamp, options = {}) => {
     if (!stream?.name || !Number.isFinite(targetTimestamp)) {
       return null;
     }
 
+    const {
+      mode = 'nearest',
+      maxForwardGapSeconds = null
+    } = options;
     const safeTargetTimestamp = Math.floor(Math.max(targetTimestamp, 0));
     const seenSegmentIds = new Set();
     const allSegments = [];
@@ -447,6 +517,27 @@ export function WebRTCVideoCell({
 
     const segments = [...allSegments].sort((a, b) => Number(a.start_timestamp) - Number(b.start_timestamp));
     const containingIndex = findContainingSegmentIndex(segments, safeTargetTimestamp);
+    if (mode === 'forward') {
+      const forwardIndex = containingIndex !== -1
+        ? containingIndex
+        : segments.findIndex((segment) => Number(segment.end_timestamp) >= safeTargetTimestamp);
+
+      if (forwardIndex === -1) {
+        return null;
+      }
+
+      const segment = segments[forwardIndex];
+      const segmentStart = Number(segment.start_timestamp);
+      if (Number.isFinite(maxForwardGapSeconds) &&
+          Number.isFinite(segmentStart) &&
+          segmentStart > safeTargetTimestamp &&
+          segmentStart - safeTargetTimestamp > maxForwardGapSeconds) {
+        return null;
+      }
+
+      return buildFullscreenPlaybackSample(segment, Math.max(safeTargetTimestamp, segmentStart));
+    }
+
     const sampleIndex = containingIndex !== -1
       ? containingIndex
       : findNearestSegmentIndex(segments, safeTargetTimestamp);
@@ -528,6 +619,7 @@ export function WebRTCVideoCell({
           fullscreenPlaybackTimestampRef.current = nextTimestamp;
           try {
             playbackVideo.currentTime = nextOffset;
+            applyFullscreenPlaybackSpeed(playbackVideo, fullscreenPlaybackSpeed);
             playbackVideo.play().catch((error) => {
               console.debug('Fullscreen playback seek did not resume automatically', error);
             });
@@ -544,7 +636,7 @@ export function WebRTCVideoCell({
 
     window.addEventListener('keydown', handleFullscreenTimelineKeys, { capture: true });
     return () => window.removeEventListener('keydown', handleFullscreenTimelineKeys, { capture: true });
-  }, [fullscreenPlayback, isFullscreenCell, resolveFullscreenPlaybackSample]);
+  }, [fullscreenPlayback, fullscreenPlaybackSpeed, isFullscreenCell, resolveFullscreenPlaybackSample]);
 
   const setPlaybackVideoRef = (element) => {
     playbackVideoRef.current = element;
@@ -552,12 +644,8 @@ export function WebRTCVideoCell({
       return;
     }
 
-    if (element && Number.isFinite(fullscreenPlaybackSpeed) && fullscreenPlaybackSpeed > 0) {
-      try {
-        element.playbackRate = fullscreenPlaybackSpeed;
-      } catch (error) {
-        console.warn('Unable to set initial playback speed for fullscreen sample', error);
-      }
+    if (element) {
+      applyFullscreenPlaybackSpeed(element, fullscreenPlaybackSpeed);
     }
   };
 
@@ -1576,66 +1664,82 @@ export function WebRTCVideoCell({
         overflow: 'hidden'
       }}
     >
-      {/* Video element */}
-      <video
-        id={`video-${streamId.replace(/\s+/g, '-')}`}
-        className="video-element"
-        ref={videoRef}
-        autoPlay
-        muted={!audioEnabled}
-        disablePictureInPicture
-        playsInline
+      <div
+        className="fullscreen-video-stage"
         style={{
-          width: '100%',
-          height: isFullscreenCell ? 'auto' : '100%',
-          objectFit: 'contain',
-          position: isFullscreenCell ? 'relative' : 'absolute',
-          flex: isFullscreenCell ? '1 1 0%' : undefined,
+          display: isFullscreenCell ? 'block' : 'contents',
+          position: isFullscreenCell ? 'relative' : undefined,
+          flex: isFullscreenCell ? '1 1 auto' : undefined,
           minHeight: isFullscreenCell ? 0 : undefined,
-          display: isFullscreenCell && fullscreenPlayback ? 'none' : undefined
+          width: isFullscreenCell ? '100%' : undefined,
+          overflow: isFullscreenCell ? 'hidden' : undefined,
+          backgroundColor: isFullscreenCell ? 'black' : undefined
         }}
-      />
-
-      {isFullscreenCell && fullscreenPlayback && (
+      >
+        {/* Video element */}
         <video
-          key={fullscreenPlayback.key}
-          ref={setPlaybackVideoRef}
+          id={`video-${streamId.replace(/\s+/g, '-')}`}
           className="video-element"
+          ref={videoRef}
           autoPlay
           muted={!audioEnabled}
-          playsInline
           disablePictureInPicture
-          src={fullscreenPlayback.playbackUrl}
-          onEnded={handleReturnToLive}
-          onTimeUpdate={handleFullscreenPlaybackTimeUpdate}
-          onCanPlay={() => {
-            const video = playbackVideoRef.current;
-            if (video) {
-              video.play().catch((error) => {
-                console.debug('Fullscreen playback canplay did not resume automatically', error);
-              });
-            }
-          }}
-          onClick={() => {
-            const video = playbackVideoRef.current;
-            if (!video) return;
-            if (video.paused) {
-              video.play().catch(() => {});
-            } else {
-              video.pause();
-            }
-          }}
+          playsInline
           style={{
             width: '100%',
-            height: 'auto',
+            height: '100%',
             objectFit: 'contain',
-            position: 'relative',
-            flex: '1 1 0%',
-            minHeight: 0,
-            backgroundColor: 'black'
+            position: 'absolute',
+            inset: isFullscreenCell ? 0 : undefined,
+            display: isFullscreenCell && fullscreenPlayback ? 'none' : undefined
           }}
         />
-      )}
+
+        {isFullscreenCell && fullscreenPlayback && (
+          <video
+            key={fullscreenPlayback.key}
+            ref={setPlaybackVideoRef}
+            className="video-element"
+            autoPlay
+            muted={!audioEnabled}
+            playsInline
+            disablePictureInPicture
+            src={fullscreenPlayback.playbackUrl}
+            onEnded={handleFullscreenPlaybackEnded}
+            onTimeUpdate={handleFullscreenPlaybackTimeUpdate}
+            onLoadedMetadata={() => {
+              applyFullscreenPlaybackSpeed(playbackVideoRef.current, fullscreenPlaybackSpeed);
+            }}
+            onCanPlay={() => {
+              const video = playbackVideoRef.current;
+              if (video) {
+                applyFullscreenPlaybackSpeed(video, fullscreenPlaybackSpeed);
+                video.play().catch((error) => {
+                  console.debug('Fullscreen playback canplay did not resume automatically', error);
+                });
+              }
+            }}
+            onClick={() => {
+              const video = playbackVideoRef.current;
+              if (!video) return;
+              applyFullscreenPlaybackSpeed(video, fullscreenPlaybackSpeed);
+              if (video.paused) {
+                video.play().catch(() => {});
+              } else {
+                video.pause();
+              }
+            }}
+            style={{
+              width: '100%',
+              height: '100%',
+              objectFit: 'contain',
+              position: 'absolute',
+              inset: 0,
+              backgroundColor: 'black'
+            }}
+          />
+        )}
+      </div>
 
       {/* Detection overlay component */}
       {stream.detection_based_recording && stream.detection_model && showDetections && (
