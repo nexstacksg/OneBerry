@@ -174,7 +174,7 @@ int set_recording_retention_override(uint64_t id, int days);
  * Priority 2: Detection recordings past detection retention period
  * Protected recordings are never returned
  *
- * @param stream_name Stream name to filter
+ * @param stream_name Stream name to filter (NULL for all streams)
  * @param retention_days Regular recordings retention in days
  * @param detection_retention_days Detection recordings retention in days
  * @param recordings Array to fill with recording metadata
@@ -216,7 +216,7 @@ int get_protected_recordings_count(const char *stream_name);
  * important clips: lower retention tier first, then no manual override,
  * then non-detection, then oldest first.
  *
- * @param stream_name Stream name
+ * @param stream_name Stream name (NULL for all streams)
  * @param recordings Array to fill with recording metadata
  * @param max_count Maximum number of recordings to return
  * @return Number of recordings found, or -1 on error
@@ -224,6 +224,17 @@ int get_protected_recordings_count(const char *stream_name);
 int get_recordings_for_quota_enforcement(const char *stream_name,
                                          recording_metadata_t *recordings,
                                          int max_count);
+
+/**
+ * Get oldest unprotected complete recordings for global quota enforcement.
+ * Returned in oldest-first order (by start_time) so oldest data is deleted first.
+ *
+ * @param recordings Array to fill with recording metadata
+ * @param max_count Maximum number of recordings to return
+ * @return Number of recordings found, or -1 on error
+ */
+int get_recordings_for_global_quota(recording_metadata_t *recordings,
+                                   int max_count);
 
 /**
  * Get orphaned recording entries (DB entries without files on disk)

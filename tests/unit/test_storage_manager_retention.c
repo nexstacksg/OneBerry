@@ -235,6 +235,47 @@ void test_apply_retention_policy_cleans_low_ratio_orphans_when_storage_is_health
     TEST_ASSERT_NOT_EQUAL(0, get_recording_metadata_by_path(missing_path, &meta));
 }
 
+void test_apply_retention_policy_enforces_global_max_size_oldest_first(void) {
+    time_t now = time(NULL);
+    char cam_a_old[PATH_MAX], cam_a_new[PATH_MAX];
+    char cam_b_old[PATH_MAX], cam_b_new[PATH_MAX];
+    recording_metadata_t rec_a_old, rec_a_new, rec_b_old, rec_b_new;
+
+    create_mp4_dir();
+    add_stream_with_quota("cam_a", 0);
+    add_stream_with_quota("cam_b", 0);
+
+    TEST_ASSERT_EQUAL_INT(0, set_max_storage_size(2 * 1024 * 1024));
+
+    mp4_path(cam_a_old, sizeof(cam_a_old), "cam-a-old.mp4");
+    mp4_path(cam_a_new, sizeof(cam_a_new), "cam-a-new.mp4");
+    mp4_path(cam_b_old, sizeof(cam_b_old), "cam-b-old.mp4");
+    mp4_path(cam_b_new, sizeof(cam_b_new), "cam-b-new.mp4");
+    create_file(cam_a_old, 1024 * 1024);
+    create_file(cam_a_new, 1024 * 1024);
+    create_file(cam_b_old, 1024 * 1024);
+    create_file(cam_b_new, 1024 * 1024);
+
+    rec_a_old = make_recording("cam_a", cam_a_old, now - 400, 1024 * 1024);
+    rec_a_new = make_recording("cam_a", cam_a_new, now - 100, 1024 * 1024);
+    rec_b_old = make_recording("cam_b", cam_b_old, now - 300, 1024 * 1024);
+    rec_b_new = make_recording("cam_b", cam_b_new, now - 200, 1024 * 1024);
+
+    TEST_ASSERT_NOT_EQUAL(0, add_recording_metadata(&rec_a_old));
+    TEST_ASSERT_NOT_EQUAL(0, add_recording_metadata(&rec_a_new));
+    TEST_ASSERT_NOT_EQUAL(0, add_recording_metadata(&rec_b_old));
+    TEST_ASSERT_NOT_EQUAL(0, add_recording_metadata(&rec_b_new));
+
+    TEST_ASSERT_EQUAL_INT(0, set_retention_days(0));
+    TEST_ASSERT_EQUAL_INT(2, apply_retention_policy());
+
+    TEST_ASSERT_EQUAL_INT(2, count_recordings());
+    TEST_ASSERT_EQUAL_INT(-1, access(cam_a_old, F_OK));
+    TEST_ASSERT_EQUAL_INT(-1, access(cam_b_old, F_OK));
+    TEST_ASSERT_EQUAL_INT(0, access(cam_a_new, F_OK));
+    TEST_ASSERT_EQUAL_INT(0, access(cam_b_new, F_OK));
+}
+
 void test_apply_retention_policy_skips_orphans_when_mp4_storage_is_inaccessible(void) {
     time_t now = time(NULL);
     add_stream_with_quota("offline_cam", 0);
@@ -261,6 +302,7 @@ int main(void) {
     RUN_TEST(test_apply_retention_policy_preserves_metadata_when_file_delete_fails);
     RUN_TEST(test_apply_retention_policy_skips_orphan_cleanup_when_ratio_is_too_high);
     RUN_TEST(test_apply_retention_policy_cleans_low_ratio_orphans_when_storage_is_healthy);
+    RUN_TEST(test_apply_retention_policy_enforces_global_max_size_oldest_first);
     RUN_TEST(test_apply_retention_policy_skips_orphans_when_mp4_storage_is_inaccessible);
     int result = UNITY_END();
 

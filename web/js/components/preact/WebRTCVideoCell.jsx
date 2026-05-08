@@ -13,7 +13,7 @@ import { PTZControls } from './PTZControls.jsx';
 import { FullscreenTimelineOverlay } from './FullscreenTimelineOverlay.jsx';
 import { ConfirmDialog } from './UI.jsx';
 import { getGo2rtcBaseUrl } from '../../utils/settings-utils.js';
-import { formatFilenameTimestamp, getLocalDayIsoRange } from '../../utils/date-utils.js';
+import { currentDateInputValue, formatFilenameTimestamp, getLocalDayIsoRange } from '../../utils/date-utils.js';
 import { forceNavigation } from '../../utils/navigation-utils.js';
 import { formatUtils } from './recordings/formatUtils.js';
 import { useI18n } from '../../i18n.js';
@@ -23,7 +23,12 @@ import { StreamQualitySelector } from './StreamQualitySelector.jsx';
 import { useStreamQuality } from './useStreamQuality.js';
 import { updateStreamRecordingQuality } from '../../utils/stream-quality-utils.js';
 import 'webrtc-adapter';
-import { findContainingSegmentIndex, findNearestSegmentIndex, formatTimestampAsLocalDate } from './timeline/timelineUtils.js';
+import {
+  findContainingSegmentIndex,
+  findNearestSegmentIndex,
+  formatTimestampAsLocalDate,
+  getPlayableSegmentTimestamp
+} from './timeline/timelineUtils.js';
 
 // Retry configuration for sending WebRTC offers to go2rtc.
 // Adjust these values to tune reliability vs. latency.
@@ -74,9 +79,11 @@ function buildFullscreenPlaybackSample(segment, sampleTimestamp) {
 
   const segmentStart = Number(segment.start_timestamp);
   const segmentEnd = Number(segment.end_timestamp);
-  const safeTimestamp = Number.isFinite(segmentStart) && Number.isFinite(segmentEnd)
-    ? clamp(Math.max(segmentStart, Math.min(sampleTimestamp, segmentEnd)), segmentStart, segmentEnd)
-    : sampleTimestamp;
+  if (!Number.isFinite(segmentStart) || !Number.isFinite(segmentEnd) || segmentEnd <= segmentStart) {
+    return null;
+  }
+
+  const safeTimestamp = getPlayableSegmentTimestamp(segment, sampleTimestamp);
 
   if (!Number.isFinite(safeTimestamp)) {
     return null;
@@ -88,10 +95,37 @@ function buildFullscreenPlaybackSample(segment, sampleTimestamp) {
     key: `seek-${segment.id}-${safeTimestamp}`,
     timestamp: safeTimestamp,
     segmentId: segment.id,
+    segmentStartTimestamp: segmentStart,
+    segmentEndTimestamp: segmentEnd,
     offsetSeconds,
     thumbUrl: `/api/recordings/thumbnail/${segment.id}/${getPreviewFrameIndexForTimelineSample(segment, safeTimestamp)}`,
     playbackUrl: `/api/recordings/play/${segment.id}?v=${safeTimestamp}`,
   };
+}
+
+function getFullscreenPlaybackStartTimestamp(sample) {
+  const segmentStart = Number(sample?.segmentStartTimestamp);
+  if (Number.isFinite(segmentStart)) {
+    return segmentStart;
+  }
+
+  const timestamp = Number(sample?.timestamp);
+  const offsetSeconds = Number(sample?.offsetSeconds);
+  if (Number.isFinite(timestamp) && Number.isFinite(offsetSeconds)) {
+    return timestamp - offsetSeconds;
+  }
+
+  return null;
+}
+
+function getFullscreenPlaybackTimestampFromVideo(sample, video) {
+  const startTimestamp = getFullscreenPlaybackStartTimestamp(sample);
+  const currentTime = Number(video?.currentTime);
+  if (!Number.isFinite(startTimestamp) || !Number.isFinite(currentTime)) {
+    return null;
+  }
+
+  return startTimestamp + currentTime;
 }
 
 // Connection quality classification thresholds
@@ -168,6 +202,7 @@ export function WebRTCVideoCell({
   const [isFullscreenCell, setIsFullscreenCell] = useState(false);
   const [fullscreenPlayback, setFullscreenPlayback] = useState(null);
   const [fullscreenPlaybackTimestamp, setFullscreenPlaybackTimestamp] = useState(null);
+  const [fullscreenPlaybackSpeed, setFullscreenPlaybackSpeed] = useState(1);
 
   const handleStreamQualityChange = useCallback((quality) => {
     if (quality === streamQuality || isUpdatingQuality) {
@@ -237,12 +272,18 @@ export function WebRTCVideoCell({
   const showDetections = globalShowDetections && localShowDetections;
 
   const handleFullscreenPreviewSelect = (sample) => {
+    if (!sample) {
+      return;
+    }
+
     setFullscreenPlayback(sample);
-    setFullscreenPlaybackTimestamp(sample?.timestamp ?? null);
+    setFullscreenPlaybackTimestamp(sample.timestamp ?? null);
+    fullscreenPlaybackTimestampRef.current = sample.timestamp ?? null;
   };
   const handleReturnToLive = () => {
     setFullscreenPlayback(null);
     setFullscreenPlaybackTimestamp(null);
+    fullscreenPlaybackTimestampRef.current = null;
   };
 
 
@@ -295,15 +336,27 @@ export function WebRTCVideoCell({
       return undefined;
     }
 
+    const targetSpeed = Number.isFinite(fullscreenPlaybackSpeed) && fullscreenPlaybackSpeed > 0
+      ? fullscreenPlaybackSpeed
+      : 1;
     const seekTo = Math.max(0, fullscreenPlayback.offsetSeconds || 0);
     const applySeek = () => {
+      try {
+        video.playbackRate = targetSpeed;
+      } catch (error) {
+        console.warn('Unable to set fullscreen playback speed', error);
+      }
+
+      video.muted = !audioEnabled;
       try {
         video.currentTime = seekTo;
       } catch (error) {
         console.warn('Unable to seek fullscreen playback video', error);
       }
 
-      video.play().catch(() => {});
+      video.play().catch((error) => {
+        console.debug('Fullscreen playback autoplay did not start automatically', error);
+      });
     };
 
     if (video.readyState >= 1) {
@@ -313,7 +366,7 @@ export function WebRTCVideoCell({
 
     video.addEventListener('loadedmetadata', applySeek, { once: true });
     return () => video.removeEventListener('loadedmetadata', applySeek);
-  }, [fullscreenPlayback]);
+  }, [audioEnabled, fullscreenPlayback, fullscreenPlaybackSpeed]);
 
   const handleFullscreenPlaybackTimeUpdate = () => {
     const video = playbackVideoRef.current;
@@ -321,56 +374,87 @@ export function WebRTCVideoCell({
       return;
     }
 
-    const playbackStartTimestamp = (fullscreenPlayback.timestamp || 0) - (fullscreenPlayback.offsetSeconds || 0);
-    setFullscreenPlaybackTimestamp(playbackStartTimestamp + video.currentTime);
+    const nextTimestamp = getFullscreenPlaybackTimestampFromVideo(fullscreenPlayback, video);
+    if (Number.isFinite(nextTimestamp)) {
+      setFullscreenPlaybackTimestamp(nextTimestamp);
+    }
   };
 
   useEffect(() => {
     fullscreenPlaybackTimestampRef.current = fullscreenPlaybackTimestamp;
   }, [fullscreenPlaybackTimestamp]);
 
+  useEffect(() => {
+    const video = playbackVideoRef.current;
+    if (!video || !isFullscreenCell) {
+      return;
+    }
+
+    if (Number.isFinite(fullscreenPlaybackSpeed) && fullscreenPlaybackSpeed > 0) {
+      try {
+        video.playbackRate = fullscreenPlaybackSpeed;
+      } catch (error) {
+        console.warn('Unable to set fullscreen playback speed', error);
+      }
+    }
+
+    video.muted = !audioEnabled;
+  }, [audioEnabled, fullscreenPlaybackSpeed, isFullscreenCell]);
+
   const resolveFullscreenPlaybackSample = useCallback(async (targetTimestamp) => {
     if (!stream?.name || !Number.isFinite(targetTimestamp)) {
       return null;
     }
 
-    const selectedDate = formatTimestampAsLocalDate(targetTimestamp);
-    if (!selectedDate) {
+    const safeTargetTimestamp = Math.floor(Math.max(targetTimestamp, 0));
+    const seenSegmentIds = new Set();
+    const allSegments = [];
+    const dayOffsets = [-2, -1, 0, 1, 2];
+
+    for (const dayOffset of dayOffsets) {
+      const dayDate = formatTimestampAsLocalDate(safeTargetTimestamp + (dayOffset * 86400));
+      const dayRange = dayDate ? getLocalDayIsoRange(dayDate) : null;
+      if (!dayRange || !dayRange.startTime || !dayRange.endTime) {
+        continue;
+      }
+
+      const endpoint = `/api/timeline/segments?stream=${encodeURIComponent(stream.name)}&start=${encodeURIComponent(dayRange.startTime)}&end=${encodeURIComponent(dayRange.endTime)}`;
+      try {
+        const response = await fetch(endpoint);
+        if (!response.ok) {
+          continue;
+        }
+
+        const timelineData = await response.json();
+        const rawSegments = Array.isArray(timelineData?.segments) ? timelineData.segments : [];
+        rawSegments.forEach((segment) => {
+          if (!segment || seenSegmentIds.has(segment.id)) {
+            return;
+          }
+
+          seenSegmentIds.add(segment.id);
+          allSegments.push(segment);
+        });
+      } catch (error) {
+        console.warn('Unable to resolve fullscreen playback sample for timeline seek', error);
+        return null;
+      }
+    }
+
+    if (!allSegments.length) {
       return null;
     }
 
-    const dayRange = getLocalDayIsoRange(selectedDate);
-    if (!dayRange.startTime || !dayRange.endTime) {
+    const segments = [...allSegments].sort((a, b) => Number(a.start_timestamp) - Number(b.start_timestamp));
+    const containingIndex = findContainingSegmentIndex(segments, safeTargetTimestamp);
+    const sampleIndex = containingIndex !== -1
+      ? containingIndex
+      : findNearestSegmentIndex(segments, safeTargetTimestamp);
+    if (sampleIndex === -1) {
       return null;
     }
 
-    const endpoint = `/api/timeline/segments?stream=${encodeURIComponent(stream.name)}&start=${encodeURIComponent(dayRange.startTime)}&end=${encodeURIComponent(dayRange.endTime)}`;
-    try {
-      const response = await fetch(endpoint);
-      if (!response.ok) {
-        return null;
-      }
-
-      const timelineData = await response.json();
-      const rawSegments = Array.isArray(timelineData?.segments) ? timelineData.segments : [];
-      if (!rawSegments.length) {
-        return null;
-      }
-
-      const segments = [...rawSegments].sort((a, b) => Number(a.start_timestamp) - Number(b.start_timestamp));
-      const containingIndex = findContainingSegmentIndex(segments, targetTimestamp);
-      const sampleIndex = containingIndex !== -1
-        ? containingIndex
-        : findNearestSegmentIndex(segments, targetTimestamp);
-      if (sampleIndex === -1) {
-        return null;
-      }
-
-      return buildFullscreenPlaybackSample(segments[sampleIndex], targetTimestamp);
-    } catch (error) {
-      console.warn('Unable to resolve fullscreen playback sample for timeline seek', error);
-      return null;
-    }
+    return buildFullscreenPlaybackSample(segments[sampleIndex], safeTargetTimestamp);
   }, [stream?.name]);
 
   useEffect(() => {
@@ -398,17 +482,25 @@ export function WebRTCVideoCell({
       const directionSeconds = event.key === 'ArrowLeft' ? -FULLSCREEN_ARROW_SEEK_SECONDS : FULLSCREEN_ARROW_SEEK_SECONDS;
       const playbackVideo = playbackVideoRef.current;
       const nowTimestamp = Math.floor(Date.now() / 1000);
-
-      const baseTimestamp = fullscreenPlayback && playbackVideo
-        ? ((fullscreenPlayback.timestamp || 0) - (fullscreenPlayback.offsetSeconds || 0) + (playbackVideo.currentTime || 0))
+      const todayDate = currentDateInputValue();
+      const timestampFromVideo = fullscreenPlayback
+        ? getFullscreenPlaybackTimestampFromVideo(fullscreenPlayback, playbackVideo)
+        : null;
+      const baseTimestamp = Number.isFinite(timestampFromVideo)
+        ? timestampFromVideo
         : Number.isFinite(fullscreenPlaybackTimestampRef.current)
-        ? fullscreenPlaybackTimestampRef.current
-        : nowTimestamp;
-      const targetTimestamp = clamp(baseTimestamp + directionSeconds, 0, nowTimestamp);
+          ? fullscreenPlaybackTimestampRef.current
+          : nowTimestamp;
+
+      let targetTimestamp = Math.floor(Math.max(0, baseTimestamp + directionSeconds));
+      if (formatTimestampAsLocalDate(targetTimestamp) === todayDate) {
+        targetTimestamp = Math.min(targetTimestamp, nowTimestamp);
+      }
       const requestId = fullscreenTimelineSeekRequestRef.current + 1;
 
       fullscreenTimelineSeekRequestRef.current = requestId;
       setFullscreenPlaybackTimestamp(targetTimestamp);
+      fullscreenPlaybackTimestampRef.current = targetTimestamp;
 
       resolveFullscreenPlaybackSample(targetTimestamp).then((sample) => {
         if (requestId !== fullscreenTimelineSeekRequestRef.current) {
@@ -424,10 +516,21 @@ export function WebRTCVideoCell({
           const nextOffset = Number.isFinite(segmentDuration)
             ? clamp(sample.offsetSeconds, 0, segmentDuration)
             : sample.offsetSeconds;
+          const sampleStartTimestamp = getFullscreenPlaybackStartTimestamp(sample);
+          const nextTimestamp = Number.isFinite(sampleStartTimestamp)
+            ? sampleStartTimestamp + nextOffset
+            : sample.timestamp;
 
-          setFullscreenPlaybackTimestamp((fullscreenPlayback.timestamp || 0) - (fullscreenPlayback.offsetSeconds || 0) + nextOffset);
+          setFullscreenPlayback((current) => current
+            ? { ...current, timestamp: nextTimestamp, offsetSeconds: nextOffset }
+            : sample);
+          setFullscreenPlaybackTimestamp(nextTimestamp);
+          fullscreenPlaybackTimestampRef.current = nextTimestamp;
           try {
             playbackVideo.currentTime = nextOffset;
+            playbackVideo.play().catch((error) => {
+              console.debug('Fullscreen playback seek did not resume automatically', error);
+            });
           } catch (error) {
             console.warn('Unable to seek fullscreen playback with keyboard', error);
             handleFullscreenPreviewSelect(sample);
@@ -442,6 +545,21 @@ export function WebRTCVideoCell({
     window.addEventListener('keydown', handleFullscreenTimelineKeys, { capture: true });
     return () => window.removeEventListener('keydown', handleFullscreenTimelineKeys, { capture: true });
   }, [fullscreenPlayback, isFullscreenCell, resolveFullscreenPlaybackSample]);
+
+  const setPlaybackVideoRef = (element) => {
+    playbackVideoRef.current = element;
+    if (element && !isFullscreenCell) {
+      return;
+    }
+
+    if (element && Number.isFinite(fullscreenPlaybackSpeed) && fullscreenPlaybackSpeed > 0) {
+      try {
+        element.playbackRate = fullscreenPlaybackSpeed;
+      } catch (error) {
+        console.warn('Unable to set initial playback speed for fullscreen sample', error);
+      }
+    }
+  };
 
   // Initialize WebRTC connection when component mounts
   useEffect(() => {
@@ -1480,7 +1598,8 @@ export function WebRTCVideoCell({
 
       {isFullscreenCell && fullscreenPlayback && (
         <video
-          ref={playbackVideoRef}
+          key={fullscreenPlayback.key}
+          ref={setPlaybackVideoRef}
           className="video-element"
           autoPlay
           muted={!audioEnabled}
@@ -1489,6 +1608,23 @@ export function WebRTCVideoCell({
           src={fullscreenPlayback.playbackUrl}
           onEnded={handleReturnToLive}
           onTimeUpdate={handleFullscreenPlaybackTimeUpdate}
+          onCanPlay={() => {
+            const video = playbackVideoRef.current;
+            if (video) {
+              video.play().catch((error) => {
+                console.debug('Fullscreen playback canplay did not resume automatically', error);
+              });
+            }
+          }}
+          onClick={() => {
+            const video = playbackVideoRef.current;
+            if (!video) return;
+            if (video.paused) {
+              video.play().catch(() => {});
+            } else {
+              video.pause();
+            }
+          }}
           style={{
             width: '100%',
             height: 'auto',
@@ -1947,6 +2083,8 @@ export function WebRTCVideoCell({
           isVisible={isFullscreenCell}
           mode="dock"
           playbackTimestamp={fullscreenPlaybackTimestamp}
+          playbackSpeed={fullscreenPlaybackSpeed}
+          onPlaybackSpeedChange={setFullscreenPlaybackSpeed}
           onPreviewSelect={handleFullscreenPreviewSelect}
           onReturnToLive={handleReturnToLive}
         />

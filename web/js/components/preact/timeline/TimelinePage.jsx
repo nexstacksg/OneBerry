@@ -865,44 +865,36 @@ export function TimelinePage() {
     const fitWindowHours = Math.max(fitEnd - fitStart, MIN_TIMELINE_VIEW_HOURS);
 
     // Push to global state
-    timelineState.timelineSegments = segmentsCopy;
-    timelineState.currentSegmentIndex = initialSegmentIndex;
-    timelineState.currentTime = initialTime;
-    timelineState.prevCurrentTime = initialTime;
-    timelineState.timelineWindowHours = fitWindowHours;
-    if (!preserveExistingPlayback) {
-      timelineState.isPlaying = true;
-    }
-    timelineState.forceReload = !preserveExistingPlayback;
-    timelineState.autoFitStartHour = fitStart;
-    timelineState.autoFitEndHour = fitEnd;
-    timelineState.selectedDate = effectiveDate;
-    timelineState.setState({});
+    timelineState.setState({
+      timelineSegments: segmentsCopy,
+      currentSegmentIndex: initialSegmentIndex,
+      currentTime: initialTime,
+      prevCurrentTime: initialTime,
+      timelineWindowHours: fitWindowHours,
+      isPlaying: !preserveExistingPlayback ? true : timelineState.isPlaying,
+      forceReload: !preserveExistingPlayback,
+      autoFitStartHour: fitStart,
+      autoFitEndHour: fitEnd,
+      selectedDate: effectiveDate
+    });
 
-    if (!preserveExistingPlayback) {
-      // Safety net: retry if state didn't stick
-      setTimeout(() => {
-        if (!timelineState.currentTime || timelineState.currentSegmentIndex === -1) {
-          timelineState.setState({
-            currentSegmentIndex: initialSegmentIndex,
-            currentTime: initialTime,
-            prevCurrentTime: initialTime,
-            selectedDate: effectiveDate
-          });
-        }
-      }, 100);
-
-      // Preload the initial segment's video for this day
-      const videoPlayer = videoElementRef.current;
-      if (videoPlayer instanceof HTMLVideoElement) {
-        videoPlayer.src = `/api/recordings/play/${segmentsCopy[initialSegmentIndex].id}?t=${nowMilliseconds()}`;
-        videoPlayer.load();
+      if (!preserveExistingPlayback) {
+        // Safety net: retry if state didn't stick
+        setTimeout(() => {
+          if (!Number.isFinite(timelineState.currentTime) || timelineState.currentSegmentIndex === -1) {
+            timelineState.setState({
+              currentSegmentIndex: initialSegmentIndex,
+              currentTime: initialTime,
+              prevCurrentTime: initialTime,
+              selectedDate: effectiveDate
+            });
+          }
+        }, 100);
       }
-    }
 
-    if (successMessage) {
-      showStatusMessage(successMessage, 'success');
-    }
+      if (successMessage) {
+        showStatusMessage(successMessage, 'success');
+      }
     return true;
   }, []);
 
@@ -1192,18 +1184,6 @@ export function TimelinePage() {
             isPlaying: false,
             forceReload: true
           });
-
-          // Load the next segment's video
-          setTimeout(() => {
-            const videoEl = videoElementRef.current;
-            if (videoEl instanceof HTMLVideoElement) {
-              videoEl.pause();
-              videoEl.removeAttribute('src');
-              videoEl.load();
-              videoEl.src = `/api/recordings/play/${nextSeg.id}?t=${nowMilliseconds()}`;
-              videoEl.load();
-            }
-          }, 100);
         } else {
           timelineState.setState({
             timelineSegments: [],

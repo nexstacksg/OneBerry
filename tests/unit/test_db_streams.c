@@ -20,6 +20,7 @@
 #include "unity.h"
 #include "database/db_core.h"
 #include "database/db_streams.h"
+#include "core/config.h"
 
 #define TEST_DB_PATH "/tmp/lightnvr_unit_streams_test.db"
 
@@ -199,6 +200,24 @@ void test_stream_retention_config_round_trip(void) {
     TEST_ASSERT_EQUAL_INT(30, cfg_out.detection_retention_days);
 }
 
+void test_stream_retention_config_inherits_global_when_zero(void) {
+    int old_global_retention = g_config.retention_days;
+    g_config.retention_days = 14;
+
+    stream_config_t s = make_stream("cam_ret_global", true);
+    add_stream_config(&s);
+
+    stream_retention_config_t cfg_in = {.retention_days = 0, .detection_retention_days = 0, .max_storage_mb = 0};
+    TEST_ASSERT_EQUAL_INT(0, set_stream_retention_config("cam_ret_global", &cfg_in));
+
+    stream_retention_config_t cfg_out;
+    TEST_ASSERT_EQUAL_INT(0, get_stream_retention_config("cam_ret_global", &cfg_out));
+    TEST_ASSERT_EQUAL_INT(14, cfg_out.retention_days);
+    TEST_ASSERT_EQUAL_INT(42, cfg_out.detection_retention_days);
+
+    g_config.retention_days = old_global_retention;
+}
+
 /* ================================================================
  * get_all_stream_names
  * ================================================================ */
@@ -317,6 +336,7 @@ int main(void) {
     RUN_TEST(test_get_all_stream_configs_returns_multiple);
     RUN_TEST(test_get_enabled_stream_count);
     RUN_TEST(test_stream_retention_config_round_trip);
+    RUN_TEST(test_stream_retention_config_inherits_global_when_zero);
     RUN_TEST(test_get_all_stream_names);
     RUN_TEST(test_repair_onvif_embedded_credentials_migration_normalizes_legacy_rows);
     RUN_TEST(test_motion_trigger_source_defaults_empty);
@@ -329,4 +349,3 @@ int main(void) {
     unlink(TEST_DB_PATH);
     return result;
 }
-

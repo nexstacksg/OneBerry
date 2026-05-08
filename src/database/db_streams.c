@@ -284,7 +284,7 @@ uint64_t add_stream_config(const stream_config_t *stream) {
           "ptz_enabled, ptz_max_x, ptz_max_y, ptz_max_z, ptz_has_home, "
           "onvif_username, onvif_password, onvif_profile, onvif_port, "
           "record_on_schedule, recording_schedule, tags, admin_url, privacy_mode, motion_trigger_source) "
-          "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);";
+          "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);";
 
     rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
     if (rc != SQLITE_OK) {
@@ -1439,9 +1439,11 @@ int get_stream_retention_config(const char *stream_name, stream_retention_config
         return -1;
     }
 
-    // Set defaults
-    config->retention_days = 30;
-    config->detection_retention_days = 90;
+    // Set defaults from current global retention policy.
+    // Stream-level zero values are treated as "inherit global".
+    // Keep compatibility with existing behavior when global config is unset.
+    config->retention_days = g_config.retention_days > 0 ? g_config.retention_days : 30;
+    config->detection_retention_days = config->retention_days > 0 ? config->retention_days * 3 : 90;
     config->max_storage_mb = 0;
 
     pthread_mutex_lock(db_mutex);
@@ -1467,6 +1469,15 @@ int get_stream_retention_config(const char *stream_name, stream_retention_config
         }
         if (sqlite3_column_type(stmt, 2) != SQLITE_NULL) {
             config->max_storage_mb = (uint64_t)sqlite3_column_int64(stmt, 2);
+        }
+
+        if (config->retention_days <= 0) {
+            config->retention_days = g_config.retention_days > 0 ? g_config.retention_days : 30;
+        }
+        if (config->detection_retention_days <= 0) {
+            config->detection_retention_days = config->retention_days > 0
+                ? (config->retention_days * 3)
+                : (g_config.retention_days > 0 ? g_config.retention_days * 3 : 90);
         }
         result = 0;
     }

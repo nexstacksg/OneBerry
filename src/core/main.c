@@ -722,6 +722,13 @@ int main(int argc, char *argv[]) {
         log_error("Failed to initialize storage manager");
         goto cleanup;
     }
+
+    if (set_retention_days(config.retention_days) != 0) {
+        log_warn("Failed to apply retention days to storage manager");
+    }
+    if (set_max_storage_size(config.max_storage_size) != 0) {
+        log_warn("Failed to apply max storage size to storage manager");
+    }
     log_info("Storage manager initialized");
 
     // Start recording sync thread to ensure database file sizes are accurate

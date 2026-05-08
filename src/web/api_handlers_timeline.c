@@ -47,7 +47,7 @@ static pthread_mutex_t manifest_mutex = PTHREAD_MUTEX_INITIALIZER;
  * Get timeline segments for a specific stream and time range
  */
 int get_timeline_segments(const char *stream_name, time_t start_time, time_t end_time,
-                         timeline_segment_t *segments, int max_segments) {
+                         timeline_segment_t *segments, int max_segments, int has_detection) {
     if (!stream_name || !segments || max_segments <= 0) {
         log_error("Invalid parameters for get_timeline_segments");
         return -1;
@@ -75,7 +75,8 @@ int get_timeline_segments(const char *stream_name, time_t start_time, time_t end
      *
      * Also populate has_detection by checking trigger_type or the detections table.
      */
-    const char *sql =
+    char sql[2048] = {0};
+    const char *base_query =
         "SELECT r.id, r.stream_name, r.file_path, r.start_time, r.end_time, "
         "r.size_bytes, "
         "CASE WHEN r.trigger_type = 'detection' THEN 1 "
@@ -86,9 +87,32 @@ int get_timeline_segments(const char *stream_name, time_t start_time, time_t end
         "  AND r.end_time IS NOT NULL "
         "  AND r.stream_name = ? "
         "  AND r.start_time <= ? "
-        "  AND r.end_time   >= ? "
-        "ORDER BY r.start_time ASC "
-        "LIMIT ?;";
+        "  AND r.end_time   >= ? ";
+
+    snprintf(sql, sizeof(sql), "%s", base_query);
+
+    if (has_detection == 1) {
+        strncat(sql,
+                " AND (r.trigger_type = 'detection' "
+                "      OR EXISTS (SELECT 1 FROM detections d WHERE d.recording_id = r.id) "
+                "      OR EXISTS (SELECT 1 FROM detections d "
+                "                 WHERE d.stream_name = r.stream_name "
+                "                 AND d.timestamp >= r.start_time "
+                "                 AND d.timestamp <= r.end_time))",
+                sizeof(sql) - strlen(sql) - 1);
+    } else if (has_detection == -1) {
+        strncat(sql,
+                " AND (r.trigger_type != 'detection' OR r.trigger_type IS NULL) "
+                " AND NOT EXISTS (SELECT 1 FROM detections d WHERE d.recording_id = r.id) "
+                " AND NOT EXISTS (SELECT 1 FROM detections d "
+                "                WHERE d.stream_name = r.stream_name "
+                "                AND d.timestamp >= r.start_time "
+                "                AND d.timestamp <= r.end_time)",
+                sizeof(sql) - strlen(sql) - 1);
+    }
+
+    strncat(sql, " ORDER BY r.start_time ASC LIMIT ?;",
+            sizeof(sql) - strlen(sql) - 1);
 
     sqlite3_stmt *stmt = NULL;
     int rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
@@ -187,6 +211,8 @@ void handle_get_timeline_segments(const http_request_t *req, http_response_t *re
     char stream_name[MAX_STREAM_NAME] = {0};
     char start_time_str[64] = {0};
     char end_time_str[64] = {0};
+    char has_detection_str[16] = {0};
+    int has_detection = 0;
 
     // Extract stream parameter
     if (http_request_get_query_param(req, "stream", stream_name, sizeof(stream_name)) < 0) {
@@ -198,6 +224,17 @@ void handle_get_timeline_segments(const http_request_t *req, http_response_t *re
     // Extract start and end parameters (optional)
     http_request_get_query_param(req, "start", start_time_str, sizeof(start_time_str));
     http_request_get_query_param(req, "end", end_time_str, sizeof(end_time_str));
+    if (http_request_get_query_param(req, "has_detection", has_detection_str, sizeof(has_detection_str)) == 0) {
+        char *end_ptr = NULL;
+        long parsed_has_detection = strtol(has_detection_str, &end_ptr, 10);
+
+        if (end_ptr && *end_ptr == '\0' && (parsed_has_detection == 1 || parsed_has_detection == -1 || parsed_has_detection == 0)) {
+            has_detection = (int)parsed_has_detection;
+        } else {
+            log_warn("Invalid has_detection value: %s", has_detection_str);
+            has_detection = 0;
+        }
+    }
 
     // Parse time strings to time_t
     time_t start_time = 0;
@@ -235,7 +272,7 @@ void handle_get_timeline_segments(const http_request_t *req, http_response_t *re
         return;
     }
     
-    int count = get_timeline_segments(stream_name, start_time, end_time, segments, MAX_TIMELINE_SEGMENTS);
+    int count = get_timeline_segments(stream_name, start_time, end_time, segments, MAX_TIMELINE_SEGMENTS, has_detection);
 
     if (count < 0) {
         log_error("Failed to get timeline segments");
@@ -377,6 +414,8 @@ void handle_timeline_manifest(const http_request_t *req, http_response_t *res) {
     char stream_name[MAX_STREAM_NAME] = {0};
     char start_time_str[64] = {0};
     char end_time_str[64] = {0};
+    char has_detection_str[16] = {0};
+    int has_detection = 0;
 
     // Extract stream parameter
     if (http_request_get_query_param(req, "stream", stream_name, sizeof(stream_name)) < 0) {
@@ -388,6 +427,17 @@ void handle_timeline_manifest(const http_request_t *req, http_response_t *res) {
     // Extract start and end parameters (optional)
     http_request_get_query_param(req, "start", start_time_str, sizeof(start_time_str));
     http_request_get_query_param(req, "end", end_time_str, sizeof(end_time_str));
+    if (http_request_get_query_param(req, "has_detection", has_detection_str, sizeof(has_detection_str)) == 0) {
+        char *end_ptr = NULL;
+        long parsed_has_detection = strtol(has_detection_str, &end_ptr, 10);
+
+        if (end_ptr && *end_ptr == '\0' && (parsed_has_detection == 1 || parsed_has_detection == -1 || parsed_has_detection == 0)) {
+            has_detection = (int)parsed_has_detection;
+        } else {
+            log_warn("Invalid has_detection value: %s", has_detection_str);
+            has_detection = 0;
+        }
+    }
 
     // Parse time strings to time_t
     time_t start_time = 0;
@@ -425,7 +475,7 @@ void handle_timeline_manifest(const http_request_t *req, http_response_t *res) {
         return;
     }
 
-    int count = get_timeline_segments(stream_name, start_time, end_time, segments, MAX_TIMELINE_SEGMENTS);
+    int count = get_timeline_segments(stream_name, start_time, end_time, segments, MAX_TIMELINE_SEGMENTS, has_detection);
 
     if (count <= 0) {
         log_error("No timeline segments found for stream %s", stream_name);
@@ -462,6 +512,8 @@ void handle_timeline_playback(const http_request_t *req, http_response_t *res) {
     // Extract parameters
     char stream_name[MAX_STREAM_NAME] = {0};
     char start_time_str[64] = {0};
+    char has_detection_str[16] = {0};
+    int has_detection = 0;
 
     // Extract stream parameter
     if (http_request_get_query_param(req, "stream", stream_name, sizeof(stream_name)) < 0) {
@@ -472,6 +524,17 @@ void handle_timeline_playback(const http_request_t *req, http_response_t *res) {
 
     // Extract start parameter
     http_request_get_query_param(req, "start", start_time_str, sizeof(start_time_str));
+    if (http_request_get_query_param(req, "has_detection", has_detection_str, sizeof(has_detection_str)) == 0) {
+        char *end_ptr = NULL;
+        long parsed_has_detection = strtol(has_detection_str, &end_ptr, 10);
+
+        if (end_ptr && *end_ptr == '\0' && (parsed_has_detection == 1 || parsed_has_detection == -1 || parsed_has_detection == 0)) {
+            has_detection = (int)parsed_has_detection;
+        } else {
+            log_warn("Invalid has_detection value: %s", has_detection_str);
+            has_detection = 0;
+        }
+    }
 
     // Parse start time
     time_t start_time = 0;
@@ -508,7 +571,7 @@ void handle_timeline_playback(const http_request_t *req, http_response_t *res) {
     time_t search_start = start_time - 3600;
     time_t search_end = start_time + 3600;
 
-    int count = get_timeline_segments(stream_name, search_start, search_end, segments, MAX_TIMELINE_SEGMENTS);
+    int count = get_timeline_segments(stream_name, search_start, search_end, segments, MAX_TIMELINE_SEGMENTS, has_detection);
 
     if (count <= 0) {
         log_error("No recordings found for stream %s near time %ld", stream_name, (long)start_time);

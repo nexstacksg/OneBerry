@@ -1405,7 +1405,7 @@ int get_recordings_for_retention(const char *stream_name,
         return -1;
     }
 
-    if (!stream_name || !recordings || max_count <= 0) {
+    if (!recordings || max_count <= 0) {
         log_error("Invalid parameters for get_recordings_for_retention");
         return -1;
     }
@@ -1426,10 +1426,10 @@ int get_recordings_for_retention(const char *stream_name,
         "SELECT id, stream_name, file_path, start_time, end_time, "
         "size_bytes, width, height, fps, codec, is_complete, trigger_type, protected, retention_override_days "
         "FROM recordings "
-        "WHERE stream_name = ? "
+        "WHERE (?1 IS NULL OR stream_name = ?) "
         "AND protected = 0 "
         "AND ("
-        "  (trigger_type != 'detection' AND ? > 0 AND start_time < ?) "
+        "  ((trigger_type IS NULL OR trigger_type != 'detection') AND ? > 0 AND start_time < ?) "
         "  OR "
         "  (trigger_type = 'detection' AND ? > 0 AND start_time < ?)"
         ") "
@@ -1449,12 +1449,19 @@ int get_recordings_for_retention(const char *stream_name,
         return -1;
     }
 
-    sqlite3_bind_text(stmt, 1, stream_name, -1, SQLITE_STATIC);
-    sqlite3_bind_int(stmt, 2, retention_days);
-    sqlite3_bind_int64(stmt, 3, (sqlite3_int64)regular_cutoff);
-    sqlite3_bind_int(stmt, 4, detection_retention_days);
-    sqlite3_bind_int64(stmt, 5, (sqlite3_int64)detection_cutoff);
-    sqlite3_bind_int(stmt, 6, max_count);
+    if (stream_name) {
+        sqlite3_bind_text(stmt, 1, stream_name, -1, SQLITE_STATIC);
+        sqlite3_bind_text(stmt, 2, stream_name, -1, SQLITE_STATIC);
+    } else {
+        sqlite3_bind_null(stmt, 1);
+        sqlite3_bind_null(stmt, 2);
+    }
+
+    sqlite3_bind_int(stmt, 3, retention_days);
+    sqlite3_bind_int64(stmt, 4, (sqlite3_int64)regular_cutoff);
+    sqlite3_bind_int(stmt, 5, detection_retention_days);
+    sqlite3_bind_int64(stmt, 6, (sqlite3_int64)detection_cutoff);
+    sqlite3_bind_int(stmt, 7, max_count);
 
     while (sqlite3_step(stmt) == SQLITE_ROW && count < max_count) {
         recordings[count].id = (uint64_t)sqlite3_column_int64(stmt, 0);
@@ -1674,7 +1681,7 @@ int get_recordings_for_quota_enforcement(const char *stream_name,
         return -1;
     }
 
-    if (!stream_name || !recordings || max_count <= 0) {
+    if (!recordings || max_count <= 0) {
         log_error("Invalid parameters for get_recordings_for_quota_enforcement");
         return -1;
     }
@@ -1686,7 +1693,7 @@ int get_recordings_for_quota_enforcement(const char *stream_name,
         "SELECT id, stream_name, file_path, start_time, end_time, "
         "size_bytes, width, height, fps, codec, is_complete, trigger_type, protected, retention_override_days "
         "FROM recordings "
-        "WHERE stream_name = ? "
+        "WHERE (?1 IS NULL OR stream_name = ?) "
         "AND protected = 0 "
         "AND is_complete = 1 "
         "ORDER BY retention_tier DESC, "
@@ -1702,8 +1709,14 @@ int get_recordings_for_quota_enforcement(const char *stream_name,
         return -1;
     }
 
-    sqlite3_bind_text(stmt, 1, stream_name, -1, SQLITE_STATIC);
-    sqlite3_bind_int(stmt, 2, max_count);
+    if (stream_name) {
+        sqlite3_bind_text(stmt, 1, stream_name, -1, SQLITE_STATIC);
+        sqlite3_bind_text(stmt, 2, stream_name, -1, SQLITE_STATIC);
+    } else {
+        sqlite3_bind_null(stmt, 1);
+        sqlite3_bind_null(stmt, 2);
+    }
+    sqlite3_bind_int(stmt, 3, max_count);
 
     while (sqlite3_step(stmt) == SQLITE_ROW && count < max_count) {
         recordings[count].id = (uint64_t)sqlite3_column_int64(stmt, 0);
@@ -1769,6 +1782,130 @@ int get_recordings_for_quota_enforcement(const char *stream_name,
     sqlite3_finalize(stmt);
     pthread_mutex_unlock(db_mutex);
 
+    return count;
+}
+
+/**
+ * Get recordings for global quota enforcement.
+ * Returns oldest unprotected complete recordings first so oldest data is removed first.
+ * Protected recordings are never returned.
+ *
+ * @param recordings Array to fill with recording metadata
+ * @param max_count Maximum number of recordings to return
+ * @return Number of recordings found, or -1 on error
+ */
+int get_recordings_for_global_quota(recording_metadata_t *recordings,
+                                    int max_count) {
+    int rc;
+    sqlite3_stmt *stmt;
+    int count = 0;
+
+    sqlite3 *db = get_db_handle();
+    pthread_mutex_t *db_mutex = get_db_mutex();
+
+    if (!db) {
+        log_error("Database not initialized");
+        return -1;
+    }
+
+    if (!recordings || max_count <= 0) {
+        log_error("Invalid parameters for get_recordings_for_global_quota");
+        return -1;
+    }
+
+    pthread_mutex_lock(db_mutex);
+
+    const char *sql =
+        "SELECT id, stream_name, file_path, start_time, end_time, "
+        "size_bytes, width, height, fps, codec, is_complete, trigger_type, "
+        "protected, retention_override_days, retention_tier, disk_pressure_eligible "
+        "FROM recordings "
+        "WHERE protected = 0 "
+        "AND is_complete = 1 "
+        "ORDER BY start_time ASC "
+        "LIMIT ?;";
+
+    rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        log_error("Failed to prepare global quota cleanup query: %s", sqlite3_errmsg(db));
+        pthread_mutex_unlock(db_mutex);
+        return -1;
+    }
+
+    sqlite3_bind_int(stmt, 1, max_count);
+
+    while (sqlite3_step(stmt) == SQLITE_ROW && count < max_count) {
+        recordings[count].id = (uint64_t)sqlite3_column_int64(stmt, 0);
+
+        const char *sname = (const char *)sqlite3_column_text(stmt, 1);
+        if (sname) {
+            strncpy(recordings[count].stream_name, sname,
+                    sizeof(recordings[count].stream_name) - 1);
+            recordings[count].stream_name[sizeof(recordings[count].stream_name) - 1] = '\0';
+        } else {
+            recordings[count].stream_name[0] = '\0';
+        }
+
+        const char *fpath = (const char *)sqlite3_column_text(stmt, 2);
+        if (fpath) {
+            strncpy(recordings[count].file_path, fpath, sizeof(recordings[count].file_path) - 1);
+            recordings[count].file_path[sizeof(recordings[count].file_path) - 1] = '\0';
+        } else {
+            recordings[count].file_path[0] = '\0';
+        }
+
+        recordings[count].start_time = (time_t)sqlite3_column_int64(stmt, 3);
+        recordings[count].end_time = (sqlite3_column_type(stmt, 4) != SQLITE_NULL)
+            ? (time_t)sqlite3_column_int64(stmt, 4) : 0;
+        recordings[count].size_bytes = (uint64_t)sqlite3_column_int64(stmt, 5);
+        recordings[count].width = sqlite3_column_int(stmt, 6);
+        recordings[count].height = sqlite3_column_int(stmt, 7);
+        recordings[count].fps = sqlite3_column_int(stmt, 8);
+
+        const char *codec = (const char *)sqlite3_column_text(stmt, 9);
+        if (codec) {
+            strncpy(recordings[count].codec, codec, sizeof(recordings[count].codec) - 1);
+            recordings[count].codec[sizeof(recordings[count].codec) - 1] = '\0';
+        } else {
+            recordings[count].codec[0] = '\0';
+        }
+
+        recordings[count].is_complete = sqlite3_column_int(stmt, 10) != 0;
+
+        const char *trigger_type = (const char *)sqlite3_column_text(stmt, 11);
+        if (trigger_type) {
+            strncpy(recordings[count].trigger_type, trigger_type,
+                    sizeof(recordings[count].trigger_type) - 1);
+            recordings[count].trigger_type[sizeof(recordings[count].trigger_type) - 1] = '\0';
+        } else {
+            strncpy(recordings[count].trigger_type, "scheduled",
+                    sizeof(recordings[count].trigger_type) - 1);
+            recordings[count].trigger_type[sizeof(recordings[count].trigger_type) - 1] = '\0';
+        }
+
+        recordings[count].protected = sqlite3_column_int(stmt, 12) != 0;
+
+        if (sqlite3_column_type(stmt, 13) != SQLITE_NULL) {
+            recordings[count].retention_override_days = sqlite3_column_int(stmt, 13);
+        } else {
+            recordings[count].retention_override_days = -1;
+        }
+
+        recordings[count].retention_tier = (sqlite3_column_type(stmt, 14) != SQLITE_NULL)
+            ? sqlite3_column_int(stmt, 14)
+            : RETENTION_TIER_STANDARD;
+
+        recordings[count].disk_pressure_eligible = (sqlite3_column_type(stmt, 15) != SQLITE_NULL)
+            ? (sqlite3_column_int(stmt, 15) != 0)
+            : true;
+
+        count++;
+    }
+
+    sqlite3_finalize(stmt);
+    pthread_mutex_unlock(db_mutex);
+
+    log_debug("Found %d recordings for global quota cleanup", count);
     return count;
 }
 
