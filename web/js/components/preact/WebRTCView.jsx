@@ -480,6 +480,13 @@ export function WebRTCView() {
   // Arrow-key navigation between streams while one is in native fullscreen.
   useFullscreenGridNav(streamsToShow, cols, rows);
 
+  const gridHasEmptySlots = !isLoadingStreams
+    && !isLoading
+    && !streamsError
+    && streams.length > 0
+    && streamsToShow.length > 0
+    && streamsToShow.length < maxStreams;
+
   return (
     <section
       id="live-page"
@@ -495,7 +502,7 @@ export function WebRTCView() {
         targetId="live-page"
       />
 
-      <div className="page-header flex justify-between items-center mb-4 p-4 bg-card text-card-foreground rounded-lg shadow" style={{ position: 'relative', zIndex: 10, pointerEvents: 'auto' }}>
+      <div className="page-header live-toolbar flex justify-between items-center mb-4 p-4 bg-card text-card-foreground rounded-lg shadow" style={{ position: 'relative', zIndex: 10, pointerEvents: 'auto' }}>
         <div className="flex items-center gap-3">
           <h2 className="text-xl font-bold whitespace-nowrap">{t('live.liveView')}</h2>
           {/* View-mode tab strip: WebRTC | HLS | MSE */}
@@ -665,7 +672,7 @@ export function WebRTCView() {
       <div className="flex flex-col space-y-4 h-full">
         <div
           id="video-grid"
-          className="video-container"
+          className={`video-container ${gridHasEmptySlots ? 'is-partial-grid' : 'is-filled-grid'}`}
           style={{ '--grid-cols': cols, '--grid-rows': rows }}
         >
           {isLoadingStreams ? (
