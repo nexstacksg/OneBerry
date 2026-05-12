@@ -68,12 +68,21 @@
 }
 
 #live-page .controls > button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     width: 2.375rem;
     height: 2.375rem;
     padding: 0;
     border: 1px solid hsl(var(--border) / 0.75);
     border-radius: 0.5rem;
     box-shadow: none;
+    line-height: 0;
+}
+
+#live-page .controls > button svg {
+    display: block;
+    flex-shrink: 0;
 }
 
 .video-container {
