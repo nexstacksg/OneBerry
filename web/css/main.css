@@ -6,8 +6,8 @@
 
 /* Additional custom styles */
 .page {
-  @apply text-card-foreground rounded-xl shadow-md border border-border p-4 mb-4;
-  background: linear-gradient(155deg, hsl(var(--card) / 0.95), hsl(var(--card)) 48%, hsl(var(--background)));
+  @apply text-card-foreground rounded-lg shadow-sm border border-border p-4 mb-4;
+  background: hsl(var(--card));
 }
 
 .fullscreen-mode.page {
@@ -16,7 +16,7 @@
 
 /* Footer styles */
 footer {
-  @apply bg-card text-card-foreground py-3 px-4 flex justify-between items-center text-sm mt-4 border-t border-border;
+  @apply bg-card text-card-foreground py-3 px-4 flex justify-between items-center text-sm mt-4 border border-border rounded-lg;
 }
 
 footer a {
@@ -81,25 +81,13 @@ th {
   @apply w-full h-full object-contain;
 }
 
-/* Ensure header is always clickable */
-header, header *, nav, nav * {
+/* Ensure dashboard shell navigation is always clickable */
+.app-header, .app-header *, .sidebar-main-nav, .sidebar-main-nav * {
   pointer-events: auto !important;
 }
 
 /* Responsive adjustments */
 @media (max-width: 768px) {
-  header {
-    @apply flex-col items-start;
-  }
-
-  nav ul {
-    @apply flex-wrap mt-2;
-  }
-
-  .user-menu {
-    @apply mt-2 self-end;
-  }
-
   .page-header {
     @apply flex-col items-start;
   }
