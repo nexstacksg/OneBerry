@@ -3,14 +3,15 @@
  * Preact component for the site header
  */
 
-import { useState, useEffect, useCallback } from 'preact/hooks';
+import { useState, useEffect, useCallback, useMemo } from 'preact/hooks';
 import {VERSION} from '../../version.js';
-import { fetchJSON } from '../../query-client.js';
+import { fetchJSON, useQuery } from '../../query-client.js';
 import { getSettings } from '../../utils/settings-utils.js';
 import { showStatusMessage } from './ToastContainer.jsx';
 import { EditUserModal } from './users/EditUserModal.jsx';
 import { getAuthHeaders, isDemoMode, validateSession } from '../../utils/auth-utils.js';
 import { forceNavigation } from '../../utils/navigation-utils.js';
+import { buildBuildingTree } from '../../utils/building-hierarchy.js';
 import { useI18n } from '../../i18n.js';
 import LanguageSelector from './common/LanguageSelector.jsx';
 
@@ -84,6 +85,30 @@ const getStoredSidebarState = () => {
   }
 };
 
+const BUILDING_TREE_STORAGE_KEY = 'oneberry.dashboardBuildings';
+
+const getStoredExpandedBuildings = () => {
+  try {
+    const stored = localStorage.getItem(BUILDING_TREE_STORAGE_KEY);
+    const parsed = stored ? JSON.parse(stored) : null;
+    if (!parsed || typeof parsed !== 'object') return {};
+    return parsed;
+  } catch (error) {
+    return {};
+  }
+};
+
+const makeLiveHref = (params = {}) => {
+  const search = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== '') {
+      search.set(key, value);
+    }
+  });
+  const query = search.toString();
+  return query ? `index.html?${query}` : 'index.html';
+};
+
 const buildProfileFormData = (user = {}) => ({
   username: user.username || '',
   password: '',
@@ -116,8 +141,29 @@ export function Header({ version = VERSION }) {
   const [userRole, _setUserRole] = useState(localStorage.getItem('userrole') || null); // null = still loading
   const [sidebarState, setSidebarState] = useState(getStoredSidebarState);
   const [isDraggingSidebar, setIsDraggingSidebar] = useState(false);
+  const [expandedBuildings, setExpandedBuildings] = useState(getStoredExpandedBuildings);
   const { t } = useI18n();
   const sidebarCollapsed = sidebarState.collapsed;
+  const { data: sidebarStreams = [] } = useQuery(
+    'streams',
+    '/api/streams',
+    {
+      headers: getAuthHeaders(),
+      timeout: 15000,
+      retries: 1,
+      retryDelay: 1000,
+    },
+    {
+      refetchInterval: 30000,
+    }
+  );
+  const buildingTree = useMemo(() => buildBuildingTree(
+    Array.isArray(sidebarStreams) ? sidebarStreams : [],
+    {
+      unassignedBuilding: t('sidebar.unassignedBuilding'),
+      generalArea: t('sidebar.generalArea'),
+    }
+  ), [sidebarStreams, t]);
 
   const setUsername = (username) => {
     _setUsername(username);
@@ -230,6 +276,21 @@ export function Header({ version = VERSION }) {
       document.body.classList.remove('dashboard-sidebar-dragging');
     };
   }, [isDraggingSidebar, sidebarCollapsed, sidebarState.width]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(BUILDING_TREE_STORAGE_KEY, JSON.stringify(expandedBuildings));
+    } catch (error) {
+      // Ignore storage failures.
+    }
+  }, [expandedBuildings]);
+
+  const toggleBuildingNode = useCallback((nodeKey) => {
+    setExpandedBuildings((prevState) => ({
+      ...prevState,
+      [nodeKey]: prevState[nodeKey] === false,
+    }));
+  }, []);
 
   const handleProfileInputChange = useCallback((e) => {
     const { name, value, type, checked } = e.target;
@@ -357,20 +418,6 @@ export function Header({ version = VERSION }) {
     window.addEventListener('pointercancel', stopDragging);
   }, []);
 
-  // Special handling for Live View link to handle both index.html and root URL
-  const getLiveViewHref = () => {
-    // Check if we're on the root URL or index.html
-    const isRoot = window.location.pathname === '/' || window.location.pathname.endsWith('/');
-
-    // If we're on the root URL, stay on the root URL
-    if (isRoot) {
-      return './';
-    }
-
-    // Otherwise, default to index.html
-    return 'index.html';
-  };
-
   // Determine if the current user has admin access for nav filtering.
   // While the role is still loading (null) we conservatively show all items
   // so the nav doesn't flash/reorder after load.
@@ -381,7 +428,6 @@ export function Header({ version = VERSION }) {
   // Navigation items - don't preserve query parameters when navigating via header
   // Admin-only tabs (System, Users) are hidden from non-admin roles.
   const navItems = [
-    { id: 'nav-live', href: getLiveViewHref(), label: t('nav.live') },
     { id: 'nav-recordings', href: 'recordings.html', label: t('nav.recordings') },
     { id: 'nav-streams', href: 'streams.html', label: t('nav.streams') },
     { id: 'nav-settings', href: 'settings.html', label: t('nav.settings') },
@@ -450,6 +496,90 @@ export function Header({ version = VERSION }) {
     }, mobile);
   };
 
+  const renderBuildingTree = () => {
+    if (buildingTree.length === 0) {
+      return (
+        <div className="sidebar-building-empty">
+          {t('sidebar.noBuildings')}
+        </div>
+      );
+    }
+
+    return (
+      <ul className="sidebar-building-tree">
+        {buildingTree.map((building) => {
+          const expanded = expandedBuildings[building.key] !== false;
+          const buildingHref = building.tag ? makeLiveHref({ tag: building.tag }) : makeLiveHref();
+
+          return (
+            <li key={building.key} className="sidebar-building-node">
+              <div className="sidebar-building-row">
+                <button
+                  type="button"
+                  className="sidebar-tree-toggle"
+                  onClick={() => toggleBuildingNode(building.key)}
+                  aria-label={expanded ? t('sidebar.collapseBuilding') : t('sidebar.expandBuilding')}
+                  aria-expanded={expanded}
+                >
+                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d={expanded ? 'M4 6l4 4 4-4' : 'M6 4l4 4-4 4'} />
+                  </svg>
+                </button>
+                <a
+                  href={buildingHref}
+                  className="sidebar-building-link"
+                  title={`${building.name} (${building.cameraCount})`}
+                  onClick={(event) => forceNavigation(buildingHref, event)}
+                >
+                  <span className="sidebar-tree-label">{building.name}</span>
+                  <span className="sidebar-tree-count">{building.cameraCount}</span>
+                </a>
+              </div>
+
+              {expanded && (
+                <ul className="sidebar-area-tree">
+                  {building.areas.map((area) => {
+                    const areaHref = area.tag ? makeLiveHref({ tag: area.tag }) : buildingHref;
+                    return (
+                      <li key={area.key} className="sidebar-area-node">
+                        <a
+                          href={areaHref}
+                          className="sidebar-area-link"
+                          title={`${area.name} (${area.cameras.length})`}
+                          onClick={(event) => forceNavigation(areaHref, event)}
+                        >
+                          <span className="sidebar-tree-label">{area.name}</span>
+                          <span className="sidebar-tree-count">{area.cameras.length}</span>
+                        </a>
+                        <ul className="sidebar-camera-tree">
+                          {area.cameras.map((stream) => {
+                            const cameraHref = makeLiveHref({ cols: 1, rows: 1, stream: stream.name });
+                            return (
+                              <li key={stream.name} className="sidebar-camera-node">
+                                <a
+                                  href={cameraHref}
+                                  className="sidebar-camera-link"
+                                  title={stream.name}
+                                  onClick={(event) => forceNavigation(cameraHref, event)}
+                                >
+                                  {stream.name}
+                                </a>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    );
+  };
+
   return (
       <>
       <header className={`app-header dashboard-sidebar ${mobileMenuOpen ? 'is-mobile-open' : ''} ${sidebarCollapsed ? 'is-collapsed' : ''} ${isDraggingSidebar ? 'is-resizing' : ''}`}>
@@ -489,6 +619,9 @@ export function Header({ version = VERSION }) {
 
         <div className="sidebar-content">
           <nav className="sidebar-main-nav" aria-label="Primary navigation">
+            <div className="sidebar-section-label">{t('nav.live')}</div>
+            {renderBuildingTree()}
+
             <div className="sidebar-section-label">Workspace</div>
             <ul>
               {navItems.map((navItem) => renderNavItem(navItem, true))}

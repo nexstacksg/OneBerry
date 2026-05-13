@@ -6,6 +6,7 @@
 import { useState, useEffect, useRef, useCallback } from 'preact/hooks';
 import { ZoneEditor } from './ZoneEditor.jsx';
 import { obfuscateUrlCredentials } from '../../utils/url-utils.js';
+import { getAreaName, getBuildingName, setBuildingAreaTags } from '../../utils/building-hierarchy.js';
 import { useI18n } from '../../i18n.js';
 import { showStatusMessage } from './ToastContainer.jsx';
 import {
@@ -310,6 +311,17 @@ export function StreamConfigModal({
     && String(currentStream.detectionObjectFilterList || '').trim().toLowerCase() === 'person';
   const currentResolutionValue = formatResolutionValue(currentStream.width, currentStream.height);
   const currentFpsValue = formatFpsValue(currentStream.fps);
+  const currentBuildingName = getBuildingName(currentStream.tags || '');
+  const currentAreaName = getAreaName(currentStream.tags || '');
+  const updateLocationTags = useCallback((nextBuilding, nextArea) => {
+    onInputChange({
+      target: {
+        name: 'tags',
+        value: setBuildingAreaTags(currentStream.tags || '', nextBuilding, nextArea),
+        type: 'text',
+      },
+    });
+  }, [currentStream.tags, onInputChange]);
   const resolutionOptions = [
     { value: '', label: t('streamsConfig.autoDetected') },
     ...(currentResolutionValue && !VIDEO_RESOLUTION_PRESETS.some(option =>
@@ -554,6 +566,42 @@ export function StreamConfigModal({
                   />
                   <p className="mt-1 text-xs text-muted-foreground">
                     {t('streamsConfig.cameraAdminUrlHelpBefore')} <span className="font-mono">http://</span> {t('streamsConfig.cameraAdminUrlHelpOr')} <span className="font-mono">https://</span> {t('streamsConfig.cameraAdminUrlHelpAfter')}
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium mb-1" htmlFor="stream-building">
+                    {t('streamsConfig.building')}
+                  </label>
+                  <input
+                    type="text"
+                    id="stream-building"
+                    className="w-full px-3 py-2 border border-input rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-primary bg-background text-foreground"
+                    placeholder={t('streamsConfig.buildingPlaceholder')}
+                    value={currentBuildingName}
+                    onChange={(event) => updateLocationTags(event.target.value, currentAreaName)}
+                    maxLength={96}
+                  />
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {t('streamsConfig.buildingHelp')}
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium mb-1" htmlFor="stream-area">
+                    {t('streamsConfig.area')}
+                  </label>
+                  <input
+                    type="text"
+                    id="stream-area"
+                    className="w-full px-3 py-2 border border-input rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-primary bg-background text-foreground"
+                    placeholder={t('streamsConfig.areaPlaceholder')}
+                    value={currentAreaName}
+                    onChange={(event) => updateLocationTags(currentBuildingName, event.target.value)}
+                    maxLength={96}
+                  />
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {t('streamsConfig.areaHelp')}
                   </p>
                 </div>
 

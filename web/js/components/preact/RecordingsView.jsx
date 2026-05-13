@@ -3,7 +3,7 @@
  * Preact component for the recordings page
  */
 
-import { useState, useEffect, useRef, useContext } from 'preact/hooks';
+import { useState, useEffect, useRef, useContext, useMemo } from 'preact/hooks';
 import { useQueryClient } from '../../query-client.js';
 import { showStatusMessage } from './ToastContainer.jsx';
 import { showVideoModal, DeleteConfirmationModal, ModalContext } from './UI.jsx';
@@ -24,6 +24,7 @@ import { formatUtils } from './recordings/formatUtils.js';
 import { recordingsAPI } from './recordings/recordingsAPI.jsx';
 import { urlUtils } from './recordings/urlUtils.js';
 import { getDefaultDateRange } from '../../utils/date-utils.js';
+import { getBuildingName } from '../../utils/building-hierarchy.js';
 
 import { validateSession } from '../../utils/auth-utils.js';
 
@@ -268,6 +269,25 @@ export function RecordingsView() {
     }
   }, [streamsError]);
 
+  const effectiveRecordingFilters = useMemo(() => {
+    const selectedBuildings = filters.buildings || [];
+    if (selectedBuildings.length === 0) {
+      return filters;
+    }
+
+    const buildingStreamIds = streams
+      .filter((stream) => selectedBuildings.includes(getBuildingName(stream.tags || '')))
+      .map((stream) => stream.name);
+    const effectiveStreamIds = filters.streamIds.length > 0
+      ? filters.streamIds.filter((streamId) => buildingStreamIds.includes(streamId))
+      : buildingStreamIds;
+
+    return {
+      ...filters,
+      streamIds: effectiveStreamIds.length > 0 ? effectiveStreamIds : ['__no_stream_match__'],
+    };
+  }, [filters, streams]);
+
   // Clear thumbnail queue when component unmounts (user navigates away)
   useEffect(() => {
     return () => {
@@ -302,6 +322,10 @@ export function RecordingsView() {
     const serializedStreams = urlUtils.serializeMultiValueParam(filters.streamIds);
     if (serializedStreams) url.searchParams.set('stream', serializedStreams);
     else url.searchParams.delete('stream');
+
+    const serializedBuildings = urlUtils.serializeMultiValueParam(filters.buildings || []);
+    if (serializedBuildings) url.searchParams.set('building', serializedBuildings);
+    else url.searchParams.delete('building');
 
     if (filters.recordingType === 'detection') url.searchParams.set('detection', '1');
     else if (filters.recordingType === 'no_detection') url.searchParams.set('detection', '-1');
@@ -374,7 +398,7 @@ export function RecordingsView() {
     data: recordingsData,
     isLoading: isLoadingRecordings,
     error: recordingsError
-  } = recordingsAPI.hooks.useRecordings(filters, pagination, sortField, sortDirection);
+  } = recordingsAPI.hooks.useRecordings(effectiveRecordingFilters, pagination, sortField, sortDirection);
 
   // Update recordings state when data is loaded
   useEffect(() => {
@@ -564,6 +588,12 @@ export function RecordingsView() {
         setFilters(prev => ({
           ...prev,
           streamIds: value ? urlUtils.removeMultiValue(prev.streamIds, value) : []
+        }));
+        break;
+      case 'buildings':
+        setFilters(prev => ({
+          ...prev,
+          buildings: value ? urlUtils.removeMultiValue(prev.buildings || [], value) : []
         }));
         break;
       case 'recordingType':
