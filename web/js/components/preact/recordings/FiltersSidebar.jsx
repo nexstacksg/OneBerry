@@ -3,11 +3,12 @@
  * Collapsible sidebar with accordion-style filter sections
  */
 
-import { useState, useEffect } from 'preact/hooks';
+import { useState, useEffect, useMemo } from 'preact/hooks';
 import { recordingsAPI } from './recordingsAPI.jsx';
 import { formatUtils } from './formatUtils.js';
 import { urlUtils } from './urlUtils.js';
 import { useI18n } from '../../../i18n.js';
+import { getBuildingName } from '../../../utils/building-hierarchy.js';
 
 /** Small reusable accordion section for filter groups */
 function FilterSection({ title, badge, isExpanded, onToggle, children }) {
@@ -67,6 +68,7 @@ function SelectedValues({ values, onRemove, formatValue = (value) => value, empt
 
 const DEFAULT_SECTIONS = {
   dateRange: true,
+  building: true,
   stream: true,
   recordingType: true,
   detectionObject: false,
@@ -105,6 +107,14 @@ export function FiltersSidebar({
 
   const [availableDetectionLabels, setAvailableDetectionLabels] = useState([]);
   const [availableTags, setAvailableTags] = useState([]);
+  const availableBuildings = useMemo(() => {
+    const buildings = new Set();
+    streams.forEach((stream) => {
+      const building = getBuildingName(stream.tags || '');
+      if (building) buildings.add(building);
+    });
+    return Array.from(buildings).sort();
+  }, [streams]);
 
   useEffect(() => {
     recordingsAPI.getAllRecordingTags().then(setAvailableTags);
@@ -209,6 +219,31 @@ export function FiltersSidebar({
               </div>
             )}
           </FilterSection>
+
+          {availableBuildings.length > 0 && (
+            <FilterSection title={t('sidebar.buildings')} badge={getCountBadge(filters.buildings || [])} isExpanded={sections.building} onToggle={() => toggleSection('building')}>
+              <select
+                id="building-filter"
+                className="w-full p-2 text-sm border border-input rounded-md bg-background text-foreground"
+                defaultValue=""
+                onChange={(e) => {
+                  if (e.target.value) addMultiFilterValue('buildings', e.target.value);
+                  e.target.value = '';
+                }}
+              >
+                <option value="">{t('live.allBuildings')}</option>
+                {availableBuildings.map((building) => (
+                  <option key={building} value={building}>{building}</option>
+                ))}
+              </select>
+              <SelectedValues
+                values={filters.buildings || []}
+                onRemove={(value) => removeMultiFilterValue('buildings', value)}
+                emptyText={t('recordings.noBuildingFiltersSelected')}
+                t={t}
+              />
+            </FilterSection>
+          )}
 
           <FilterSection title={t('nav.streams')} badge={getCountBadge(filters.streamIds)} isExpanded={sections.stream} onToggle={() => toggleSection('stream')}>
             <select

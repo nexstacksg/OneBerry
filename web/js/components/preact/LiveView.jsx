@@ -14,6 +14,7 @@ import { FullscreenTimelineOverlay } from './FullscreenTimelineOverlay.jsx';
 import { isGo2rtcEnabled } from '../../utils/settings-utils.js';
 import { useCameraOrder } from './useCameraOrder.js';
 import { GridPicker, computeOptimalGrid, MAX_GRID_CELLS } from './GridPicker.jsx';
+import { buildBuildingTree } from '../../utils/building-hierarchy.js';
 import { useI18n } from '../../i18n.js';
 
 /**
@@ -376,14 +377,21 @@ export function LiveView({isWebRTCDisabled}) {
     localStorage.setItem('lightnvr-show-detections', String(showDetections));
   }, [tagFilter, showLabels, showControls, showDetections]);
 
-  // Derive unique tags from all streams for the filter dropdown
-  const availableTags = useMemo(() => {
-    const tags = new Set();
-    streams.forEach(s => {
-      if (s.tags) s.tags.split(',').forEach(t => { const v = t.trim(); if (v) tags.add(v); });
-    });
-    return Array.from(tags).sort();
-  }, [streams]);
+  const buildingTree = useMemo(() => buildBuildingTree(
+    streams,
+    {
+      unassignedBuilding: t('sidebar.unassignedBuilding'),
+      generalArea: t('sidebar.generalArea'),
+    }
+  ).filter((building) => building.tag), [streams, t]);
+  const selectedBuilding = useMemo(() => {
+    if (!tagFilter) return null;
+    return buildingTree.find((building) => (
+      building.tag === tagFilter || building.areas.some((area) => area.tag === tagFilter)
+    )) || null;
+  }, [buildingTree, tagFilter]);
+  const selectedAreaTag = selectedBuilding?.areas.some((area) => area.tag === tagFilter) ? tagFilter : '';
+  const selectedBuildingTag = selectedBuilding?.tag || '';
 
   // Apply tag filter before passing to the order hook
   const tagFilteredStreams = useMemo(() => {
@@ -551,17 +559,36 @@ export function LiveView({isWebRTCDisabled}) {
           </div>
         </div>
         <div className="controls flex items-center space-x-2">
-          {availableTags.length > 0 && (
+          {buildingTree.length > 0 && (
             <div className="flex items-center gap-1.5">
-              <label htmlFor="tag-filter" className="text-sm whitespace-nowrap">{t('recordings.tags')}:</label>
+              <label htmlFor="building-filter" className="text-sm whitespace-nowrap">{t('sidebar.buildings')}:</label>
               <select
-                id="tag-filter"
+                id="building-filter"
                 className="px-3 py-2 border border-border rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-primary bg-background text-foreground"
-                value={tagFilter}
+                value={selectedBuildingTag}
                 onChange={(e) => { setTagFilter(e.target.value); setCurrentPage(0); }}
               >
-                <option value="">{t('live.allTags')}</option>
-                {availableTags.map(t => <option key={t} value={t}>#{t}</option>)}
+                <option value="">{t('live.allBuildings')}</option>
+                {buildingTree.map((building) => (
+                  <option key={building.key} value={building.tag}>{building.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {selectedBuilding?.areas?.some((area) => area.tag) && (
+            <div className="flex items-center gap-1.5">
+              <label htmlFor="area-filter" className="text-sm whitespace-nowrap">{t('streamsConfig.area')}:</label>
+              <select
+                id="area-filter"
+                className="px-3 py-2 border border-border rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-primary bg-background text-foreground"
+                value={selectedAreaTag}
+                onChange={(e) => { setTagFilter(e.target.value || selectedBuildingTag); setCurrentPage(0); }}
+              >
+                <option value="">{t('live.allAreas')}</option>
+                {selectedBuilding.areas.filter((area) => area.tag).map((area) => (
+                  <option key={area.key} value={area.tag}>{area.name}</option>
+                ))}
               </select>
             </div>
           )}

@@ -70,6 +70,7 @@ const createDefaultFilters = () => {
     endDate,
     endTime: '23:59',
     streamIds: [],
+    buildings: [],
     recordingType: 'all',
     detectionLabels: [],
     tags: [],
@@ -104,6 +105,7 @@ export const urlUtils = {
         !urlParams.has('sort') &&
         !urlParams.has('detection') &&
         !urlParams.has('stream') &&
+        !urlParams.has('building') &&
         !urlParams.has('detection_label') &&
         !urlParams.has('tag') &&
         !urlParams.has('capture_method') &&
@@ -144,6 +146,10 @@ export const urlUtils = {
     // Stream
     if (urlParams.has('stream')) {
       result.filters.streamIds = parseMultiValueParam(urlParams.get('stream'));
+    }
+
+    if (urlParams.has('building')) {
+      result.filters.buildings = parseMultiValueParam(urlParams.get('building'));
     }
     
     // Recording type
@@ -208,6 +214,7 @@ export const urlUtils = {
     const hasFilters = (
       filters.dateRange !== 'last7days' ||
       filters.streamIds.length > 0 ||
+      (filters.buildings || []).length > 0 ||
       filters.recordingType !== 'all' ||
       filters.detectionLabels.length > 0 ||
       filters.tags.length > 0 ||
@@ -239,6 +246,10 @@ export const urlUtils = {
       // Stream filter
       filters.streamIds.forEach((streamId) => {
         activeFilters.push({ key: 'streamIds', value: streamId, label: `Stream: ${streamId}` });
+      });
+
+      (filters.buildings || []).forEach((building) => {
+        activeFilters.push({ key: 'buildings', value: building, label: `Building: ${building}` });
       });
       
       // Recording type filter
