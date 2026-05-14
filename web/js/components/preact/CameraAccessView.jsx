@@ -4,7 +4,7 @@
  * and user allowed_tags fields.
  */
 
-import { useEffect, useMemo, useState, useCallback } from 'preact/hooks';
+import { useEffect, useMemo, useState, useCallback, useRef } from 'preact/hooks';
 import { showStatusMessage } from './ToastContainer.jsx';
 import { ContentLoader } from './LoadingIndicator.jsx';
 import { useMutation, useQuery, fetchJSON } from '../../query-client.js';
@@ -384,6 +384,7 @@ export function CameraAccessView() {
   const [searchTerm, setSearchTerm] = useState('');
   const [editorState, setEditorState] = useState(null);
   const [selectedGroupKey, setSelectedGroupKey] = useState(null);
+  const handledInitialActionRef = useRef(false);
 
   const getAuthHeaders = useCallback(() => {
     const auth = localStorage.getItem('auth');
@@ -690,6 +691,32 @@ export function CameraAccessView() {
   const isLoading = streamsLoading || usersLoading || roleLoading;
   const isAuthError = (streamsError || usersError) && (streamsError?.status === 401 || streamsError?.status === 403 || usersError?.status === 401 || usersError?.status === 403);
   const hasFatalError = (streamsError || usersError) && streams.length === 0 && users.length === 0;
+
+  useEffect(() => {
+    if (handledInitialActionRef.current || isLoading || !canManageAccess) {
+      return;
+    }
+
+    const params = new URLSearchParams(window.location.search);
+    const tab = params.get('tab');
+    const action = params.get('action');
+
+    if (tab === 'user') {
+      setActiveTab('user');
+    }
+
+    if (tab === 'user' && action === 'create') {
+      handledInitialActionRef.current = true;
+      setEditorState({
+        mode: 'user',
+        initialGroupTag: '',
+        initialSelectedIds: [],
+      });
+      return;
+    }
+
+    handledInitialActionRef.current = true;
+  }, [canManageAccess, isLoading]);
 
   if (isLoading && streams.length === 0 && users.length === 0) {
     return <ContentLoader isLoading hasData={false} loadingMessage={t('common.loadingData')} />;

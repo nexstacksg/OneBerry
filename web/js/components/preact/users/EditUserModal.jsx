@@ -3,6 +3,7 @@
  */
 
 import { USER_ROLE_KEYS } from './UserRoles.js';
+import { formatAccessTag } from './userGroups.js';
 import { useEffect, useRef } from 'preact/hooks';
 import { useI18n } from '../../../i18n.js';
 
@@ -254,7 +255,7 @@ ${t('users.allowedLoginCidrsPlaceholderTail')}`;
           {showAllowedTagsField && (
             <div className="mb-4">
               <label className="block text-sm font-bold mb-2" htmlFor="allowed_tags">
-                {t('users.allowedStreamTags')} <span className="font-normal text-muted-foreground">(RBAC)</span>
+                {t('users.userGroups')}
               </label>
               <input
                 className="w-full px-3 py-2 border border-input rounded-md bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
@@ -273,7 +274,7 @@ ${t('users.allowedLoginCidrsPlaceholderTail')}`;
                 <div className="mt-2 flex flex-wrap gap-1">
                   {(formData.allowed_tags || '').split(',').filter(t => t.trim()).map(tag => (
                     <span key={tag.trim()} className="badge-info">
-                      #{tag.trim()}
+                      {formatAccessTag(tag.trim())}
                     </span>
                   ))}
                 </div>

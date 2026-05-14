@@ -3,7 +3,7 @@
  * Preact component for the user management page
  */
 
-import { useState, useCallback } from 'preact/hooks';
+import { useState, useCallback, useEffect, useMemo } from 'preact/hooks';
 import { showStatusMessage } from './ToastContainer.jsx';
 import { useQuery, useMutation, fetchJSON } from '../../query-client.js';
 import { useI18n } from '../../i18n.js';
@@ -11,11 +11,13 @@ import { useI18n } from '../../i18n.js';
 // Import user components
 
 import { UsersTable } from './users/UsersTable.jsx';
+import { UserGroupsPanel } from './users/UserGroupsPanel.jsx';
 import { AddUserModal } from './users/AddUserModal.jsx';
 import { EditUserModal } from './users/EditUserModal.jsx';
 import { DeleteUserModal } from './users/DeleteUserModal.jsx';
 import { ApiKeyModal } from './users/ApiKeyModal.jsx';
 import { TotpSetupModal } from './users/TotpSetupModal.jsx';
+import { ALL_USERS_GROUP_KEY, deriveUserGroups, userMatchesGroup } from './users/userGroups.js';
 
 /**
  * UsersView component
@@ -30,6 +32,7 @@ export function UsersView() {
   // State for selected user and API key
   const [selectedUser, setSelectedUser] = useState(null);
   const [apiKey, setApiKey] = useState('');
+  const [selectedUserGroup, setSelectedUserGroup] = useState(ALL_USERS_GROUP_KEY);
 
   // Form state for adding/editing users
   const [formData, setFormData] = useState({
@@ -72,6 +75,28 @@ export function UsersView() {
 
   // Extract users array from response
   const users = usersData?.users || [];
+  const userGroups = useMemo(() => deriveUserGroups(users), [users]);
+  const filteredUsers = useMemo(
+    () => users.filter((user) => userMatchesGroup(user, selectedUserGroup)),
+    [users, selectedUserGroup]
+  );
+  const activeUserCount = useMemo(
+    () => users.filter((user) => user.is_active).length,
+    [users]
+  );
+  const adminUserCount = useMemo(
+    () => users.filter((user) => Number(user.role) === 0).length,
+    [users]
+  );
+
+  useEffect(() => {
+    if (
+      selectedUserGroup !== ALL_USERS_GROUP_KEY &&
+      !userGroups.some((group) => group.key === selectedUserGroup)
+    ) {
+      setSelectedUserGroup(ALL_USERS_GROUP_KEY);
+    }
+  }, [selectedUserGroup, userGroups]);
 
   const renderPageHeader = (actionButton = null) => (
     <div className="page-header flex justify-between items-center mb-4 p-4 bg-card text-card-foreground rounded-lg shadow">
@@ -460,6 +485,7 @@ export function UsersView() {
             formData={formData}
             handleInputChange={handleInputChange}
             handleAddUser={handleAddUser}
+            userGroups={userGroups}
             onClose={closeModal}
           />
         )}
@@ -479,8 +505,17 @@ export function UsersView() {
         </button>
       )}
 
+      <UserGroupsPanel
+        groups={userGroups}
+        totalUsers={users.length}
+        activeUserCount={activeUserCount}
+        adminUserCount={adminUserCount}
+        selectedGroup={selectedUserGroup}
+        onSelectGroup={setSelectedUserGroup}
+      />
+
       <UsersTable
-        users={users}
+        users={filteredUsers}
         onEdit={openEditModal}
         onDelete={openDeleteModal}
         onApiKey={openApiKeyModal}
@@ -492,6 +527,7 @@ export function UsersView() {
           formData={formData}
           handleInputChange={handleInputChange}
           handleAddUser={handleAddUser}
+          userGroups={userGroups}
           onClose={closeModal}
         />
       )}
