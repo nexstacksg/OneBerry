@@ -4,6 +4,7 @@
 
 import { useState, useMemo, useCallback } from 'preact/hooks';
 import { getUserRoleLabel } from './UserRoles.js';
+import { getUserGroupLabels } from './userGroups.js';
 import { formatLocalDateTime } from '../../../utils/date-utils.js';
 import { useI18n } from '../../../i18n.js';
 
@@ -52,6 +53,9 @@ export function UsersTable({ users, onEdit, onDelete, onApiKey, onMfa }) {
       } else if (sortColumn === 'role') {
         aVal = a.role ?? 0;
         bVal = b.role ?? 0;
+      } else if (sortColumn === 'group') {
+        aVal = getUserGroupLabels(a).join(', ').toLowerCase();
+        bVal = getUserGroupLabels(b).join(', ').toLowerCase();
       } else if (sortColumn === 'status') {
         aVal = a.is_active ? 1 : 0;
         bVal = b.is_active ? 1 : 0;
@@ -108,6 +112,7 @@ export function UsersTable({ users, onEdit, onDelete, onApiKey, onMfa }) {
               { key: 'username',  label: t('fields.username') },
               { key: 'email',     label: t('fields.email') },
               { key: 'role',      label: t('fields.role') },
+              { key: 'group',     label: t('users.userGroup') },
               { key: 'status',    label: t('users.status') },
               { key: 'password',  label: t('fields.password') },
               { key: 'mfa',       label: 'MFA' },
@@ -144,6 +149,15 @@ export function UsersTable({ users, onEdit, onDelete, onApiKey, onMfa }) {
               <td className="py-3 px-6 border-b border-border">{user.username ?? '-'}</td>
               <td className="py-3 px-6 border-b border-border">{user.email || '-'}</td>
               <td className="py-3 px-6 border-b border-border">{getUserRoleLabel(t, user.role)}</td>
+              <td className="py-3 px-6 border-b border-border">
+                <div className="flex max-w-[18rem] flex-wrap gap-1">
+                  {getUserGroupLabels(user).map((group) => (
+                    <span key={group} className="badge-info text-xs">
+                      {group}
+                    </span>
+                  ))}
+                </div>
+              </td>
               <td className="py-3 px-6 border-b border-border">
                 <span className={`inline-block px-2 py-1 text-xs font-semibold rounded-full ${user.is_active ? 'badge-success' : 'badge-danger'}`}>
                   {user.is_active ? t('users.active') : t('users.inactive')}

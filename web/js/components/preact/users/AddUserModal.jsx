@@ -3,7 +3,8 @@
  */
 
 import { USER_ROLE_KEYS, getUserRoleLabel } from './UserRoles.js';
-import { useEffect, useRef } from 'preact/hooks';
+import { UNRESTRICTED_GROUP_KEY, formatAccessTag } from './userGroups.js';
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { useI18n } from '../../../i18n.js';
 
 const FOCUSABLE_SELECTORS = [
@@ -21,6 +22,8 @@ const INPUT_CLASS = 'w-full rounded-2xl border border-input bg-background px-4 p
 const SELECT_CLASS = `${INPUT_CLASS} appearance-none`;
 const TEXTAREA_CLASS = `${INPUT_CLASS} min-h-[144px] resize-y font-mono text-[13px] leading-6`;
 const CHECKBOX_CLASS = 'mt-1 h-4 w-4 rounded border-border text-primary focus:ring-primary';
+const normalizeGroupName = (value) => value.trim().replace(/,/g, ' ').replace(/\s+/g, ' ');
+const joinGroupTags = (tags) => tags.filter(Boolean).join(', ');
 const ROLE_DETAILS = {
   0: 'Full administrative access across users, streams, recordings, and system settings.',
   1: 'Standard operator access for day-to-day monitoring and user workflows.',
@@ -87,6 +90,164 @@ function ToggleCard({ id, name, checked, onChange, label, description }) {
   );
 }
 
+function UserGroupPicker({ groups, selectedTags, onChange }) {
+  const { t } = useI18n();
+  const [newGroupName, setNewGroupName] = useState('');
+
+  const availableGroups = useMemo(() => {
+    const seen = new Set();
+    return (Array.isArray(groups) ? groups : [])
+      .filter((group) => group?.key && group.key !== UNRESTRICTED_GROUP_KEY)
+      .filter((group) => {
+        if (seen.has(group.key)) return false;
+        seen.add(group.key);
+        return true;
+      });
+  }, [groups]);
+
+  const selectedSet = useMemo(() => new Set(selectedTags), [selectedTags]);
+  const customSelectedTags = selectedTags.filter(
+    (tag) => !availableGroups.some((group) => group.key === tag)
+  );
+
+  const updateTags = (nextTags) => {
+    onChange(Array.from(new Set(nextTags.map(normalizeGroupName).filter(Boolean))));
+  };
+
+  const toggleGroup = (tag) => {
+    if (selectedSet.has(tag)) {
+      updateTags(selectedTags.filter((item) => item !== tag));
+      return;
+    }
+    updateTags([...selectedTags, tag]);
+  };
+
+  const handleAddGroup = () => {
+    const normalized = normalizeGroupName(newGroupName);
+    if (!normalized) return;
+    updateTags([...selectedTags, normalized]);
+    setNewGroupName('');
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded-2xl border border-border bg-muted/15 p-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <div className="text-sm font-semibold text-foreground">{t('users.selectExistingGroups')}</div>
+            <p className="mt-1 text-xs leading-5 text-muted-foreground">{t('users.selectExistingGroupsHelp')}</p>
+          </div>
+          {selectedTags.length > 0 && (
+            <button type="button" className="btn-secondary text-sm" onClick={() => updateTags([])}>
+              {t('users.clearUserGroups')}
+            </button>
+          )}
+        </div>
+
+        {availableGroups.length > 0 ? (
+          <div className="mt-4 grid gap-2 sm:grid-cols-2">
+            {availableGroups.map((group) => {
+              const selected = selectedSet.has(group.key);
+              return (
+                <button
+                  key={group.key}
+                  type="button"
+                  className={`rounded-2xl border px-3 py-3 text-left transition ${
+                    selected
+                      ? 'border-primary bg-primary/10 text-foreground shadow-sm'
+                      : 'border-border bg-card hover:border-primary/30 hover:bg-background'
+                  }`}
+                  onClick={() => toggleGroup(group.key)}
+                  aria-pressed={selected}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-semibold">{group.label || formatAccessTag(group.key)}</div>
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        {t('users.groupUserCount', { count: group.users?.length || 0 })}
+                      </div>
+                    </div>
+                    <span className={`inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full border ${
+                      selected ? 'border-primary bg-primary text-primary-foreground' : 'border-border bg-background'
+                    }`}>
+                      {selected && (
+                        <svg className="h-3 w-3" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2.2">
+                          <path d="M3.5 8.25 6.5 11 12.5 5" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                      )}
+                    </span>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="mt-4 rounded-xl border border-dashed border-border bg-background px-4 py-3 text-sm text-muted-foreground">
+            {t('users.noExistingGroups')}
+          </div>
+        )}
+      </div>
+
+      <div className="rounded-2xl border border-border bg-background/80 p-4">
+        <label className="block text-sm font-semibold text-foreground" htmlFor="new-user-group">
+          {t('users.createUserGroupInline')}
+        </label>
+        <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+          <input
+            id="new-user-group"
+            className={INPUT_CLASS}
+            type="text"
+            value={newGroupName}
+            onInput={(e) => setNewGroupName(e.currentTarget.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                handleAddGroup();
+              }
+            }}
+            placeholder={t('users.newUserGroupPlaceholder')}
+            maxLength={64}
+            autoComplete="off"
+          />
+          <button type="button" className="btn-secondary whitespace-nowrap" onClick={handleAddGroup}>
+            {t('users.addGroup')}
+          </button>
+        </div>
+        <p className="mt-2 text-xs leading-5 text-muted-foreground">{t('users.createUserGroupInlineHelp')}</p>
+      </div>
+
+      <div className="rounded-2xl border border-border bg-card p-4">
+        <div className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+          {t('users.selectedUserGroups')}
+        </div>
+        {selectedTags.length > 0 ? (
+          <div className="mt-3 flex flex-wrap gap-2">
+            {selectedTags.map((tag) => (
+              <button
+                key={tag}
+                type="button"
+                className="inline-flex items-center gap-1.5 rounded-full border border-primary/20 bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary"
+                onClick={() => updateTags(selectedTags.filter((item) => item !== tag))}
+                title={t('users.removeGroup')}
+              >
+                {formatAccessTag(tag)}
+                <span aria-hidden="true">x</span>
+              </button>
+            ))}
+          </div>
+        ) : (
+          <p className="mt-2 text-sm text-muted-foreground">{t('users.allCamerasAccess')}</p>
+        )}
+        {customSelectedTags.length > 0 && (
+          <p className="mt-3 text-xs text-muted-foreground">
+            {t('users.customGroupsSelected', { count: customSelectedTags.length })}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /**
  * Add User Modal Component
  * @param {Object} props - Component props
@@ -96,7 +257,7 @@ function ToggleCard({ id, name, checked, onChange, label, description }) {
  * @param {Function} props.onClose - Function to close the modal
  * @returns {JSX.Element} Add user modal
  */
-export function AddUserModal({ formData, handleInputChange, handleAddUser, onClose }) {
+export function AddUserModal({ formData, handleInputChange, handleAddUser, onClose, userGroups = [] }) {
   const dialogRef = useRef(null);
   const firstFieldRef = useRef(null);
   const backdropPointerDownRef = useRef(false);
@@ -112,6 +273,16 @@ ${t('users.allowedLoginCidrsPlaceholderTail')}`;
     .split(',')
     .map((tag) => tag.trim())
     .filter(Boolean);
+
+  const handleUserGroupsChange = (nextTags) => {
+    handleInputChange({
+      target: {
+        name: 'allowed_tags',
+        type: 'text',
+        value: joinGroupTags(nextTags),
+      },
+    });
+  };
 
   const parsedAllowedCidrs = (formData.allowed_login_cidrs || '')
     .split(/[\n,]+/)
@@ -285,39 +456,20 @@ ${t('users.allowedLoginCidrsPlaceholderTail')}`;
 
                   <SectionCard
                     eyebrow="Access"
-                    title="Visibility and login policy"
-                    description="Scope this account to specific cameras and trusted networks when needed."
+                    title="User groups and login policy"
+                    description="Assign camera-access groups and trusted networks when this account should not see everything."
                   >
                     <div className="space-y-5">
                       <FieldBlock
-                        htmlFor="allowed_tags"
-                        label={`${t('users.allowedStreamTags')} (RBAC)`}
+                        htmlFor="new-user-group"
+                        label={t('users.userGroups')}
                         hint={t('users.allowedTagsHelp')}
                       >
-                        <div>
-                          <input
-                            className={INPUT_CLASS}
-                            id="allowed_tags"
-                            type="text"
-                            name="allowed_tags"
-                            value={formData.allowed_tags || ''}
-                            onChange={handleInputChange}
-                            placeholder={t('users.allowedTagsPlaceholder')}
-                            maxLength={255}
-                          />
-                          {parsedAllowedTags.length > 0 ? (
-                            <div className="mt-3 flex flex-wrap gap-2" role="list" aria-label={t('users.currentAllowedStreamTags')}>
-                              {parsedAllowedTags.map((tag) => (
-                                <span
-                                  key={tag}
-                                  className="inline-flex items-center rounded-full border border-primary/20 bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary"
-                                >
-                                  #{tag}
-                                </span>
-                              ))}
-                            </div>
-                          ) : null}
-                        </div>
+                        <UserGroupPicker
+                          groups={userGroups}
+                          selectedTags={parsedAllowedTags}
+                          onChange={handleUserGroupsChange}
+                        />
                       </FieldBlock>
 
                       <FieldBlock

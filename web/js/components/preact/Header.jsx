@@ -34,6 +34,9 @@ const navIcons = {
   'nav-users': (
     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M9.25 11.25a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm-5 7.5a5 5 0 0 1 10 0m.5-13a2.75 2.75 0 0 1 0 5.5m1.75 7.5a4.25 4.25 0 0 0-2.25-3.75" />
   ),
+  'nav-user-groups': (
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M8.75 10.75a2.75 2.75 0 1 0 0-5.5 2.75 2.75 0 0 0 0 5.5Zm-4.5 7.5a4.5 4.5 0 0 1 9 0m3-10.5v5m-2.5-2.5h5m-3.25 8a3.75 3.75 0 0 0-2.25-3.25" />
+  ),
   'nav-system': (
     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M5.75 7.25a2 2 0 0 1 2-2h8.5a2 2 0 0 1 2 2v5.5a2 2 0 0 1-2 2h-8.5a2 2 0 0 1-2-2v-5.5Zm3.5 11.5h5.5M12 14.75v4m-3.5-9.5h.01m3.49 0h3.5" />
   ),
@@ -487,6 +490,15 @@ export function Header({ version = VERSION }) {
     }, mobile);
   };
 
+  const renderCreateUserGroup = (mobile = false) => {
+    return renderNavItem({
+      id: 'nav-user-groups',
+      href: 'camera-access.html?tab=user&action=create',
+      title: t('cameraAccess.createUserGroup'),
+      label: t('cameraAccess.newUserGroup'),
+    }, mobile);
+  };
+
   const renderLoginLogout = (login = false, mobile = false) => {
     return renderNavItem({
       id: login ? 'nav-login' : 'nav-logout',
@@ -638,6 +650,7 @@ export function Header({ version = VERSION }) {
             </div>
             <ul className="sidebar-user-actions">
               {renderUsername(true)}
+              {isAdmin && renderCreateUserGroup(true)}
               {authEnabled && (
                 demoMode && !localStorage.getItem('auth') ? renderLoginLogout(true, true) : renderLoginLogout(false, true)
               )}
