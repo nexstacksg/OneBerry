@@ -72,9 +72,38 @@ export const COLOR_THEMES = {
 };
 
 const VISIBLE_THEME_IDS = ['default', 'oneberry'];
+const SIDEBAR_STORAGE_KEY = 'oneberry.dashboardSidebar';
+const SIDEBAR_EXPANDED_WIDTH_REM = 17;
+const SIDEBAR_COLLAPSED_WIDTH_REM = 5.25;
+const SIDEBAR_MIN_WIDTH_REM = 14;
+const SIDEBAR_MAX_WIDTH_REM = 22;
 
 function resolveVisibleThemeId(colorTheme) {
   return VISIBLE_THEME_IDS.includes(colorTheme) ? colorTheme : 'default';
+}
+
+function clampSidebarWidth(width) {
+  if (!Number.isFinite(width)) return SIDEBAR_EXPANDED_WIDTH_REM;
+  return Math.min(SIDEBAR_MAX_WIDTH_REM, Math.max(SIDEBAR_MIN_WIDTH_REM, width));
+}
+
+function applyStoredSidebarLayout() {
+  try {
+    const stored = localStorage.getItem(SIDEBAR_STORAGE_KEY);
+    if (!stored) {
+      document.documentElement.style.setProperty('--dashboard-sidebar-width', `${SIDEBAR_EXPANDED_WIDTH_REM}rem`);
+      return;
+    }
+
+    const parsed = JSON.parse(stored);
+    const width = parsed?.collapsed === true
+      ? SIDEBAR_COLLAPSED_WIDTH_REM
+      : clampSidebarWidth(Number(parsed?.width));
+
+    document.documentElement.style.setProperty('--dashboard-sidebar-width', `${width}rem`);
+  } catch (error) {
+    document.documentElement.style.setProperty('--dashboard-sidebar-width', `${SIDEBAR_EXPANDED_WIDTH_REM}rem`);
+  }
 }
 
 /**
@@ -183,6 +212,8 @@ export function applyThemeColors(isDark, colorTheme, colorIntensity) {
  */
 export function initTheme() {
   try {
+    applyStoredSidebarLayout();
+
     const savedColorIntensity = localStorage.getItem('lightnvr-color-intensity');
     const savedColorTheme = localStorage.getItem('lightnvr-color-theme');
     const colorTheme = resolveVisibleThemeId(savedColorTheme);
@@ -204,6 +235,7 @@ export function initTheme() {
   } catch (e) {
     console.warn('Theme initialization failed:', e);
     document.documentElement.classList.remove('dark');
+    applyStoredSidebarLayout();
   }
 }
 
@@ -216,6 +248,32 @@ export function getThemeInitScript() {
 (function() {
   try {
     const COLOR_THEMES = ${JSON.stringify(COLOR_THEMES)};
+    const SIDEBAR_STORAGE_KEY = ${JSON.stringify(SIDEBAR_STORAGE_KEY)};
+    const SIDEBAR_EXPANDED_WIDTH_REM = ${SIDEBAR_EXPANDED_WIDTH_REM};
+    const SIDEBAR_COLLAPSED_WIDTH_REM = ${SIDEBAR_COLLAPSED_WIDTH_REM};
+    const SIDEBAR_MIN_WIDTH_REM = ${SIDEBAR_MIN_WIDTH_REM};
+    const SIDEBAR_MAX_WIDTH_REM = ${SIDEBAR_MAX_WIDTH_REM};
+    const applyStoredSidebarLayout = function() {
+      try {
+        const stored = localStorage.getItem(SIDEBAR_STORAGE_KEY);
+        if (!stored) {
+          document.documentElement.style.setProperty('--dashboard-sidebar-width', SIDEBAR_EXPANDED_WIDTH_REM + 'rem');
+          return;
+        }
+
+        const parsed = JSON.parse(stored);
+        const storedWidth = Number(parsed && parsed.width);
+        const clampedWidth = Number.isFinite(storedWidth)
+          ? Math.min(SIDEBAR_MAX_WIDTH_REM, Math.max(SIDEBAR_MIN_WIDTH_REM, storedWidth))
+          : SIDEBAR_EXPANDED_WIDTH_REM;
+        const width = parsed && parsed.collapsed === true ? SIDEBAR_COLLAPSED_WIDTH_REM : clampedWidth;
+
+        document.documentElement.style.setProperty('--dashboard-sidebar-width', width + 'rem');
+      } catch (e) {
+        document.documentElement.style.setProperty('--dashboard-sidebar-width', SIDEBAR_EXPANDED_WIDTH_REM + 'rem');
+      }
+    };
+    applyStoredSidebarLayout();
     
     const savedTheme = localStorage.getItem('lightnvr-theme');
     const savedColorIntensity = localStorage.getItem('lightnvr-color-intensity');

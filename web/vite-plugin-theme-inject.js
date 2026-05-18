@@ -48,6 +48,28 @@ function generateThemeScript(colorThemes) {
       try {
         const COLOR_THEMES = ${themesJson};
         const VISIBLE_THEME_IDS = ${visibleThemeIds};
+        const SIDEBAR_STORAGE_KEY = 'oneberry.dashboardSidebar';
+        const SIDEBAR_EXPANDED_WIDTH_REM = 17;
+        const SIDEBAR_COLLAPSED_WIDTH_REM = 5.25;
+        const SIDEBAR_MIN_WIDTH_REM = 14;
+        const SIDEBAR_MAX_WIDTH_REM = 22;
+        try {
+          const storedSidebar = localStorage.getItem(SIDEBAR_STORAGE_KEY);
+          let sidebarWidth = SIDEBAR_EXPANDED_WIDTH_REM;
+          if (storedSidebar) {
+            const sidebarState = JSON.parse(storedSidebar);
+            const storedWidth = Number(sidebarState && sidebarState.width);
+            const clampedWidth = Number.isFinite(storedWidth)
+              ? Math.min(SIDEBAR_MAX_WIDTH_REM, Math.max(SIDEBAR_MIN_WIDTH_REM, storedWidth))
+              : SIDEBAR_EXPANDED_WIDTH_REM;
+            sidebarWidth = sidebarState && sidebarState.collapsed === true
+              ? SIDEBAR_COLLAPSED_WIDTH_REM
+              : clampedWidth;
+          }
+          document.documentElement.style.setProperty('--dashboard-sidebar-width', sidebarWidth + 'rem');
+        } catch (sidebarError) {
+          document.documentElement.style.setProperty('--dashboard-sidebar-width', SIDEBAR_EXPANDED_WIDTH_REM + 'rem');
+        }
         const savedColorIntensity = localStorage.getItem('lightnvr-color-intensity');
         const savedColorTheme = localStorage.getItem('lightnvr-color-theme');
         const colorTheme = VISIBLE_THEME_IDS.includes(savedColorTheme) && savedColorTheme in COLOR_THEMES ? savedColorTheme : 'default';

@@ -230,10 +230,15 @@ body > .container {
     gap: 0.25rem;
 }
 
-.sidebar-building-row {
+.sidebar-building-row,
+.sidebar-area-row {
     display: flex;
     align-items: center;
     gap: 0.25rem;
+}
+
+.sidebar-area-row {
+    margin-left: 0.95rem;
 }
 
 .sidebar-tree-toggle {
@@ -281,8 +286,8 @@ body > .container {
 }
 
 .sidebar-area-link {
+    flex: 1 1 auto;
     min-height: 1.75rem;
-    margin-left: 1.95rem;
     padding: 0.3rem 0.45rem;
     font-size: 0.8rem;
     font-weight: 650;
@@ -290,7 +295,7 @@ body > .container {
 
 .sidebar-camera-link {
     min-height: 1.65rem;
-    margin-left: 3rem;
+    margin-left: 3.85rem;
     padding: 0.25rem 0.45rem;
     font-size: 0.76rem;
 }
