@@ -89,10 +89,11 @@ const getStoredSidebarState = () => {
 };
 
 const BUILDING_TREE_STORAGE_KEY = 'oneberry.dashboardBuildings';
+const AREA_TREE_STORAGE_KEY = 'oneberry.dashboardAreas';
 
-const getStoredExpandedBuildings = () => {
+const getStoredExpandedTree = (storageKey) => {
   try {
-    const stored = localStorage.getItem(BUILDING_TREE_STORAGE_KEY);
+    const stored = localStorage.getItem(storageKey);
     const parsed = stored ? JSON.parse(stored) : null;
     if (!parsed || typeof parsed !== 'object') return {};
     return parsed;
@@ -144,7 +145,8 @@ export function Header({ version = VERSION }) {
   const [userRole, _setUserRole] = useState(localStorage.getItem('userrole') || null); // null = still loading
   const [sidebarState, setSidebarState] = useState(getStoredSidebarState);
   const [isDraggingSidebar, setIsDraggingSidebar] = useState(false);
-  const [expandedBuildings, setExpandedBuildings] = useState(getStoredExpandedBuildings);
+  const [expandedBuildings, setExpandedBuildings] = useState(() => getStoredExpandedTree(BUILDING_TREE_STORAGE_KEY));
+  const [expandedAreas, setExpandedAreas] = useState(() => getStoredExpandedTree(AREA_TREE_STORAGE_KEY));
   const { t } = useI18n();
   const sidebarCollapsed = sidebarState.collapsed;
   const { data: sidebarStreams = [] } = useQuery(
@@ -288,8 +290,23 @@ export function Header({ version = VERSION }) {
     }
   }, [expandedBuildings]);
 
+  useEffect(() => {
+    try {
+      localStorage.setItem(AREA_TREE_STORAGE_KEY, JSON.stringify(expandedAreas));
+    } catch (error) {
+      // Ignore storage failures.
+    }
+  }, [expandedAreas]);
+
   const toggleBuildingNode = useCallback((nodeKey) => {
     setExpandedBuildings((prevState) => ({
+      ...prevState,
+      [nodeKey]: prevState[nodeKey] === false,
+    }));
+  }, []);
+
+  const toggleAreaNode = useCallback((nodeKey) => {
+    setExpandedAreas((prevState) => ({
       ...prevState,
       [nodeKey]: prevState[nodeKey] === false,
     }));
@@ -552,34 +569,52 @@ export function Header({ version = VERSION }) {
                 <ul className="sidebar-area-tree">
                   {building.areas.map((area) => {
                     const areaHref = area.tag ? makeLiveHref({ tag: area.tag }) : buildingHref;
+                    const areaNodeKey = `${building.key}:${area.key}`;
+                    const areaExpanded = expandedAreas[areaNodeKey] !== false;
+
                     return (
                       <li key={area.key} className="sidebar-area-node">
-                        <a
-                          href={areaHref}
-                          className="sidebar-area-link"
-                          title={`${area.name} (${area.cameras.length})`}
-                          onClick={(event) => forceNavigation(areaHref, event)}
-                        >
-                          <span className="sidebar-tree-label">{area.name}</span>
-                          <span className="sidebar-tree-count">{area.cameras.length}</span>
-                        </a>
-                        <ul className="sidebar-camera-tree">
-                          {area.cameras.map((stream) => {
-                            const cameraHref = makeLiveHref({ cols: 1, rows: 1, stream: stream.name });
-                            return (
-                              <li key={stream.name} className="sidebar-camera-node">
-                                <a
-                                  href={cameraHref}
-                                  className="sidebar-camera-link"
-                                  title={stream.name}
-                                  onClick={(event) => forceNavigation(cameraHref, event)}
-                                >
-                                  {stream.name}
-                                </a>
-                              </li>
-                            );
-                          })}
-                        </ul>
+                        <div className="sidebar-area-row">
+                          <button
+                            type="button"
+                            className="sidebar-tree-toggle sidebar-area-toggle"
+                            onClick={() => toggleAreaNode(areaNodeKey)}
+                            aria-label={areaExpanded ? t('sidebar.collapseArea') : t('sidebar.expandArea')}
+                            aria-expanded={areaExpanded}
+                          >
+                            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d={areaExpanded ? 'M4 6l4 4 4-4' : 'M6 4l4 4-4 4'} />
+                            </svg>
+                          </button>
+                          <a
+                            href={areaHref}
+                            className="sidebar-area-link"
+                            title={`${area.name} (${area.cameras.length})`}
+                            onClick={(event) => forceNavigation(areaHref, event)}
+                          >
+                            <span className="sidebar-tree-label">{area.name}</span>
+                            <span className="sidebar-tree-count">{area.cameras.length}</span>
+                          </a>
+                        </div>
+                        {areaExpanded && (
+                          <ul className="sidebar-camera-tree">
+                            {area.cameras.map((stream) => {
+                              const cameraHref = makeLiveHref({ cols: 1, rows: 1, stream: stream.name });
+                              return (
+                                <li key={stream.name} className="sidebar-camera-node">
+                                  <a
+                                    href={cameraHref}
+                                    className="sidebar-camera-link"
+                                    title={stream.name}
+                                    onClick={(event) => forceNavigation(cameraHref, event)}
+                                  >
+                                    {stream.name}
+                                  </a>
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        )}
                       </li>
                     );
                   })}
