@@ -42,6 +42,7 @@ const MAX_NO_DATA_RECONNECT_ATTEMPTS = 3;
 const MAX_OFFER_RETRIES = 4;
 const BASE_RETRY_DELAY_MS = 1500; // base delay for exponential backoff: 1.5s, 3s, 6s, 12s, 24s, ...
 const FULLSCREEN_ARROW_SEEK_SECONDS = 10;
+const FULLSCREEN_SEEK_SETTLE_TOLERANCE_SECONDS = 1.5;
 
 function clamp(value, min, max) {
   if (!Number.isFinite(value)) {
@@ -99,7 +100,7 @@ function buildFullscreenPlaybackSample(segment, sampleTimestamp) {
     segmentEndTimestamp: segmentEnd,
     offsetSeconds,
     thumbUrl: `/api/recordings/thumbnail/${segment.id}/${getPreviewFrameIndexForTimelineSample(segment, safeTimestamp)}`,
-    playbackUrl: `/api/recordings/play/${segment.id}?v=${safeTimestamp}`,
+    playbackUrl: `/api/recordings/play/${segment.id}`,
   };
 }
 
@@ -309,6 +310,7 @@ export function WebRTCVideoCell({
         ? sampleStartTimestamp + nextOffset
         : sample.timestamp;
 
+      fullscreenPlaybackSeekTargetRef.current = nextTimestamp;
       setFullscreenPlayback((current) => current
         ? { ...current, timestamp: nextTimestamp, offsetSeconds: nextOffset }
         : sample);
@@ -327,6 +329,7 @@ export function WebRTCVideoCell({
       return;
     }
 
+    fullscreenPlaybackSeekTargetRef.current = Number.isFinite(sample.timestamp) ? sample.timestamp : null;
     setFullscreenPlayback(sample);
     setFullscreenPlaybackTimestamp(sample.timestamp ?? null);
     fullscreenPlaybackTimestampRef.current = sample.timestamp ?? null;
@@ -335,6 +338,7 @@ export function WebRTCVideoCell({
     setFullscreenPlayback(null);
     setFullscreenPlaybackTimestamp(null);
     fullscreenPlaybackTimestampRef.current = null;
+    fullscreenPlaybackSeekTargetRef.current = null;
   };
 
   const handleFullscreenPlaybackEnded = () => {
@@ -388,6 +392,7 @@ export function WebRTCVideoCell({
   const disconnectRecoveryTimeoutRef = useRef(null);
   const fullscreenTimelineSeekRequestRef = useRef(0);
   const fullscreenPlaybackTimestampRef = useRef(null);
+  const fullscreenPlaybackSeekTargetRef = useRef(null);
 
   useEffect(() => {
     const syncFullscreenState = () => {
@@ -451,8 +456,41 @@ export function WebRTCVideoCell({
 
     const nextTimestamp = getFullscreenPlaybackTimestampFromVideo(fullscreenPlayback, video);
     if (Number.isFinite(nextTimestamp)) {
+      const seekTarget = fullscreenPlaybackSeekTargetRef.current;
+      if (Number.isFinite(seekTarget)) {
+        const isStillSettling = video.seeking || Math.abs(nextTimestamp - seekTarget) > FULLSCREEN_SEEK_SETTLE_TOLERANCE_SECONDS;
+        if (isStillSettling) {
+          return;
+        }
+
+        fullscreenPlaybackSeekTargetRef.current = null;
+      }
+
       setFullscreenPlaybackTimestamp(nextTimestamp);
+      fullscreenPlaybackTimestampRef.current = nextTimestamp;
     }
+  };
+
+  const handleFullscreenPlaybackSeeked = () => {
+    const video = playbackVideoRef.current;
+    if (!fullscreenPlayback || !video) {
+      fullscreenPlaybackSeekTargetRef.current = null;
+      return;
+    }
+
+    const nextTimestamp = getFullscreenPlaybackTimestampFromVideo(fullscreenPlayback, video);
+    const seekTarget = fullscreenPlaybackSeekTargetRef.current;
+    if (Number.isFinite(seekTarget) &&
+        (!Number.isFinite(nextTimestamp) || Math.abs(nextTimestamp - seekTarget) > FULLSCREEN_SEEK_SETTLE_TOLERANCE_SECONDS)) {
+      return;
+    }
+
+    if (Number.isFinite(nextTimestamp)) {
+      setFullscreenPlaybackTimestamp(nextTimestamp);
+      fullscreenPlaybackTimestampRef.current = nextTimestamp;
+    }
+
+    fullscreenPlaybackSeekTargetRef.current = null;
   };
 
   useEffect(() => {
@@ -594,6 +632,7 @@ export function WebRTCVideoCell({
       fullscreenTimelineSeekRequestRef.current = requestId;
       setFullscreenPlaybackTimestamp(targetTimestamp);
       fullscreenPlaybackTimestampRef.current = targetTimestamp;
+      fullscreenPlaybackSeekTargetRef.current = targetTimestamp;
 
       resolveFullscreenPlaybackSample(targetTimestamp).then((sample) => {
         if (requestId !== fullscreenTimelineSeekRequestRef.current) {
@@ -601,6 +640,7 @@ export function WebRTCVideoCell({
         }
 
         if (!sample) {
+          fullscreenPlaybackSeekTargetRef.current = null;
           return;
         }
 
@@ -614,6 +654,7 @@ export function WebRTCVideoCell({
             ? sampleStartTimestamp + nextOffset
             : sample.timestamp;
 
+          fullscreenPlaybackSeekTargetRef.current = nextTimestamp;
           setFullscreenPlayback((current) => current
             ? { ...current, timestamp: nextTimestamp, offsetSeconds: nextOffset }
             : sample);
@@ -1699,7 +1740,7 @@ export function WebRTCVideoCell({
 
         {isFullscreenCell && fullscreenPlayback && (
           <video
-            key={fullscreenPlayback.key}
+            key={fullscreenPlayback.segmentId || `fullscreen-playback-${fullscreenPlayback.timestamp}`}
             ref={setPlaybackVideoRef}
             className="video-element"
             autoPlay
@@ -1709,6 +1750,7 @@ export function WebRTCVideoCell({
             src={fullscreenPlayback.playbackUrl}
             onEnded={handleFullscreenPlaybackEnded}
             onTimeUpdate={handleFullscreenPlaybackTimeUpdate}
+            onSeeked={handleFullscreenPlaybackSeeked}
             onLoadedMetadata={() => {
               applyFullscreenPlaybackSpeed(playbackVideoRef.current, fullscreenPlaybackSpeed);
             }}
