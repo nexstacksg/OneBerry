@@ -181,6 +181,7 @@ export function FullscreenTimelineOverlay({
   const [startHour, setStartHour] = useState(0);
   const [endHour, setEndHour] = useState(() => getTimelineDayLengthHours(selectedDate));
   const [scrubTimestamp, setScrubTimestamp] = useState(null);
+  const rootRef = useRef(null);
   const trackRef = useRef(null);
   const scrubStateRef = useRef({
     isDragging: false,
@@ -190,6 +191,40 @@ export function FullscreenTimelineOverlay({
     suppressNextClick: false
   });
   const isDocked = mode === 'dock';
+
+  useEffect(() => {
+    if (!isVisible) {
+      return undefined;
+    }
+
+    const root = rootRef.current;
+    const host = isDocked ? root?.parentElement : document.documentElement;
+    if (!root || !host) {
+      return undefined;
+    }
+
+    const updateDockHeight = () => {
+      host.style.setProperty('--fullscreen-timeline-dock-height', `${root.getBoundingClientRect().height}px`);
+    };
+
+    updateDockHeight();
+
+    if (typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', updateDockHeight);
+      return () => {
+        window.removeEventListener('resize', updateDockHeight);
+        host.style.removeProperty('--fullscreen-timeline-dock-height');
+      };
+    }
+
+    const resizeObserver = new ResizeObserver(updateDockHeight);
+    resizeObserver.observe(root);
+
+    return () => {
+      resizeObserver.disconnect();
+      host.style.removeProperty('--fullscreen-timeline-dock-height');
+    };
+  }, [isDocked, isVisible, isExpanded]);
 
   const dayRange = useMemo(() => getLocalDayIsoRange(selectedDate), [selectedDate]);
   const dayLengthHours = useMemo(() => getTimelineDayLengthHours(selectedDate), [selectedDate]);
@@ -649,6 +684,7 @@ export function FullscreenTimelineOverlay({
 
   return (
     <div
+      ref={rootRef}
       className={`text-white ${isDocked ? 'w-full' : 'border-t border-white/10 bg-[#05070d]'}`}
       style={{
         pointerEvents: 'auto',
