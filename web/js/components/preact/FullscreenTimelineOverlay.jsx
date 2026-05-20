@@ -81,6 +81,7 @@ function clamp(value, min, max) {
 
 const MIN_FULLSCREEN_TIMELINE_VIEW_HOURS = 1 / 3600;
 const PLAYBACK_SPEEDS = [0.25, 0.5, 1, 1.5, 2, 4];
+const SEEK_SETTLE_TOLERANCE_SECONDS = 1.5;
 
 function formatDurationLabel(seconds) {
   if (!Number.isFinite(seconds) || seconds <= 0) {
@@ -181,6 +182,7 @@ export function FullscreenTimelineOverlay({
   const [startHour, setStartHour] = useState(0);
   const [endHour, setEndHour] = useState(() => getTimelineDayLengthHours(selectedDate));
   const [scrubTimestamp, setScrubTimestamp] = useState(null);
+  const [pendingSeekTimestamp, setPendingSeekTimestamp] = useState(null);
   const rootRef = useRef(null);
   const trackRef = useRef(null);
   const scrubStateRef = useRef({
@@ -298,6 +300,7 @@ export function FullscreenTimelineOverlay({
     setStartHour(0);
     setEndHour(nextDayLengthHours);
     setScrubTimestamp(null);
+    setPendingSeekTimestamp(null);
     setIsFollowingLive(false);
 
     if (nextBounds) {
@@ -361,6 +364,7 @@ export function FullscreenTimelineOverlay({
 
     setCursorTimestamp(timestamp);
     setScrubTimestamp(timestamp);
+    setPendingSeekTimestamp(null);
     scrubStateRef.current.lastTimestamp = timestamp;
     setIsFollowingLive(false);
   };
@@ -418,6 +422,7 @@ export function FullscreenTimelineOverlay({
     }
 
     setCursorTimestamp(safeTimestamp);
+    setPendingSeekTimestamp(null);
     setIsFollowingLive(false);
     return false;
   };
@@ -456,8 +461,12 @@ export function FullscreenTimelineOverlay({
     }
 
     setCursorTimestamp(playbackTimestamp);
+    if (Number.isFinite(pendingSeekTimestamp) &&
+        Math.abs(playbackTimestamp - pendingSeekTimestamp) <= SEEK_SETTLE_TOLERANCE_SECONDS) {
+      setPendingSeekTimestamp(null);
+    }
     setIsFollowingLive(false);
-  }, [isVisible, playbackTimestamp, selectedDate, streamName]);
+  }, [isVisible, pendingSeekTimestamp, playbackTimestamp, selectedDate, streamName]);
 
   useEffect(() => {
     if (!isVisible || !streamName) {
@@ -518,6 +527,7 @@ export function FullscreenTimelineOverlay({
     setStartHour(0);
     setEndHour(todayLengthHours);
     setCursorTimestamp(now);
+    setPendingSeekTimestamp(null);
     setIsFollowingLive(true);
     setIsExpanded(true);
   };
@@ -650,6 +660,7 @@ export function FullscreenTimelineOverlay({
       : sample;
 
     setCursorTimestamp(resolvedSample.timestamp);
+    setPendingSeekTimestamp(resolvedSample.timestamp);
     setIsFollowingLive(false);
 
     if (typeof onPreviewSelect === 'function') {
@@ -675,7 +686,7 @@ export function FullscreenTimelineOverlay({
   const dateInputId = `fullscreen-timeline-date-${String(streamName).replace(/[^a-zA-Z0-9_-]/g, '-')}`;
   const todayDate = currentDateInputValue();
   const isTodaySelected = selectedDate >= todayDate;
-  const activeCursorTimestamp = playbackTimestamp ?? scrubTimestamp ?? cursorTimestamp;
+  const activeCursorTimestamp = scrubTimestamp ?? pendingSeekTimestamp ?? playbackTimestamp ?? cursorTimestamp;
   const activeCursorHour = timestampToTimelineOffset(activeCursorTimestamp, selectedDate);
   const cursorPosition = Number.isFinite(activeCursorHour)
     ? ((activeCursorHour - startHour) / visibleRange) * 100
