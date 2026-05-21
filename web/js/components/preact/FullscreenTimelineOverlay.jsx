@@ -946,7 +946,7 @@ export function FullscreenTimelineOverlay({
                   <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-white/55">Motion clips</div>
                   <div className="h-2 w-2 rounded-full bg-emerald-400 shadow-[0_0_10px_rgba(74,222,128,0.55)]" />
                 </div>
-                <div className="max-h-28 space-y-1 overflow-y-auto pr-1 min-[980px]:max-h-36">
+                <div className="max-h-[7.35rem] space-y-1 overflow-y-auto pr-1">
                   {isMotionLoading && motionSegments.length === 0 ? (
                     <div className="px-2 py-3 text-[11px] text-white/45">{t('common.loading')}</div>
                   ) : motionSegments.length === 0 ? (
