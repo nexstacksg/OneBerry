@@ -544,7 +544,7 @@ export function WebRTCView() {
               >
                 <option value="">{t('live.allBuildings')}</option>
                 {buildingTree.map((building) => (
-                  <option key={building.key} value={building.tag}>{building.name}</option>
+                  <option key={building.key} value={building.tag}>{building.name} ({building.cameraCount})</option>
                 ))}
               </select>
             </div>
@@ -561,7 +561,7 @@ export function WebRTCView() {
               >
                 <option value="">{t('live.allAreas')}</option>
                 {selectedBuilding.areas.filter((area) => area.tag).map((area) => (
-                  <option key={area.key} value={area.tag}>{area.name}</option>
+                  <option key={area.key} value={area.tag}>{area.name} ({area.cameras.length})</option>
                 ))}
               </select>
             </div>

@@ -1,4 +1,4 @@
-import { parseTagList } from '../../../utils/building-hierarchy.js';
+import { getAccessTagLabel, getAccessTagKind, parseTagList, ACCESS_TAG_KIND } from '../../../utils/building-hierarchy.js';
 
 export const ALL_USERS_GROUP_KEY = 'all';
 export const UNRESTRICTED_GROUP_KEY = 'unrestricted';
@@ -6,20 +6,10 @@ export const UNRESTRICTED_GROUP_KEY = 'unrestricted';
 export function formatAccessTag(tag) {
   if (!tag) return '';
 
-  if (tag.startsWith('building:')) {
-    return `Building: ${tag.slice('building:'.length).trim()}`;
-  }
-
-  if (tag.startsWith('area:')) {
-    const path = tag.slice('area:'.length).trim();
-    const parts = path.split('/').map((part) => part.trim()).filter(Boolean);
-    if (parts.length >= 2) {
-      return `${parts[0]} / ${parts.slice(1).join(' / ')}`;
-    }
-    return `Area: ${path}`;
-  }
-
-  return tag;
+  const label = getAccessTagLabel(tag);
+  if (getAccessTagKind(tag) === ACCESS_TAG_KIND.BUILDING) return `Building: ${label}`;
+  if (getAccessTagKind(tag) === ACCESS_TAG_KIND.AREA) return label;
+  return label;
 }
 
 export function getUserAccessTags(user) {

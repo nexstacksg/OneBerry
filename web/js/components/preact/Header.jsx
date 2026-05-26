@@ -11,7 +11,7 @@ import { showStatusMessage } from './ToastContainer.jsx';
 import { EditUserModal } from './users/EditUserModal.jsx';
 import { getAuthHeaders, isDemoMode, validateSession } from '../../utils/auth-utils.js';
 import { forceNavigation } from '../../utils/navigation-utils.js';
-import { buildBuildingTree } from '../../utils/building-hierarchy.js';
+import { buildBuildingTree, getStreamStatusKind } from '../../utils/building-hierarchy.js';
 import { useI18n } from '../../i18n.js';
 import LanguageSelector from './common/LanguageSelector.jsx';
 
@@ -55,6 +55,26 @@ const NavIcon = ({ id }) => (
   <span className="sidebar-nav-icon" aria-hidden="true">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
       {navIcons[id] || navIcons['nav-live']}
+    </svg>
+  </span>
+);
+
+const treeIcons = {
+  building: (
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M5.75 19.25V5.75a1.5 1.5 0 0 1 1.5-1.5h6.5a1.5 1.5 0 0 1 1.5 1.5v13.5m-7-10h.01m3.49 0h.01m-3.51 3.5h.01m3.49 0h.01m-3.51 3.5h.01m8.99 3V10.75h1.5a1.5 1.5 0 0 1 1.5 1.5v7m-10 0v-3h2.5v3m-8.5 0h16" />
+  ),
+  area: (
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M5.25 6.75h13.5v10.5H5.25V6.75Zm3 3h2.5v2.5h-2.5v-2.5Zm5 0h2.5v2.5h-2.5v-2.5Zm-5 5h7.5" />
+  ),
+  camera: (
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M4.75 8.25a2 2 0 0 1 2-2h7.25a2 2 0 0 1 2 2v7.5a2 2 0 0 1-2 2H6.75a2 2 0 0 1-2-2v-7.5Zm11.25 2.25 3.25-2v7l-3.25-2v-3Z" />
+  ),
+};
+
+const TreeIcon = ({ type }) => (
+  <span className={`sidebar-tree-icon sidebar-tree-icon-${type}`} aria-hidden="true">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      {treeIcons[type] || treeIcons.camera}
     </svg>
   </span>
 );
@@ -147,6 +167,7 @@ export function Header({ version = VERSION }) {
   const [isDraggingSidebar, setIsDraggingSidebar] = useState(false);
   const [expandedBuildings, setExpandedBuildings] = useState(() => getStoredExpandedTree(BUILDING_TREE_STORAGE_KEY));
   const [expandedAreas, setExpandedAreas] = useState(() => getStoredExpandedTree(AREA_TREE_STORAGE_KEY));
+  const [locationSearch, setLocationSearch] = useState(() => (typeof window !== 'undefined' ? window.location.search : ''));
   const { t } = useI18n();
   const sidebarCollapsed = sidebarState.collapsed;
   const { data: sidebarStreams = [] } = useQuery(
@@ -169,6 +190,16 @@ export function Header({ version = VERSION }) {
       generalArea: t('sidebar.generalArea'),
     }
   ), [sidebarStreams, t]);
+  const liveSelection = useMemo(() => {
+    if (activeNav !== 'nav-live' || typeof window === 'undefined') {
+      return { tag: '', stream: '' };
+    }
+    const params = new URLSearchParams(locationSearch);
+    return {
+      tag: params.get('tag') || '',
+      stream: params.get('stream') || '',
+    };
+  }, [activeNav, locationSearch]);
 
   const setUsername = (username) => {
     _setUsername(username);
@@ -261,6 +292,34 @@ export function Header({ version = VERSION }) {
     setTimeout(() => clearInterval(intervalId), 5000);
     return () => clearInterval(intervalId);
   }, [currentUser?.id, syncSessionState]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+
+    const updateLocationSearch = () => setLocationSearch(window.location.search);
+    const wrapHistoryMethod = (methodName) => {
+      const original = window.history[methodName];
+      window.history[methodName] = function wrappedHistoryMethod(...args) {
+        const result = original.apply(this, args);
+        window.dispatchEvent(new Event('oneberry:locationchange'));
+        return result;
+      };
+      return original;
+    };
+
+    const originalPushState = wrapHistoryMethod('pushState');
+    const originalReplaceState = wrapHistoryMethod('replaceState');
+
+    window.addEventListener('popstate', updateLocationSearch);
+    window.addEventListener('oneberry:locationchange', updateLocationSearch);
+
+    return () => {
+      window.history.pushState = originalPushState;
+      window.history.replaceState = originalReplaceState;
+      window.removeEventListener('popstate', updateLocationSearch);
+      window.removeEventListener('oneberry:locationchange', updateLocationSearch);
+    };
+  }, []);
 
   useEffect(() => {
     const sidebarWidth = sidebarCollapsed ? SIDEBAR_COLLAPSED_WIDTH_REM : sidebarState.width;
@@ -525,6 +584,18 @@ export function Header({ version = VERSION }) {
     }, mobile);
   };
 
+  const getTreeStatusTitle = (node, fallbackName) => {
+    const online = node.onlineCount || 0;
+    const warning = node.warningCount || 0;
+    const offline = node.offlineCount || 0;
+    const parts = [
+      t('sidebar.runningCount', { count: online }),
+      warning > 0 ? t('sidebar.attentionCount', { count: warning }) : null,
+      offline > 0 ? t('sidebar.offlineCount', { count: offline }) : null,
+    ].filter(Boolean);
+    return `${fallbackName} (${parts.join(', ')})`;
+  };
+
   const renderBuildingTree = () => {
     if (buildingTree.length === 0) {
       return (
@@ -539,9 +610,10 @@ export function Header({ version = VERSION }) {
         {buildingTree.map((building) => {
           const expanded = expandedBuildings[building.key] !== false;
           const buildingHref = building.tag ? makeLiveHref({ tag: building.tag }) : makeLiveHref();
+          const buildingActive = activeNav === 'nav-live' && Boolean(building.tag) && !liveSelection.stream && liveSelection.tag === building.tag;
 
           return (
-            <li key={building.key} className="sidebar-building-node">
+            <li key={building.key} className={`sidebar-building-node ${buildingActive ? 'is-active' : ''}`}>
               <div className="sidebar-building-row">
                 <button
                   type="button"
@@ -556,10 +628,12 @@ export function Header({ version = VERSION }) {
                 </button>
                 <a
                   href={buildingHref}
-                  className="sidebar-building-link"
-                  title={`${building.name} (${building.cameraCount})`}
+                  className={`sidebar-building-link ${buildingActive ? 'is-active' : ''}`}
+                  title={getTreeStatusTitle(building, building.name)}
+                  aria-current={buildingActive ? 'page' : undefined}
                   onClick={(event) => forceNavigation(buildingHref, event)}
                 >
+                  <TreeIcon type="building" />
                   <span className="sidebar-tree-label">{building.name}</span>
                   <span className="sidebar-tree-count">{building.cameraCount}</span>
                 </a>
@@ -571,9 +645,10 @@ export function Header({ version = VERSION }) {
                     const areaHref = area.tag ? makeLiveHref({ tag: area.tag }) : buildingHref;
                     const areaNodeKey = `${building.key}:${area.key}`;
                     const areaExpanded = expandedAreas[areaNodeKey] !== false;
+                    const areaActive = activeNav === 'nav-live' && Boolean(area.tag) && !liveSelection.stream && liveSelection.tag === area.tag;
 
                     return (
-                      <li key={area.key} className="sidebar-area-node">
+                      <li key={area.key} className={`sidebar-area-node ${areaActive ? 'is-active' : ''}`}>
                         <div className="sidebar-area-row">
                           <button
                             type="button"
@@ -588,10 +663,12 @@ export function Header({ version = VERSION }) {
                           </button>
                           <a
                             href={areaHref}
-                            className="sidebar-area-link"
-                            title={`${area.name} (${area.cameras.length})`}
+                            className={`sidebar-area-link ${areaActive ? 'is-active' : ''}`}
+                            title={getTreeStatusTitle(area, area.name)}
+                            aria-current={areaActive ? 'page' : undefined}
                             onClick={(event) => forceNavigation(areaHref, event)}
                           >
+                            <TreeIcon type="area" />
                             <span className="sidebar-tree-label">{area.name}</span>
                             <span className="sidebar-tree-count">{area.cameras.length}</span>
                           </a>
@@ -600,15 +677,20 @@ export function Header({ version = VERSION }) {
                           <ul className="sidebar-camera-tree">
                             {area.cameras.map((stream) => {
                               const cameraHref = makeLiveHref({ cols: 1, rows: 1, stream: stream.name });
+                              const statusKind = getStreamStatusKind(stream);
+                              const cameraActive = activeNav === 'nav-live' && liveSelection.stream === stream.name;
                               return (
-                                <li key={stream.name} className="sidebar-camera-node">
+                                <li key={stream.name} className={`sidebar-camera-node ${cameraActive ? 'is-active' : ''}`}>
                                   <a
                                     href={cameraHref}
-                                    className="sidebar-camera-link"
-                                    title={stream.name}
+                                    className={`sidebar-camera-link ${cameraActive ? 'is-active' : ''}`}
+                                    title={`${stream.name} - ${t(`sidebar.status.${statusKind}`)}`}
+                                    aria-current={cameraActive ? 'page' : undefined}
                                     onClick={(event) => forceNavigation(cameraHref, event)}
                                   >
-                                    {stream.name}
+                                    <span className={`sidebar-camera-status is-${statusKind}`} aria-hidden="true"></span>
+                                    <TreeIcon type="camera" />
+                                    <span className="sidebar-camera-name">{stream.name}</span>
                                   </a>
                                 </li>
                               );

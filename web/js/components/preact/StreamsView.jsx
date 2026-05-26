@@ -1929,6 +1929,7 @@ export function StreamsView() {
           onClose={closeModal}
           onRefreshModels={loadDetectionModels}
           hideCredentials={shouldHideCredentials}
+          streams={streams}
         />
       )}
 
