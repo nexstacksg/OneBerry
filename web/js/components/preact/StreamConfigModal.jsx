@@ -3,10 +3,10 @@
  * Expanded, responsive modal with accordion sections for stream configuration
  */
 
-import { useState, useEffect, useRef, useCallback } from 'preact/hooks';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'preact/hooks';
 import { ZoneEditor } from './ZoneEditor.jsx';
 import { obfuscateUrlCredentials } from '../../utils/url-utils.js';
-import { getAreaName, getBuildingName, setBuildingAreaTags } from '../../utils/building-hierarchy.js';
+import { getAreaName, getBuildingName, normalizeLocationCatalog, setBuildingAreaTags } from '../../utils/building-hierarchy.js';
 import { useI18n } from '../../i18n.js';
 import { showStatusMessage } from './ToastContainer.jsx';
 import {
@@ -301,7 +301,9 @@ export function StreamConfigModal({
   onSave,
   onClose,
   onRefreshModels,
-  hideCredentials = false
+  hideCredentials = false,
+  streams = [],
+  locationCatalog = { buildings: [] }
 }) {
   const { t } = useI18n();
   const [showZoneEditor, setShowZoneEditor] = useState(false);
@@ -313,6 +315,47 @@ export function StreamConfigModal({
   const currentFpsValue = formatFpsValue(currentStream.fps);
   const currentBuildingName = getBuildingName(currentStream.tags || '');
   const currentAreaName = getAreaName(currentStream.tags || '');
+  const locationSuggestions = useMemo(() => {
+    const buildings = new Set();
+    const areasByBuilding = new Map();
+    const allAreas = new Set();
+
+    normalizeLocationCatalog(locationCatalog).buildings.forEach((building) => {
+      buildings.add(building.name);
+      building.areas.forEach((area) => {
+        allAreas.add(area);
+        if (!areasByBuilding.has(building.name)) {
+          areasByBuilding.set(building.name, new Set());
+        }
+        areasByBuilding.get(building.name).add(area);
+      });
+    });
+
+    (Array.isArray(streams) ? streams : []).forEach((stream) => {
+      const building = getBuildingName(stream?.tags || '');
+      const area = getAreaName(stream?.tags || '');
+      if (building) {
+        buildings.add(building);
+      }
+      if (area) {
+        allAreas.add(area);
+        const key = building || '';
+        if (!areasByBuilding.has(key)) {
+          areasByBuilding.set(key, new Set());
+        }
+        areasByBuilding.get(key).add(area);
+      }
+    });
+
+    const scopedAreas = currentBuildingName
+      ? areasByBuilding.get(currentBuildingName) || new Set()
+      : allAreas;
+
+    return {
+      buildings: Array.from(buildings).sort((a, b) => a.localeCompare(b)),
+      areas: Array.from(scopedAreas).sort((a, b) => a.localeCompare(b)),
+    };
+  }, [currentBuildingName, locationCatalog, streams]);
   const updateLocationTags = useCallback((nextBuilding, nextArea) => {
     onInputChange({
       target: {
@@ -576,12 +619,20 @@ export function StreamConfigModal({
                   <input
                     type="text"
                     id="stream-building"
+                    list="stream-building-options"
                     className="w-full px-3 py-2 border border-input rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-primary bg-background text-foreground"
                     placeholder={t('streamsConfig.buildingPlaceholder')}
                     value={currentBuildingName}
                     onChange={(event) => updateLocationTags(event.target.value, currentAreaName)}
                     maxLength={96}
                   />
+                  {locationSuggestions.buildings.length > 0 && (
+                    <datalist id="stream-building-options">
+                      {locationSuggestions.buildings.map((building) => (
+                        <option key={building} value={building} />
+                      ))}
+                    </datalist>
+                  )}
                   <p className="mt-1 text-xs text-muted-foreground">
                     {t('streamsConfig.buildingHelp')}
                   </p>
@@ -594,12 +645,20 @@ export function StreamConfigModal({
                   <input
                     type="text"
                     id="stream-area"
+                    list="stream-area-options"
                     className="w-full px-3 py-2 border border-input rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-primary bg-background text-foreground"
                     placeholder={t('streamsConfig.areaPlaceholder')}
                     value={currentAreaName}
                     onChange={(event) => updateLocationTags(currentBuildingName, event.target.value)}
                     maxLength={96}
                   />
+                  {locationSuggestions.areas.length > 0 && (
+                    <datalist id="stream-area-options">
+                      {locationSuggestions.areas.map((area) => (
+                        <option key={area} value={area} />
+                      ))}
+                    </datalist>
+                  )}
                   <p className="mt-1 text-xs text-muted-foreground">
                     {t('streamsConfig.areaHelp')}
                   </p>

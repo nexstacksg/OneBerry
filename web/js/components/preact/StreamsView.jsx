@@ -196,6 +196,14 @@ export function StreamsView() {
     retryDelay: 1000
   });
 
+  const {
+    data: locationCatalog = { buildings: [] }
+  } = useQuery(['locations'], '/api/locations', {
+    timeout: 10000,
+    retries: 1,
+    retryDelay: 1000
+  });
+
   // Fetch detection models
   const {
     data: detectionModelsData
@@ -1929,6 +1937,8 @@ export function StreamsView() {
           onClose={closeModal}
           onRefreshModels={loadDetectionModels}
           hideCredentials={shouldHideCredentials}
+          streams={streams}
+          locationCatalog={locationCatalog}
         />
       )}
 

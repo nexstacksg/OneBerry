@@ -20,6 +20,7 @@
 #include "core/config.h"
 #include "database/db_core.h"
 #include "database/db_streams.h"
+#include "database/db_system_settings.h"
 #include "storage/storage_manager.h"
 #include "database/db_auth.h"
 #include "video/stream_manager.h"
@@ -55,6 +56,251 @@ static bool is_safe_storage_path(const char *path) {
         }
     }
     return true;
+}
+
+#define LOCATION_CATALOG_SETTING_KEY "location_catalog"
+#define LOCATION_CATALOG_MAX_BYTES 65536
+#define LOCATION_NAME_MAX_LEN 96
+
+static void trim_location_value(const char *src, char *dst, size_t dst_size) {
+    if (!dst || dst_size == 0) return;
+    dst[0] = '\0';
+    if (!src) return;
+
+    while (*src && isspace((unsigned char)*src)) src++;
+    size_t len = strlen(src);
+    while (len > 0 && isspace((unsigned char)src[len - 1])) len--;
+    if (len >= dst_size) len = dst_size - 1;
+    memcpy(dst, src, len);
+    dst[len] = '\0';
+}
+
+static bool is_valid_location_value(const char *value) {
+    if (!value || value[0] == '\0') return false;
+    if (strlen(value) > LOCATION_NAME_MAX_LEN) return false;
+    return strchr(value, ',') == NULL && strchr(value, '/') == NULL;
+}
+
+static bool string_array_contains(cJSON *array, const char *value) {
+    if (!array || !value) return false;
+    cJSON *item = NULL;
+    cJSON_ArrayForEach(item, array) {
+        if (cJSON_IsString(item) && item->valuestring && strcmp(item->valuestring, value) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static cJSON *find_location_building(cJSON *buildings, const char *name) {
+    if (!buildings || !name) return NULL;
+    cJSON *building = NULL;
+    cJSON_ArrayForEach(building, buildings) {
+        cJSON *existing_name = cJSON_GetObjectItem(building, "name");
+        if (cJSON_IsString(existing_name) && existing_name->valuestring &&
+            strcmp(existing_name->valuestring, name) == 0) {
+            return building;
+        }
+    }
+    return NULL;
+}
+
+static cJSON *normalize_location_catalog_json(cJSON *input, char *error, size_t error_size) {
+    if (!input || !cJSON_IsObject(input)) {
+        snprintf(error, error_size, "Location catalog must be a JSON object");
+        return NULL;
+    }
+
+    cJSON *input_buildings = cJSON_GetObjectItem(input, "buildings");
+    if (input_buildings && !cJSON_IsArray(input_buildings)) {
+        snprintf(error, error_size, "buildings must be an array");
+        return NULL;
+    }
+
+    cJSON *normalized = cJSON_CreateObject();
+    cJSON *buildings = cJSON_CreateArray();
+    if (!normalized || !buildings) {
+        cJSON_Delete(normalized);
+        cJSON_Delete(buildings);
+        snprintf(error, error_size, "Out of memory");
+        return NULL;
+    }
+    cJSON_AddItemToObject(normalized, "buildings", buildings);
+
+    if (!input_buildings) {
+        return normalized;
+    }
+
+    cJSON *input_building = NULL;
+    cJSON_ArrayForEach(input_building, input_buildings) {
+        if (!cJSON_IsObject(input_building)) {
+            cJSON_Delete(normalized);
+            snprintf(error, error_size, "Each building must be an object");
+            return NULL;
+        }
+
+        cJSON *name_json = cJSON_GetObjectItem(input_building, "name");
+        if (!cJSON_IsString(name_json) || !name_json->valuestring) {
+            cJSON_Delete(normalized);
+            snprintf(error, error_size, "Each building requires a name");
+            return NULL;
+        }
+
+        char building_name[LOCATION_NAME_MAX_LEN + 1];
+        trim_location_value(name_json->valuestring, building_name, sizeof(building_name));
+        if (!is_valid_location_value(building_name)) {
+            cJSON_Delete(normalized);
+            snprintf(error, error_size, "Building names must be 1-%d characters and cannot contain commas or slashes", LOCATION_NAME_MAX_LEN);
+            return NULL;
+        }
+
+        cJSON *building = find_location_building(buildings, building_name);
+        cJSON *areas = NULL;
+        if (!building) {
+            building = cJSON_CreateObject();
+            areas = cJSON_CreateArray();
+            if (!building || !areas) {
+                cJSON_Delete(building);
+                cJSON_Delete(areas);
+                cJSON_Delete(normalized);
+                snprintf(error, error_size, "Out of memory");
+                return NULL;
+            }
+            cJSON_AddStringToObject(building, "name", building_name);
+            cJSON_AddItemToObject(building, "areas", areas);
+            cJSON_AddItemToArray(buildings, building);
+        } else {
+            areas = cJSON_GetObjectItem(building, "areas");
+        }
+
+        cJSON *input_areas = cJSON_GetObjectItem(input_building, "areas");
+        if (input_areas && !cJSON_IsArray(input_areas)) {
+            cJSON_Delete(normalized);
+            snprintf(error, error_size, "areas must be an array");
+            return NULL;
+        }
+
+        if (!input_areas) continue;
+
+        cJSON *area_json = NULL;
+        cJSON_ArrayForEach(area_json, input_areas) {
+            if (!cJSON_IsString(area_json) || !area_json->valuestring) {
+                cJSON_Delete(normalized);
+                snprintf(error, error_size, "Area names must be strings");
+                return NULL;
+            }
+
+            char area_name[LOCATION_NAME_MAX_LEN + 1];
+            trim_location_value(area_json->valuestring, area_name, sizeof(area_name));
+            if (!is_valid_location_value(area_name)) {
+                cJSON_Delete(normalized);
+                snprintf(error, error_size, "Area names must be 1-%d characters and cannot contain commas or slashes", LOCATION_NAME_MAX_LEN);
+                return NULL;
+            }
+
+            if (!string_array_contains(areas, area_name)) {
+                cJSON *area_item = cJSON_CreateString(area_name);
+                if (!area_item) {
+                    cJSON_Delete(normalized);
+                    snprintf(error, error_size, "Out of memory");
+                    return NULL;
+                }
+                cJSON_AddItemToArray(areas, area_item);
+            }
+        }
+    }
+
+    return normalized;
+}
+
+void handle_get_locations(const http_request_t *req, http_response_t *res) {
+    log_info("Handling GET /api/locations request");
+
+    if (g_config.web_auth_enabled) {
+        user_t user;
+        if (!httpd_check_viewer_access(req, &user)) {
+            http_response_set_json_error(res, 401, "Unauthorized");
+            return;
+        }
+    }
+
+    char catalog[LOCATION_CATALOG_MAX_BYTES] = {0};
+    if (db_get_system_setting(LOCATION_CATALOG_SETTING_KEY, catalog, sizeof(catalog)) != 0 || catalog[0] == '\0') {
+        http_response_set_json(res, 200, "{\"buildings\":[]}");
+        return;
+    }
+
+    cJSON *parsed = cJSON_Parse(catalog);
+    if (!parsed) {
+        log_warn("Stored location catalog is invalid JSON; returning empty catalog");
+        http_response_set_json(res, 200, "{\"buildings\":[]}");
+        return;
+    }
+
+    char error[256] = {0};
+    cJSON *normalized = normalize_location_catalog_json(parsed, error, sizeof(error));
+    cJSON_Delete(parsed);
+    if (!normalized) {
+        log_warn("Stored location catalog is invalid: %s; returning empty catalog",
+                 error[0] ? error : "unknown error");
+        http_response_set_json(res, 200, "{\"buildings\":[]}");
+        return;
+    }
+
+    char *json = cJSON_PrintUnformatted(normalized);
+    cJSON_Delete(normalized);
+    if (!json) {
+        http_response_set_json_error(res, 500, "Failed to serialize location catalog");
+        return;
+    }
+
+    http_response_set_json(res, 200, json);
+    free(json);
+}
+
+void handle_put_locations(const http_request_t *req, http_response_t *res) {
+    log_info("Handling PUT /api/locations request");
+
+    if (!httpd_check_admin_privileges(req, res)) {
+        return;
+    }
+
+    cJSON *body = httpd_parse_json_body(req);
+    if (!body) {
+        http_response_set_json_error(res, 400, "Invalid JSON body");
+        return;
+    }
+
+    char error[256] = {0};
+    cJSON *normalized = normalize_location_catalog_json(body, error, sizeof(error));
+    cJSON_Delete(body);
+
+    if (!normalized) {
+        http_response_set_json_error(res, 400, error[0] ? error : "Invalid location catalog");
+        return;
+    }
+
+    char *json = cJSON_PrintUnformatted(normalized);
+    cJSON_Delete(normalized);
+    if (!json) {
+        http_response_set_json_error(res, 500, "Failed to serialize location catalog");
+        return;
+    }
+
+    if (strlen(json) >= LOCATION_CATALOG_MAX_BYTES) {
+        free(json);
+        http_response_set_json_error(res, 400, "Location catalog is too large");
+        return;
+    }
+
+    if (db_set_system_setting(LOCATION_CATALOG_SETTING_KEY, json) != 0) {
+        free(json);
+        http_response_set_json_error(res, 500, "Failed to save location catalog");
+        return;
+    }
+
+    http_response_set_json(res, 200, json);
+    free(json);
 }
 
 /**

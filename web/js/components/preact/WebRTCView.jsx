@@ -190,6 +190,18 @@ export function WebRTCView() {
     }
   );
 
+  const {
+    data: locationCatalog = { buildings: [] }
+  } = useQuery(
+    ['locations'],
+    '/api/locations',
+    {
+      timeout: 10000,
+      retries: 1,
+      retryDelay: 1000
+    }
+  );
+
   // Update loading state based on streams query status
   useEffect(() => {
     setIsLoading(isLoadingStreams);
@@ -385,8 +397,9 @@ export function WebRTCView() {
     {
       unassignedBuilding: t('sidebar.unassignedBuilding'),
       generalArea: t('sidebar.generalArea'),
-    }
-  ).filter((building) => building.tag), [streams, t]);
+    },
+    locationCatalog
+  ).filter((building) => building.tag), [locationCatalog, streams, t]);
   const selectedBuilding = useMemo(() => {
     if (!tagFilter) return null;
     return buildingTree.find((building) => (
@@ -544,7 +557,7 @@ export function WebRTCView() {
               >
                 <option value="">{t('live.allBuildings')}</option>
                 {buildingTree.map((building) => (
-                  <option key={building.key} value={building.tag}>{building.name}</option>
+                  <option key={building.key} value={building.tag}>{building.name} ({building.cameraCount})</option>
                 ))}
               </select>
             </div>
@@ -561,7 +574,7 @@ export function WebRTCView() {
               >
                 <option value="">{t('live.allAreas')}</option>
                 {selectedBuilding.areas.filter((area) => area.tag).map((area) => (
-                  <option key={area.key} value={area.tag}>{area.name}</option>
+                  <option key={area.key} value={area.tag}>{area.name} ({area.cameras.length})</option>
                 ))}
               </select>
             </div>

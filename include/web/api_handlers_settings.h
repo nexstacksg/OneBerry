@@ -13,4 +13,14 @@ void handle_get_settings(const http_request_t *request, http_response_t *respons
  */
 void handle_post_settings(const http_request_t *request, http_response_t *response);
 
+/**
+ * Handle GET request for the manual building/area catalog
+ */
+void handle_get_locations(const http_request_t *request, http_response_t *response);
+
+/**
+ * Handle PUT request for the manual building/area catalog
+ */
+void handle_put_locations(const http_request_t *request, http_response_t *response);
+
 #endif /* API_HANDLERS_SETTINGS_H */

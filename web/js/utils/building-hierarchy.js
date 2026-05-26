@@ -1,8 +1,18 @@
-const BUILDING_PREFIX = 'building:';
-const AREA_PREFIX = 'area:';
+export const BUILDING_PREFIX = 'building:';
+export const AREA_PREFIX = 'area:';
+
+export const ACCESS_TAG_KIND = {
+  BUILDING: 'building',
+  AREA: 'area',
+  CUSTOM: 'custom',
+};
 
 export const UNASSIGNED_BUILDING_KEY = '__unassigned_building__';
 export const GENERAL_AREA_KEY = '__general_area__';
+
+export function normalizeLocationName(value) {
+  return String(value || '').trim().replace(/\s+/g, ' ');
+}
 
 export function parseTagList(value) {
   if (!value) return [];
@@ -16,6 +26,58 @@ export function parseTagList(value) {
 
 export function joinTagList(tags) {
   return parseTagList(tags.join(',')).join(', ');
+}
+
+export function normalizeLocationCatalog(catalog = {}) {
+  const buildingMap = new Map();
+  const buildings = Array.isArray(catalog?.buildings) ? catalog.buildings : [];
+
+  buildings.forEach((building) => {
+    const name = normalizeLocationName(building?.name);
+    if (!name) return;
+
+    if (!buildingMap.has(name)) {
+      buildingMap.set(name, {
+        name,
+        areas: new Set(),
+      });
+    }
+
+    const buildingNode = buildingMap.get(name);
+    const areas = Array.isArray(building?.areas) ? building.areas : [];
+    areas.forEach((area) => {
+      const areaName = normalizeLocationName(area);
+      if (areaName) buildingNode.areas.add(areaName);
+    });
+  });
+
+  return {
+    buildings: Array.from(buildingMap.values())
+      .map((building) => ({
+        name: building.name,
+        areas: Array.from(building.areas).sort((a, b) => a.localeCompare(b)),
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name)),
+  };
+}
+
+export function addLocationToCatalog(catalog = {}, building, area = '') {
+  const next = normalizeLocationCatalog(catalog);
+  const buildingName = normalizeLocationName(building);
+  const areaName = normalizeLocationName(area);
+  if (!buildingName) return next;
+
+  let buildingNode = next.buildings.find((item) => item.name === buildingName);
+  if (!buildingNode) {
+    buildingNode = { name: buildingName, areas: [] };
+    next.buildings.push(buildingNode);
+  }
+
+  if (areaName && !buildingNode.areas.includes(areaName)) {
+    buildingNode.areas.push(areaName);
+  }
+
+  return normalizeLocationCatalog(next);
 }
 
 export function getTagValue(tags, prefix) {
@@ -36,6 +98,75 @@ export function getAreaName(tags) {
   if (!areaPath) return '';
   const parts = areaPath.split('/').map((part) => part.trim()).filter(Boolean);
   return parts.length > 0 ? parts[parts.length - 1] : areaPath;
+}
+
+export function isBuildingTag(tag) {
+  return String(tag || '').trim().toLowerCase().startsWith(BUILDING_PREFIX);
+}
+
+export function isAreaTag(tag) {
+  return String(tag || '').trim().toLowerCase().startsWith(AREA_PREFIX);
+}
+
+export function isLocationTag(tag) {
+  return isBuildingTag(tag) || isAreaTag(tag);
+}
+
+export function getAccessTagKind(tag) {
+  if (isBuildingTag(tag)) return ACCESS_TAG_KIND.BUILDING;
+  if (isAreaTag(tag)) return ACCESS_TAG_KIND.AREA;
+  return ACCESS_TAG_KIND.CUSTOM;
+}
+
+export function getAccessTagLabel(tag) {
+  const value = String(tag || '').trim();
+  if (!value) return '';
+
+  if (isBuildingTag(value)) {
+    return value.slice(BUILDING_PREFIX.length).trim();
+  }
+
+  if (isAreaTag(value)) {
+    const path = value.slice(AREA_PREFIX.length).trim();
+    const parts = path.split('/').map((part) => part.trim()).filter(Boolean);
+    return parts.length > 0 ? parts.join(' / ') : path;
+  }
+
+  return value;
+}
+
+export function getAccessTagTypeLabel(tag, labels = {}) {
+  const kind = getAccessTagKind(tag);
+  if (kind === ACCESS_TAG_KIND.BUILDING) return labels.building || 'Building';
+  if (kind === ACCESS_TAG_KIND.AREA) return labels.area || 'Area';
+  return labels.custom || 'Custom group';
+}
+
+export function getAccessTagSortRank(tag) {
+  const kind = getAccessTagKind(tag);
+  if (kind === ACCESS_TAG_KIND.BUILDING) return 0;
+  if (kind === ACCESS_TAG_KIND.AREA) return 1;
+  return 2;
+}
+
+export function compareAccessTags(a, b) {
+  const rankA = getAccessTagSortRank(a);
+  const rankB = getAccessTagSortRank(b);
+  if (rankA !== rankB) return rankA - rankB;
+  return getAccessTagLabel(a).localeCompare(getAccessTagLabel(b));
+}
+
+export function getStreamStatusKind(stream = {}) {
+  if (!stream.enabled) return 'disabled';
+  const status = String(stream.status || '').trim().toLowerCase();
+  if (status === 'running') return 'online';
+  if (['starting', 'reconnecting', 'stopping'].includes(status)) return 'warning';
+  if (['error', 'stopped'].includes(status)) return 'offline';
+  return 'unknown';
+}
+
+export function isStreamOnline(stream = {}) {
+  return getStreamStatusKind(stream) === 'online';
 }
 
 export function setBuildingAreaTags(tags, building, area) {
@@ -78,8 +209,40 @@ export function getStreamArea(stream, labels = {}) {
   };
 }
 
-export function buildBuildingTree(streams = [], labels = {}) {
+export function buildBuildingTree(streams = [], labels = {}, locationCatalog = {}) {
   const buildingMap = new Map();
+
+  normalizeLocationCatalog(locationCatalog).buildings.forEach((catalogBuilding) => {
+    const building = {
+      key: catalogBuilding.name,
+      name: catalogBuilding.name,
+      tag: `${BUILDING_PREFIX}${catalogBuilding.name}`,
+      assigned: true,
+      areas: new Map(),
+      cameraCount: 0,
+      onlineCount: 0,
+      warningCount: 0,
+      offlineCount: 0,
+      catalogOnly: true,
+    };
+
+    buildingMap.set(building.key, building);
+
+    catalogBuilding.areas.forEach((areaName) => {
+      const areaPath = `${catalogBuilding.name}/${areaName}`;
+      building.areas.set(areaPath, {
+        key: areaPath,
+        name: areaName,
+        tag: `${AREA_PREFIX}${areaPath}`,
+        assigned: true,
+        cameras: [],
+        onlineCount: 0,
+        warningCount: 0,
+        offlineCount: 0,
+        catalogOnly: true,
+      });
+    });
+  });
 
   streams
     .filter((stream) => stream && !stream.is_deleted)
@@ -87,24 +250,42 @@ export function buildBuildingTree(streams = [], labels = {}) {
       const building = getStreamBuilding(stream, labels);
       const area = getStreamArea(stream, labels);
 
+      const statusKind = getStreamStatusKind(stream);
+
       if (!buildingMap.has(building.key)) {
         buildingMap.set(building.key, {
           ...building,
           areas: new Map(),
           cameraCount: 0,
+          onlineCount: 0,
+          warningCount: 0,
+          offlineCount: 0,
         });
       }
 
       const buildingNode = buildingMap.get(building.key);
+      buildingNode.catalogOnly = false;
       if (!buildingNode.areas.has(area.key)) {
         buildingNode.areas.set(area.key, {
           ...area,
           cameras: [],
+          onlineCount: 0,
+          warningCount: 0,
+          offlineCount: 0,
         });
       }
 
-      buildingNode.areas.get(area.key).cameras.push(stream);
+      const areaNode = buildingNode.areas.get(area.key);
+      areaNode.catalogOnly = false;
+      areaNode.cameras.push(stream);
+      if (statusKind === 'online') areaNode.onlineCount += 1;
+      else if (statusKind === 'warning') areaNode.warningCount += 1;
+      else areaNode.offlineCount += 1;
+
       buildingNode.cameraCount += 1;
+      if (statusKind === 'online') buildingNode.onlineCount += 1;
+      else if (statusKind === 'warning') buildingNode.warningCount += 1;
+      else buildingNode.offlineCount += 1;
     });
 
   return Array.from(buildingMap.values())
