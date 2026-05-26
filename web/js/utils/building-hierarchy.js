@@ -10,6 +10,10 @@ export const ACCESS_TAG_KIND = {
 export const UNASSIGNED_BUILDING_KEY = '__unassigned_building__';
 export const GENERAL_AREA_KEY = '__general_area__';
 
+export function normalizeLocationName(value) {
+  return String(value || '').trim().replace(/\s+/g, ' ');
+}
+
 export function parseTagList(value) {
   if (!value) return [];
   return Array.from(new Set(
@@ -22,6 +26,58 @@ export function parseTagList(value) {
 
 export function joinTagList(tags) {
   return parseTagList(tags.join(',')).join(', ');
+}
+
+export function normalizeLocationCatalog(catalog = {}) {
+  const buildingMap = new Map();
+  const buildings = Array.isArray(catalog?.buildings) ? catalog.buildings : [];
+
+  buildings.forEach((building) => {
+    const name = normalizeLocationName(building?.name);
+    if (!name) return;
+
+    if (!buildingMap.has(name)) {
+      buildingMap.set(name, {
+        name,
+        areas: new Set(),
+      });
+    }
+
+    const buildingNode = buildingMap.get(name);
+    const areas = Array.isArray(building?.areas) ? building.areas : [];
+    areas.forEach((area) => {
+      const areaName = normalizeLocationName(area);
+      if (areaName) buildingNode.areas.add(areaName);
+    });
+  });
+
+  return {
+    buildings: Array.from(buildingMap.values())
+      .map((building) => ({
+        name: building.name,
+        areas: Array.from(building.areas).sort((a, b) => a.localeCompare(b)),
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name)),
+  };
+}
+
+export function addLocationToCatalog(catalog = {}, building, area = '') {
+  const next = normalizeLocationCatalog(catalog);
+  const buildingName = normalizeLocationName(building);
+  const areaName = normalizeLocationName(area);
+  if (!buildingName) return next;
+
+  let buildingNode = next.buildings.find((item) => item.name === buildingName);
+  if (!buildingNode) {
+    buildingNode = { name: buildingName, areas: [] };
+    next.buildings.push(buildingNode);
+  }
+
+  if (areaName && !buildingNode.areas.includes(areaName)) {
+    buildingNode.areas.push(areaName);
+  }
+
+  return normalizeLocationCatalog(next);
 }
 
 export function getTagValue(tags, prefix) {
@@ -153,8 +209,40 @@ export function getStreamArea(stream, labels = {}) {
   };
 }
 
-export function buildBuildingTree(streams = [], labels = {}) {
+export function buildBuildingTree(streams = [], labels = {}, locationCatalog = {}) {
   const buildingMap = new Map();
+
+  normalizeLocationCatalog(locationCatalog).buildings.forEach((catalogBuilding) => {
+    const building = {
+      key: catalogBuilding.name,
+      name: catalogBuilding.name,
+      tag: `${BUILDING_PREFIX}${catalogBuilding.name}`,
+      assigned: true,
+      areas: new Map(),
+      cameraCount: 0,
+      onlineCount: 0,
+      warningCount: 0,
+      offlineCount: 0,
+      catalogOnly: true,
+    };
+
+    buildingMap.set(building.key, building);
+
+    catalogBuilding.areas.forEach((areaName) => {
+      const areaPath = `${catalogBuilding.name}/${areaName}`;
+      building.areas.set(areaPath, {
+        key: areaPath,
+        name: areaName,
+        tag: `${AREA_PREFIX}${areaPath}`,
+        assigned: true,
+        cameras: [],
+        onlineCount: 0,
+        warningCount: 0,
+        offlineCount: 0,
+        catalogOnly: true,
+      });
+    });
+  });
 
   streams
     .filter((stream) => stream && !stream.is_deleted)
@@ -176,6 +264,7 @@ export function buildBuildingTree(streams = [], labels = {}) {
       }
 
       const buildingNode = buildingMap.get(building.key);
+      buildingNode.catalogOnly = false;
       if (!buildingNode.areas.has(area.key)) {
         buildingNode.areas.set(area.key, {
           ...area,
@@ -187,6 +276,7 @@ export function buildBuildingTree(streams = [], labels = {}) {
       }
 
       const areaNode = buildingNode.areas.get(area.key);
+      areaNode.catalogOnly = false;
       areaNode.cameras.push(stream);
       if (statusKind === 'online') areaNode.onlineCount += 1;
       else if (statusKind === 'warning') areaNode.warningCount += 1;

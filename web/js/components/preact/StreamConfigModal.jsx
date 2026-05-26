@@ -6,7 +6,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'preact/hooks';
 import { ZoneEditor } from './ZoneEditor.jsx';
 import { obfuscateUrlCredentials } from '../../utils/url-utils.js';
-import { getAreaName, getBuildingName, setBuildingAreaTags } from '../../utils/building-hierarchy.js';
+import { getAreaName, getBuildingName, normalizeLocationCatalog, setBuildingAreaTags } from '../../utils/building-hierarchy.js';
 import { useI18n } from '../../i18n.js';
 import { showStatusMessage } from './ToastContainer.jsx';
 import {
@@ -302,7 +302,8 @@ export function StreamConfigModal({
   onClose,
   onRefreshModels,
   hideCredentials = false,
-  streams = []
+  streams = [],
+  locationCatalog = { buildings: [] }
 }) {
   const { t } = useI18n();
   const [showZoneEditor, setShowZoneEditor] = useState(false);
@@ -318,6 +319,17 @@ export function StreamConfigModal({
     const buildings = new Set();
     const areasByBuilding = new Map();
     const allAreas = new Set();
+
+    normalizeLocationCatalog(locationCatalog).buildings.forEach((building) => {
+      buildings.add(building.name);
+      building.areas.forEach((area) => {
+        allAreas.add(area);
+        if (!areasByBuilding.has(building.name)) {
+          areasByBuilding.set(building.name, new Set());
+        }
+        areasByBuilding.get(building.name).add(area);
+      });
+    });
 
     (Array.isArray(streams) ? streams : []).forEach((stream) => {
       const building = getBuildingName(stream?.tags || '');
@@ -343,7 +355,7 @@ export function StreamConfigModal({
       buildings: Array.from(buildings).sort((a, b) => a.localeCompare(b)),
       areas: Array.from(scopedAreas).sort((a, b) => a.localeCompare(b)),
     };
-  }, [currentBuildingName, streams]);
+  }, [currentBuildingName, locationCatalog, streams]);
   const updateLocationTags = useCallback((nextBuilding, nextArea) => {
     onInputChange({
       target: {

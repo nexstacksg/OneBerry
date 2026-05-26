@@ -1,9 +1,11 @@
 import {
   ACCESS_TAG_KIND,
+  addLocationToCatalog,
   buildBuildingTree,
   compareAccessTags,
   getAccessTagKind,
   getAccessTagLabel,
+  normalizeLocationCatalog,
 } from '../js/utils/building-hierarchy.js';
 
 describe('building hierarchy access tags', () => {
@@ -42,6 +44,46 @@ describe('building hierarchy access tags', () => {
       onlineCount: 1,
       warningCount: 1,
       offlineCount: 1,
+    });
+  });
+
+  test('normalizes manual location catalog entries', () => {
+    const catalog = addLocationToCatalog(
+      {
+        buildings: [
+          { name: ' North Tower ', areas: ['Lobby', 'Lobby'] },
+        ],
+      },
+      'North Tower',
+      'Roof'
+    );
+
+    expect(normalizeLocationCatalog(catalog)).toEqual({
+      buildings: [
+        { name: 'North Tower', areas: ['Lobby', 'Roof'] },
+      ],
+    });
+  });
+
+  test('shows catalog-only buildings and areas before cameras are assigned', () => {
+    const tree = buildBuildingTree([], {}, {
+      buildings: [
+        { name: 'North Tower', areas: ['Lobby'] },
+      ],
+    });
+
+    expect(tree).toHaveLength(1);
+    expect(tree[0]).toMatchObject({
+      name: 'North Tower',
+      tag: 'building:North Tower',
+      cameraCount: 0,
+      catalogOnly: true,
+    });
+    expect(tree[0].areas[0]).toMatchObject({
+      name: 'Lobby',
+      tag: 'area:North Tower/Lobby',
+      cameras: [],
+      catalogOnly: true,
     });
   });
 });

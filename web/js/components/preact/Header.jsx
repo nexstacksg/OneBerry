@@ -183,13 +183,27 @@ export function Header({ version = VERSION }) {
       refetchInterval: 30000,
     }
   );
+  const { data: locationCatalog = { buildings: [] } } = useQuery(
+    ['locations'],
+    '/api/locations',
+    {
+      headers: getAuthHeaders(),
+      timeout: 10000,
+      retries: 1,
+      retryDelay: 1000,
+    },
+    {
+      refetchInterval: 30000,
+    }
+  );
   const buildingTree = useMemo(() => buildBuildingTree(
     Array.isArray(sidebarStreams) ? sidebarStreams : [],
     {
       unassignedBuilding: t('sidebar.unassignedBuilding'),
       generalArea: t('sidebar.generalArea'),
-    }
-  ), [sidebarStreams, t]);
+    },
+    locationCatalog
+  ), [locationCatalog, sidebarStreams, t]);
   const liveSelection = useMemo(() => {
     if (activeNav !== 'nav-live' || typeof window === 'undefined') {
       return { tag: '', stream: '' };
