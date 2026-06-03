@@ -9,6 +9,7 @@
 
 const { chromium } = require('playwright');
 const path = require('path');
+const { drawDetectionZoneInCanvas } = require('./script-utils.js');
 
 const config = {
   url: process.argv.find((a, i) => process.argv[i-1] === '--url') || 'http://192.168.50.248:8080',
@@ -99,33 +100,25 @@ async function captureZoneEditorWithVehicleZone(page) {
   await sleep(2000);
 
   const canvas = zoneEditorDialog.locator('canvas').first();
-  let box = null;
-  for (let i = 0; i < 20; i++) {
-    box = await canvas.boundingBox();
-    if (box && box.width > 0 && box.height > 0) break;
-    await sleep(500);
-  }
-  
-  if (box) {
+  const zoneResult = await drawDetectionZoneInCanvas({
+    zoneEditorDialog,
+    sleep,
+    clickDelayMs: 300,
+    points: (box) => [
+      { x: box.width * 0.1, y: box.height * 0.5 },
+      { x: box.width * 0.9, y: box.height * 0.5 },
+      { x: box.width * 0.9, y: box.height * 0.95 },
+      { x: box.width * 0.1, y: box.height * 0.95 },
+    ],
+  });
+
+  if (zoneResult.boxFound) {
     console.log('  Drawing zone around driveway/vehicle area...');
-    // Draw a zone in the lower portion of the frame (where vehicles typically are)
-    const points = [
-      { x: box.width * 0.1, y: box.height * 0.5 },   // Left middle
-      { x: box.width * 0.9, y: box.height * 0.5 },   // Right middle  
-      { x: box.width * 0.9, y: box.height * 0.95 },  // Right bottom
-      { x: box.width * 0.1, y: box.height * 0.95 },  // Left bottom
-    ];
-    
-    for (const pt of points) {
-      await canvas.click({ position: { x: pt.x, y: pt.y } });
-      await sleep(300);
+    if (!zoneResult.drawn) {
+      console.log('  Could not draw zone points in editor');
+    } else {
+      console.log('  ✓ Zone drawn');
     }
-    
-    // Complete the zone
-    const completeBtn = zoneEditorDialog.locator('button').filter({ hasText: /Complete Zone/i }).first();
-    await completeBtn.click();
-    await sleep(1000);
-    console.log('  ✓ Zone drawn');
   }
   
   await sleep(1000);
@@ -234,4 +227,3 @@ async function captureRecordingPlayback(page) {
     await browser.close();
   }
 })();
-

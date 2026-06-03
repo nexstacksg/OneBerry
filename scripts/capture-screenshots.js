@@ -23,10 +23,11 @@
 const { chromium } = require('playwright');
 const fs = require('fs');
 const path = require('path');
+const { parseScriptArgs, drawDetectionZoneInCanvas } = require('./script-utils.js');
 
-// Parse command line arguments
-const args = process.argv.slice(2);
-const config = {
+const config = parseScriptArgs(
+  process.argv.slice(2),
+  {
   url: 'http://localhost:8080',
   username: 'admin',
   password: 'admin',
@@ -34,33 +35,17 @@ const config = {
   theme: 'blue',
   darkMode: false,
   allThemes: false,
-};
-
-for (let i = 0; i < args.length; i++) {
-  switch (args[i]) {
-    case '--url':
-      config.url = args[++i];
-      break;
-    case '--username':
-      config.username = args[++i];
-      break;
-    case '--password':
-      config.password = args[++i];
-      break;
-    case '--output':
-      config.outputDir = args[++i];
-      break;
-    case '--theme':
-      config.theme = args[++i];
-      break;
-    case '--dark':
-      config.darkMode = true;
-      break;
-    case '--all-themes':
-      config.allThemes = true;
-      break;
+  },
+  {
+    '--url': { key: 'url' },
+    '--username': { key: 'username' },
+    '--password': { key: 'password' },
+    '--output': { key: 'outputDir' },
+    '--theme': { key: 'theme' },
+    '--dark': { key: 'darkMode', type: 'boolean' },
+    '--all-themes': { key: 'allThemes', type: 'boolean' },
   }
-}
+);
 
 // Ensure output directory exists
 if (!fs.existsSync(config.outputDir)) {
@@ -538,48 +523,27 @@ async function captureStreamConfiguration(page) {
 
             const canvas = zoneEditorDialog.locator('canvas').first();
 
-            // Wait for the canvas to have a non-zero bounding box so
-            // clicks actually hit the drawing area. The snapshot load
-            // path controls when the canvas is shown.
-            let box = null;
-            for (let i = 0; i < 20; i++) {
-              box = await canvas.boundingBox();
-              if (box && box.width > 0 && box.height > 0) break;
-              await sleep(500);
-            }
-
-            if (!box) {
-              console.log('  Zone editor canvas never became ready for drawing');
-            } else {
-              console.log('  Drawing a sample detection zone for documentation...');
-
-              // Define points relative to the canvas so the clicks are
-              // guaranteed to hit the drawing surface even if there are
-              // other overlays on the page.
-              const points = [
+            const zoneResult = await drawDetectionZoneInCanvas({
+              zoneEditorDialog,
+              points: (box) => [
                 { x: box.width * 0.3, y: box.height * 0.3 },
                 { x: box.width * 0.7, y: box.height * 0.3 },
                 { x: box.width * 0.7, y: box.height * 0.7 },
                 { x: box.width * 0.3, y: box.height * 0.7 },
-              ];
+              ],
+              sleep,
+              clickDelayMs: 250,
+              logger: (message) => console.log(`  ${message}`)
+            });
 
-              for (const point of points) {
-                await canvas.click({ position: { x: point.x, y: point.y } });
-                await sleep(250);
-              }
-
-              // Complete the polygon so it becomes a saved zone in the
-              // editor UI.
-              try {
-                const completeButton = zoneEditorDialog
-                  .locator('button')
-                  .filter({ hasText: /Complete Zone/i })
-                  .first();
-                await completeButton.waitFor({ timeout: 3000 });
-                await completeButton.click();
-                await sleep(1000);
-              } catch (e) {
-                console.log(`  Could not click Complete Zone button: ${e.message}`);
+            if (!zoneResult.boxFound) {
+              console.log('  Zone editor canvas never became ready for drawing');
+            } else {
+              console.log('  Drawing a sample detection zone for documentation...');
+              if (!zoneResult.drawn) {
+                console.log('  Could not draw zone points, continuing...');
+              } else {
+                console.log('  ✓ Zone drawn');
               }
             }
 
@@ -815,4 +779,3 @@ async function main() {
 }
 
 main();
-

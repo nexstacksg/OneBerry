@@ -20,7 +20,7 @@ import { StreamQualitySelector } from './StreamQualitySelector.jsx';
 import { useStreamQuality } from './useStreamQuality.js';
 import { updateStreamRecordingQuality } from '../../utils/stream-quality-utils.js';
 import { captureVideoSnapshot, createPrivacyHandlers } from './video-cell-helpers.js';
-import { PrivacyModeOverlays } from './VideoCellOverlays.jsx';
+import { PrivacyModeOverlays, StreamStatusBadge } from './VideoCellOverlays.jsx';
 import Hls from 'hls.js';
 
 /**
@@ -659,60 +659,27 @@ export function HLSVideoCell({
       )}
 
       {/* Stream name overlay */}
-      {showLabels && (
-        <div
-          className="stream-name-overlay"
+      <StreamStatusBadge
+        stream={stream}
+        t={t}
+        show={showLabels}
+        className="stream-name-overlay"
+        style={{
+          zIndex: 15,
+        }}
+      >
+        <span
           style={{
-            position: 'absolute',
-            top: '10px',
-            left: '10px',
-            padding: '5px 10px',
-            backgroundColor: 'rgba(0, 0, 0, 0.5)',
-            color: 'white',
-            borderRadius: '4px',
-            fontSize: '14px',
-            zIndex: 15,
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px'
-          }}
-        >
-          <span
-            style={{
-              width: '8px',
-              height: '8px',
-              borderRadius: '50%',
-              flexShrink: 0,
-              backgroundColor:
-                stream.status === 'Running'      ? 'rgba(34, 197, 94, 0.9)'  :
-                stream.status === 'Starting'     ? 'rgba(234, 179, 8, 0.9)'  :
-                stream.status === 'Reconnecting' ? 'rgba(234, 179, 8, 0.9)'  :
-                stream.status === 'Error'        ? 'rgba(239, 68, 68, 0.9)'  :
-                stream.status === 'Stopping'     ? 'rgba(234, 179, 8, 0.9)'  :
-                'rgba(148, 163, 184, 0.9)'
-            }}
-            title={`${t('streams.streamStatus')}: ${
-              stream.status === 'Running'      ? t('streams.running')      :
-              stream.status === 'Starting'     ? t('streams.starting')     :
-              stream.status === 'Reconnecting' ? t('streams.reconnecting') :
-              stream.status === 'Error'        ? t('streams.error')        :
-              stream.status === 'Stopping'     ? t('streams.stopping')     :
-              stream.status === 'Stopped'      ? t('streams.stopped')      :
-              (stream.status || t('common.unknown'))
-            }`}
-          />
-          {stream.name}
-          <span style={{
             fontSize: '10px',
             padding: '1px 4px',
             borderRadius: '3px',
             backgroundColor: hlsMode === 'go2rtc' ? 'rgba(0, 150, 255, 0.7)' : 'rgba(100, 100, 100, 0.7)',
             color: 'white'
-          }}>
-            {hlsMode === 'go2rtc' ? 'go2rtc' : 'HLS'}
-          </span>
-        </div>
-      )}
+          }}
+        >
+          {hlsMode === 'go2rtc' ? 'go2rtc' : 'HLS'}
+        </span>
+      </StreamStatusBadge>
 
       {/* Stream controls */}
       {showControls && (
