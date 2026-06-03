@@ -2,11 +2,12 @@
  * Users Table Component
  */
 
-import { useState, useMemo, useCallback } from 'preact/hooks';
+import { useCallback } from 'preact/hooks';
 import { getUserRoleLabel } from './UserRoles.js';
 import { getUserGroupLabels } from './userGroups.js';
 import { formatLocalDateTime } from '../../../utils/date-utils.js';
 import { useI18n } from '../../../i18n.js';
+import { useSortableData } from '../useSortableData.js';
 
 /**
  * Users Table Component
@@ -24,58 +25,22 @@ export function UsersTable({ users, onEdit, onDelete, onApiKey, onMfa }) {
   const normalizedUsers = Array.isArray(users) ? users : [];
   const NO_SORT_COLUMN = '';
 
-  // Sorting state
-  const [sortColumn, setSortColumn] = useState(NO_SORT_COLUMN);
-  const [sortDirection, setSortDirection] = useState('asc');
-
-  const handleSort = (column) => {
-    if (sortColumn === column) {
-      setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
-    } else {
-      setSortColumn(column);
-      setSortDirection('asc');
-    }
-  };
-
-  const sortedUsers = useMemo(() => {
-    if (sortColumn === NO_SORT_COLUMN) return normalizedUsers;
-    return [...normalizedUsers].sort((a, b) => {
-      let aVal, bVal;
-      if (sortColumn === 'id') {
-        aVal = a.id || 0;
-        bVal = b.id || 0;
-      } else if (sortColumn === 'username') {
-        aVal = (a.username || '').toLowerCase();
-        bVal = (b.username || '').toLowerCase();
-      } else if (sortColumn === 'email') {
-        aVal = (a.email || '').toLowerCase();
-        bVal = (b.email || '').toLowerCase();
-      } else if (sortColumn === 'role') {
-        aVal = a.role ?? 0;
-        bVal = b.role ?? 0;
-      } else if (sortColumn === 'group') {
-        aVal = getUserGroupLabels(a).join(', ').toLowerCase();
-        bVal = getUserGroupLabels(b).join(', ').toLowerCase();
-      } else if (sortColumn === 'status') {
-        aVal = a.is_active ? 1 : 0;
-        bVal = b.is_active ? 1 : 0;
-      } else if (sortColumn === 'password') {
-        aVal = a.password_change_locked ? 1 : 0;
-        bVal = b.password_change_locked ? 1 : 0;
-      } else if (sortColumn === 'mfa') {
-        aVal = a.totp_enabled ? 1 : 0;
-        bVal = b.totp_enabled ? 1 : 0;
-      } else if (sortColumn === 'lastLogin') {
-        aVal = a.last_login ? new Date(a.last_login).getTime() : 0;
-        bVal = b.last_login ? new Date(b.last_login).getTime() : 0;
-      } else {
-        return 0;
-      }
-      if (aVal < bVal) return sortDirection === 'asc' ? -1 : 1;
-      if (aVal > bVal) return sortDirection === 'asc' ? 1 : -1;
-      return 0;
-    });
-  }, [normalizedUsers, sortColumn, sortDirection]);
+  const {
+    sortedItems: sortedUsers,
+    sortColumn,
+    sortDirection,
+    handleSort,
+  } = useSortableData(normalizedUsers, NO_SORT_COLUMN, {
+    id: (user) => user.id || 0,
+    username: (user) => (user.username || '').toLowerCase(),
+    email: (user) => (user.email || '').toLowerCase(),
+    role: (user) => user.role ?? 0,
+    group: (user) => getUserGroupLabels(user).join(', ').toLowerCase(),
+    status: (user) => user.is_active ? 1 : 0,
+    password: (user) => user.password_change_locked ? 1 : 0,
+    mfa: (user) => user.totp_enabled ? 1 : 0,
+    lastLogin: (user) => user.last_login ? new Date(user.last_login).getTime() : 0,
+  });
 
   // Create memoized handlers for each button to maintain stable references
   const handleEdit = useCallback((user, e) => {

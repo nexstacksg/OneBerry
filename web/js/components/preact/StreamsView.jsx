@@ -29,6 +29,65 @@ import {
   fetchJSON
 } from '../../query-client.js';
 import { useI18n } from '../../i18n.js';
+import { useSortableData } from './useSortableData.js';
+
+function buildStreamFormState(stream, motion, {
+  name = stream.name || '',
+  resetVideo = false,
+  detectionZones = stream.detection_zones || [],
+} = {}) {
+  return {
+    ...stream,
+    name,
+    width: resetVideo ? 0 : (stream.width || 0),
+    height: resetVideo ? 0 : (stream.height || 0),
+    fps: resetVideo ? 0 : (stream.fps || 0),
+    codec: stream.codec || 'h264',
+    protocol: (stream.protocol != null ? stream.protocol : 0).toString(),
+    priority: (stream.priority != null ? stream.priority : 5).toString(),
+    segment: stream.segment_duration || 30,
+    detectionThreshold: stream.detection_threshold || 50,
+    detectionInterval: stream.detection_interval || 10,
+    preBuffer: stream.pre_detection_buffer || 10,
+    detectionZones,
+    postBuffer: stream.post_detection_buffer || 30,
+    secondaryUrl: stream.secondary_url || '',
+    adminUrl: stream.admin_url || '',
+    streamingEnabled: stream.streaming_enabled !== undefined ? stream.streaming_enabled : true,
+    isOnvif: stream.isOnvif !== undefined ? stream.isOnvif : false,
+    onvifUsername: stream.onvif_username || '',
+    onvifPassword: stream.onvif_password || '',
+    onvifProfile: stream.onvif_profile || '',
+    onvifPort: stream.onvif_port || 0,
+    detectionEnabled: stream.detection_based_recording || false,
+    detectionModel: stream.detection_model || '',
+    recordAudio: stream.record_audio !== undefined ? stream.record_audio : true,
+    backchannelEnabled: stream.backchannel_enabled !== undefined ? stream.backchannel_enabled : false,
+    motionRecordingEnabled: motion ? !!motion.enabled : false,
+    motionPreBuffer: motion ? (motion.pre_buffer_seconds || 5) : 5,
+    motionPostBuffer: motion ? (motion.post_buffer_seconds || 10) : 10,
+    motionMaxDuration: motion ? (motion.max_file_duration || 300) : 300,
+    motionRetentionDays: motion ? (motion.retention_days || 7) : 7,
+    motionCodec: motion ? (motion.codec || 'h264') : 'h264',
+    motionQuality: motion ? (motion.quality || 'medium') : 'medium',
+    ptzEnabled: stream.ptz_enabled !== undefined ? stream.ptz_enabled : false,
+    ptzMaxX: stream.ptz_max_x || 0,
+    ptzMaxY: stream.ptz_max_y || 0,
+    ptzMaxZ: stream.ptz_max_z || 0,
+    ptzHasHome: stream.ptz_has_home !== undefined ? stream.ptz_has_home : false,
+    detectionObjectFilter: stream.detection_object_filter || 'none',
+    detectionObjectFilterList: stream.detection_object_filter_list || '',
+    retentionDays: stream.retention_days || 0,
+    detectionRetentionDays: stream.detection_retention_days || 0,
+    maxStorageMb: stream.max_storage_mb || 0,
+    recordOnSchedule: stream.record_on_schedule || false,
+    recordingSchedule: (Array.isArray(stream.recording_schedule) && stream.recording_schedule.length === 168)
+      ? stream.recording_schedule
+      : Array(168).fill(true),
+    tags: stream.tags || '',
+    motionTriggerSource: stream.motion_trigger_source || ''
+  };
+}
 
 /**
  * StreamsView component
@@ -216,50 +275,20 @@ export function StreamsView() {
   // Process the response to handle both array and object formats
   const streams = Array.isArray(streamsResponse) ? streamsResponse : (streamsResponse.streams || []);
 
-  // Sorting state for the streams table
   const DEFAULT_SORT_COLUMN = null;
-  const [sortColumn, setSortColumn] = useState(DEFAULT_SORT_COLUMN);
-  const [sortDirection, setSortDirection] = useState('asc');
-
-  const handleSort = (column) => {
-    if (sortColumn === column) {
-      setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
-    } else {
-      setSortColumn(column);
-      setSortDirection('asc');
-    }
-  };
-
-  const sortedStreams = (() => {
-    if (sortColumn === DEFAULT_SORT_COLUMN) return streams;
-    return [...streams].sort((a, b) => {
-      let aVal, bVal;
-      if (sortColumn === 'name') {
-        aVal = (a.name || '').toLowerCase();
-        bVal = (b.name || '').toLowerCase();
-      } else if (sortColumn === 'status') {
-        aVal = (a.status || '').toLowerCase();
-        bVal = (b.status || '').toLowerCase();
-      } else if (sortColumn === 'url') {
-        aVal = (a.url || '').toLowerCase();
-        bVal = (b.url || '').toLowerCase();
-      } else if (sortColumn === 'resolution') {
-        aVal = (a.width || 0) * (a.height || 0);
-        bVal = (b.width || 0) * (b.height || 0);
-      } else if (sortColumn === 'fps') {
-        aVal = a.fps || 0;
-        bVal = b.fps || 0;
-      } else if (sortColumn === 'recording') {
-        aVal = a.record ? 1 : 0;
-        bVal = b.record ? 1 : 0;
-      } else {
-        return 0;
-      }
-      if (aVal < bVal) return sortDirection === 'asc' ? -1 : 1;
-      if (aVal > bVal) return sortDirection === 'asc' ? 1 : -1;
-      return 0;
-    });
-  })();
+  const {
+    sortedItems: sortedStreams,
+    sortColumn,
+    sortDirection,
+    handleSort,
+  } = useSortableData(streams, DEFAULT_SORT_COLUMN, {
+    name: (stream) => (stream.name || '').toLowerCase(),
+    status: (stream) => (stream.status || '').toLowerCase(),
+    url: (stream) => (stream.url || '').toLowerCase(),
+    resolution: (stream) => (stream.width || 0) * (stream.height || 0),
+    fps: (stream) => stream.fps || 0,
+    recording: (stream) => stream.record ? 1 : 0,
+  });
 
   // Default stream state
   const [currentStream, setCurrentStream] = useState({
@@ -868,66 +897,7 @@ export function StreamsView() {
       const stream = data.stream || {};
       const motion = data.motion_config || null;
 
-      setCurrentStream({
-        ...stream,
-        // Preserve the stored video parameters so the user can review or change them
-        width: stream.width || 0,
-        height: stream.height || 0,
-        fps: stream.fps || 0,
-        codec: stream.codec || 'h264',
-        protocol: (stream.protocol != null ? stream.protocol : 0).toString(),
-        priority: (stream.priority != null ? stream.priority : 5).toString(),
-        segment: stream.segment_duration || 30,
-        detectionThreshold: stream.detection_threshold || 50,
-        detectionInterval: stream.detection_interval || 10,
-        preBuffer: stream.pre_detection_buffer || 10,
-        detectionZones: stream.detection_zones || [],
-        postBuffer: stream.post_detection_buffer || 30,
-        // Map API fields to form fields
-        secondaryUrl: stream.secondary_url || '',
-        adminUrl: stream.admin_url || '',
-        streamingEnabled: stream.streaming_enabled !== undefined ? stream.streaming_enabled : true,
-        isOnvif: stream.isOnvif !== undefined ? stream.isOnvif : false,
-        // ONVIF credentials
-        onvifUsername: stream.onvif_username || '',
-        onvifPassword: stream.onvif_password || '',
-        onvifProfile: stream.onvif_profile || '',
-        onvifPort: stream.onvif_port || 0,
-        detectionEnabled: stream.detection_based_recording || false,
-        detectionModel: stream.detection_model || '',
-        recordAudio: stream.record_audio !== undefined ? stream.record_audio : true,
-        backchannelEnabled: stream.backchannel_enabled !== undefined ? stream.backchannel_enabled : false,
-        // Motion config mapping
-        motionRecordingEnabled: motion ? !!motion.enabled : false,
-        motionPreBuffer: motion ? (motion.pre_buffer_seconds || 5) : 5,
-        motionPostBuffer: motion ? (motion.post_buffer_seconds || 10) : 10,
-        motionMaxDuration: motion ? (motion.max_file_duration || 300) : 300,
-        motionRetentionDays: motion ? (motion.retention_days || 7) : 7,
-        motionCodec: motion ? (motion.codec || 'h264') : 'h264',
-        motionQuality: motion ? (motion.quality || 'medium') : 'medium',
-        // PTZ control settings
-        ptzEnabled: stream.ptz_enabled !== undefined ? stream.ptz_enabled : false,
-        ptzMaxX: stream.ptz_max_x || 0,
-        ptzMaxY: stream.ptz_max_y || 0,
-        ptzMaxZ: stream.ptz_max_z || 0,
-        ptzHasHome: stream.ptz_has_home !== undefined ? stream.ptz_has_home : false,
-        // Detection object filter settings
-        detectionObjectFilter: stream.detection_object_filter || 'none',
-        detectionObjectFilterList: stream.detection_object_filter_list || '',
-        // Retention policy settings
-        retentionDays: stream.retention_days || 0,
-        detectionRetentionDays: stream.detection_retention_days || 0,
-        maxStorageMb: stream.max_storage_mb || 0,
-        // Recording schedule
-        recordOnSchedule: stream.record_on_schedule || false,
-        recordingSchedule: (Array.isArray(stream.recording_schedule) && stream.recording_schedule.length === 168)
-          ? stream.recording_schedule
-          : Array(168).fill(true),
-        // Tags
-        tags: stream.tags || '',
-        // Cross-stream motion trigger source
-        motionTriggerSource: stream.motion_trigger_source || ''
-      });
+      setCurrentStream(buildStreamFormState(stream, motion));
       setIsEditing(true);
       setModalVisible(true);
     } catch (error) {
@@ -958,60 +928,11 @@ export function StreamsView() {
       const stream = data.stream || {};
       const motion = data.motion_config || null;
 
-      setCurrentStream({
-        ...stream,
-        // Clear the name so the user must provide a unique one
+      setCurrentStream(buildStreamFormState(stream, motion, {
         name: `${t('streams.copyOf')} ${stream.name || streamId}`,
-        // Reset stored video parameters — the cloned stream may point to a different camera
-        width: 0,
-        height: 0,
-        fps: 0,
-        codec: stream.codec || 'h264',
-        protocol: (stream.protocol != null ? stream.protocol : 0).toString(),
-        priority: (stream.priority != null ? stream.priority : 5).toString(),
-        segment: stream.segment_duration || 30,
-        detectionThreshold: stream.detection_threshold || 50,
-        detectionInterval: stream.detection_interval || 10,
-        preBuffer: stream.pre_detection_buffer || 10,
+        resetVideo: true,
         detectionZones: [],
-        postBuffer: stream.post_detection_buffer || 30,
-        secondaryUrl: stream.secondary_url || '',
-        adminUrl: stream.admin_url || '',
-        streamingEnabled: stream.streaming_enabled !== undefined ? stream.streaming_enabled : true,
-        isOnvif: stream.isOnvif !== undefined ? stream.isOnvif : false,
-        onvifUsername: stream.onvif_username || '',
-        onvifPassword: stream.onvif_password || '',
-        onvifProfile: stream.onvif_profile || '',
-        onvifPort: stream.onvif_port || 0,
-        detectionEnabled: stream.detection_based_recording || false,
-        detectionModel: stream.detection_model || '',
-        recordAudio: stream.record_audio !== undefined ? stream.record_audio : true,
-        backchannelEnabled: stream.backchannel_enabled !== undefined ? stream.backchannel_enabled : false,
-        motionRecordingEnabled: motion ? !!motion.enabled : false,
-        motionPreBuffer: motion ? (motion.pre_buffer_seconds || 5) : 5,
-        motionPostBuffer: motion ? (motion.post_buffer_seconds || 10) : 10,
-        motionMaxDuration: motion ? (motion.max_file_duration || 300) : 300,
-        motionRetentionDays: motion ? (motion.retention_days || 7) : 7,
-        motionCodec: motion ? (motion.codec || 'h264') : 'h264',
-        motionQuality: motion ? (motion.quality || 'medium') : 'medium',
-        ptzEnabled: stream.ptz_enabled !== undefined ? stream.ptz_enabled : false,
-        ptzMaxX: stream.ptz_max_x || 0,
-        ptzMaxY: stream.ptz_max_y || 0,
-        ptzMaxZ: stream.ptz_max_z || 0,
-        ptzHasHome: stream.ptz_has_home !== undefined ? stream.ptz_has_home : false,
-        detectionObjectFilter: stream.detection_object_filter || 'none',
-        detectionObjectFilterList: stream.detection_object_filter_list || '',
-        retentionDays: stream.retention_days || 0,
-        detectionRetentionDays: stream.detection_retention_days || 0,
-        maxStorageMb: stream.max_storage_mb || 0,
-        recordOnSchedule: stream.record_on_schedule || false,
-        recordingSchedule: (Array.isArray(stream.recording_schedule) && stream.recording_schedule.length === 168)
-          ? stream.recording_schedule
-          : Array(168).fill(true),
-        tags: stream.tags || '',
-        // Cross-stream motion trigger source
-        motionTriggerSource: stream.motion_trigger_source || ''
-      });
+      }));
       setIsEditing(false);
       setIsCloning(true);
       setModalVisible(true);
