@@ -1,0 +1,56 @@
+name: Fallow
+
+on:
+  pull_request:
+    paths:
+      - ".fallowrc.json"
+      - ".fallow-baselines/dupes.json"
+      - "package.json"
+      - "package-lock.json"
+      - "scripts/**/*.js"
+      - "tests/**/*.ts"
+      - "web/**/*.js"
+      - "web/**/*.jsx"
+      - "web/**/*.ts"
+      - "web/**/*.tsx"
+  push:
+    branches: [main]
+    paths:
+      - ".fallowrc.json"
+      - ".fallow-baselines/dupes.json"
+      - "package.json"
+      - "package-lock.json"
+      - "scripts/**/*.js"
+      - "tests/**/*.ts"
+      - "web/**/*.js"
+      - "web/**/*.jsx"
+      - "web/**/*.ts"
+      - "web/**/*.tsx"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  duplication:
+    name: Duplication
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Run Fallow duplication analysis
+        uses: fallow-rs/fallow@v2
+        with:
+          command: dupes
+          format: human
+          baseline: .fallow-baselines/dupes.json
+          fail-on-issues: true
+          auto-changed-since: true
+          dupes-mode: mild
+          min-tokens: "50"
+          ignore-imports: true

@@ -1,0 +1,20 @@
+{
+  "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json",
+  "ignorePatterns": [
+    "build/**",
+    "web/dist/**",
+    "web/js/version.js",
+    "node_modules/**",
+    "web/node_modules/**"
+  ],
+  "duplicates": {
+    "mode": "mild",
+    "minTokens": 50,
+    "minLines": 5,
+    "ignoreImports": true,
+    "ignore": [
+      "web/dist/**",
+      "web/js/version.js"
+    ]
+  }
+}

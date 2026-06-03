@@ -10,6 +10,7 @@ import { useQuery, useQueryClient } from '../../query-client.js';
 import { SnapshotManager, useSnapshotManager } from './SnapshotManager.jsx';
 import { HLSVideoCell } from './HLSVideoCell.jsx';
 import { MSEVideoCell } from './MSEVideoCell.jsx';
+import { WebRTCVideoCell } from './WebRTCVideoCell.jsx';
 import { FullscreenTimelineOverlay } from './FullscreenTimelineOverlay.jsx';
 import { isGo2rtcEnabled } from '../../utils/settings-utils.js';
 import { useCameraOrder } from './useCameraOrder.js';
@@ -21,7 +22,7 @@ import { useI18n } from '../../i18n.js';
  * Convert the old single-string layout value to cols/rows for backward compat.
  * Defined as a function declaration so it hoists safely in the bundle.
  */
-function legacyLayoutToColsRowsHLS(layout) {
+function legacyLayoutToColsRows(layout) {
   switch (layout) {
     case '1':  return [1, 1];
     case '2':  return [2, 1];
@@ -33,11 +34,14 @@ function legacyLayoutToColsRowsHLS(layout) {
 }
 
 /**
- * LiveView component
+ * Shared live camera grid for HLS, MSE, and WebRTC modes.
  * @returns {JSX.Element} LiveView component
  */
-export function LiveView({isWebRTCDisabled}) {
+export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
   const { t } = useI18n();
+  const isWebRTC = mode === 'webrtc';
+  const storagePrefix = isWebRTC ? 'webrtc' : 'hls';
+  const logLabel = isWebRTC ? 'WebRTC' : 'HLS';
   // Use the snapshot manager hook
   useSnapshotManager();
 
@@ -50,7 +54,7 @@ export function LiveView({isWebRTCDisabled}) {
   // Tag filter: '' means "All"
   const [tagFilter, setTagFilter] = useState(() => {
     const p = new URLSearchParams(window.location.search);
-    return p.get('tag') || localStorage.getItem('lightnvr-hls-tag-filter') || '';
+    return p.get('tag') || localStorage.getItem(`lightnvr-${storagePrefix}-tag-filter`) || '';
   });
 
   // State for toggling stream labels and controls visibility
@@ -81,6 +85,7 @@ export function LiveView({isWebRTCDisabled}) {
   // State for go2rtc mode - determines whether to use MSE or HLS
   // Initialize from URL param if present
   const [useMSE, setUseMSE] = useState(() => {
+    if (isWebRTC) return false;
     const urlParams = new URLSearchParams(window.location.search);
     return urlParams.get('mode') === 'mse';
   });
@@ -94,8 +99,8 @@ export function LiveView({isWebRTCDisabled}) {
     const p = new URLSearchParams(window.location.search);
     return p.get('cols') === null
       && localStorage.getItem('lightnvr-live-cols') === null
-      && localStorage.getItem('lightnvr-hls-cols') === null
-      && localStorage.getItem('lightnvr-hls-layout') === null;
+      && localStorage.getItem(`lightnvr-${storagePrefix}-cols`) === null
+      && localStorage.getItem(`lightnvr-${storagePrefix}-layout`) === null;
   });
   const [cols, setCols] = useState(() => {
     const urlParams = new URLSearchParams(window.location.search);
@@ -103,10 +108,10 @@ export function LiveView({isWebRTCDisabled}) {
     if (cp) return Math.max(1, Math.min(9, parseInt(cp, 10) || 2));
     const shared = localStorage.getItem('lightnvr-live-cols');
     if (shared) return Math.max(1, Math.min(9, parseInt(shared, 10) || 2));
-    const legacy = localStorage.getItem('lightnvr-hls-cols');
+    const legacy = localStorage.getItem(`lightnvr-${storagePrefix}-cols`);
     if (legacy) return Math.max(1, Math.min(9, parseInt(legacy, 10) || 2));
-    const oldLayout = localStorage.getItem('lightnvr-hls-layout');
-    if (oldLayout) return legacyLayoutToColsRowsHLS(oldLayout)[0];
+    const oldLayout = localStorage.getItem(`lightnvr-${storagePrefix}-layout`);
+    if (oldLayout) return legacyLayoutToColsRows(oldLayout)[0];
     return 2; // placeholder until autoGrid resolves
   });
   const [rows, setRows] = useState(() => {
@@ -115,10 +120,10 @@ export function LiveView({isWebRTCDisabled}) {
     if (rp) return Math.max(1, Math.min(9, parseInt(rp, 10) || 2));
     const shared = localStorage.getItem('lightnvr-live-rows');
     if (shared) return Math.max(1, Math.min(9, parseInt(shared, 10) || 2));
-    const legacy = localStorage.getItem('lightnvr-hls-rows');
+    const legacy = localStorage.getItem(`lightnvr-${storagePrefix}-rows`);
     if (legacy) return Math.max(1, Math.min(9, parseInt(legacy, 10) || 2));
-    const oldLayout = localStorage.getItem('lightnvr-hls-layout');
-    if (oldLayout) return legacyLayoutToColsRowsHLS(oldLayout)[1];
+    const oldLayout = localStorage.getItem(`lightnvr-${storagePrefix}-layout`);
+    if (oldLayout) return legacyLayoutToColsRows(oldLayout)[1];
     return 2; // placeholder until autoGrid resolves
   });
 
@@ -145,7 +150,7 @@ export function LiveView({isWebRTCDisabled}) {
       return streamParam;
     }
     // Check sessionStorage as a backup
-    const storedStream = sessionStorage.getItem('hls_selected_stream');
+    const storedStream = sessionStorage.getItem(`${storagePrefix}_selected_stream`);
     return storedStream || '';
   });
 
@@ -158,7 +163,7 @@ export function LiveView({isWebRTCDisabled}) {
       return Math.max(0, parseInt(pageParam, 10) - 1);
     }
     // Check sessionStorage as a backup
-    const storedPage = sessionStorage.getItem('hls_current_page');
+    const storedPage = sessionStorage.getItem(`${storagePrefix}_current_page`);
     if (storedPage) {
       // Convert from 1-based (stored) to 0-based (internal)
       return Math.max(0, parseInt(storedPage, 10) - 1);
@@ -174,21 +179,21 @@ export function LiveView({isWebRTCDisabled}) {
     const checkGo2rtcMode = async () => {
       try {
         const go2rtcEnabled = await isGo2rtcEnabled();
-        console.log(`[LiveView] go2rtc enabled: ${go2rtcEnabled}`);
+        console.log(`[${logLabel}View] go2rtc enabled: ${go2rtcEnabled}`);
         setGo2rtcAvailable(go2rtcEnabled);
         // If user requested MSE via URL but go2rtc is not enabled, fall back to HLS
-        if (useMSE && !go2rtcEnabled) {
+        if (!isWebRTC && useMSE && !go2rtcEnabled) {
           console.log('[LiveView] MSE requested but go2rtc not enabled, falling back to HLS');
           setUseMSE(false);
         }
       } catch (error) {
-        console.error('[LiveView] Error checking go2rtc status:', error);
+        console.error(`[${logLabel}View] Error checking go2rtc status:`, error);
         setGo2rtcAvailable(false);
-        setUseMSE(false);
+        if (!isWebRTC) setUseMSE(false);
       }
     };
     checkGo2rtcMode();
-  }, []);
+  }, [isWebRTC, logLabel, useMSE]);
 
   // Fetch streams using preact-query, and periodically refresh so stream
   // status (Running / Reconnecting / Stopped etc.) stays up-to-date.
@@ -204,7 +209,7 @@ export function LiveView({isWebRTCDisabled}) {
       retries: 2,     // Retry twice
       retryDelay: 1000 // 1 second between retries
     },
-    {
+    isWebRTC ? {} : {
       refetchInterval: 30000 // Re-poll stream list (and status) every 30 s
     }
   );
@@ -232,60 +237,7 @@ export function LiveView({isWebRTCDisabled}) {
       // Process the streams data
       const processStreams = async () => {
         try {
-          // Filter and process the streams
-          // Note: filterStreamsForHLS is defined below but called here via closure
-          // We use a local function to fetch stream details to avoid hoisting issues
-          const fetchStreamDetails = async (stream) => {
-            try {
-              const streamId = stream.id || stream.name;
-              const streamDetails = await queryClient.fetchQuery({
-                queryKey: ['stream-details', streamId],
-                queryFn: async () => {
-                  const response = await fetch(`/api/streams/${encodeURIComponent(streamId)}`);
-                  if (!response.ok) {
-                    throw new Error(`Failed to load details for stream ${stream.name}`);
-                  }
-                  return response.json();
-                },
-                staleTime: 30000 // 30 seconds
-              });
-              return streamDetails;
-            } catch (error) {
-              console.error(`Error loading details for stream ${stream.name}:`, error);
-              return stream;
-            }
-          };
-
-          // Fetch stream details with bounded concurrency (max 3 at a time) to avoid
-          // overwhelming the backend with simultaneous /api/streams/{id} requests.
-          const BATCH_SIZE = 3;
-          const detailedStreams = [];
-          for (let i = 0; i < streamsData.length; i += BATCH_SIZE) {
-            const batch = streamsData.slice(i, i + BATCH_SIZE);
-            const batchResults = await Promise.all(batch.map(fetchStreamDetails));
-            detailedStreams.push(...batchResults);
-          }
-          console.log('Loaded detailed streams for HLS view:', detailedStreams);
-
-          // Filter out streams that are soft deleted, administratively disabled, or not configured for streaming.
-          // Streams in privacy mode (privacy_mode=true) are kept visible with a privacy overlay.
-          const filteredStreams = detailedStreams.filter(stream => {
-            if (stream.is_deleted) {
-              console.log(`Stream ${stream.name} is soft deleted, filtering out`);
-              return false;
-            }
-            if (!stream.enabled) {
-              console.log(`Stream ${stream.name} is administratively disabled, filtering out`);
-              return false;
-            }
-            if (!stream.streaming_enabled) {
-              console.log(`Stream ${stream.name} is not configured for streaming, filtering out`);
-              return false;
-            }
-            return true;
-          });
-
-          console.log('Filtered streams for HLS view:', filteredStreams);
+          const filteredStreams = await filterStreamsForLiveView(streamsData);
 
           if (filteredStreams.length > 0) {
             setStreams(filteredStreams);
@@ -310,7 +262,7 @@ export function LiveView({isWebRTCDisabled}) {
               setSelectedStream(filteredStreams[0].name);
             }
           } else {
-            console.warn('No streams available for HLS view after filtering');
+            console.warn(`No streams available for ${logLabel} view after filtering`);
           }
         } catch (error) {
           console.error('Error processing streams:', error);
@@ -323,7 +275,7 @@ export function LiveView({isWebRTCDisabled}) {
     // Note: We intentionally only re-run when streamsData changes
     // selectedStream is read but we don't want to trigger refetch when it changes
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [streamsData, queryClient]);
+  }, [streamsData, queryClient, autoGrid]);
 
   // Sync layout/page/stream to URL — only meaningful once streams are loaded.
   useEffect(() => {
@@ -352,16 +304,16 @@ export function LiveView({isWebRTCDisabled}) {
     window.history.replaceState({}, '', url);
 
     // Persist to storage
-    if (currentPage > 0) sessionStorage.setItem('hls_current_page', (currentPage + 1).toString());
-    else sessionStorage.removeItem('hls_current_page');
+    if (currentPage > 0) sessionStorage.setItem(`${storagePrefix}_current_page`, (currentPage + 1).toString());
+    else sessionStorage.removeItem(`${storagePrefix}_current_page`);
     localStorage.setItem('lightnvr-live-cols', String(cols));
     localStorage.setItem('lightnvr-live-rows', String(rows));
     // Clean up old per-view keys so reads don't fall back to stale values
-    localStorage.removeItem('lightnvr-hls-cols');
-    localStorage.removeItem('lightnvr-hls-rows');
-    localStorage.removeItem('lightnvr-hls-layout');
-    if (isSingleStream && selectedStream) sessionStorage.setItem('hls_selected_stream', selectedStream);
-    else sessionStorage.removeItem('hls_selected_stream');
+    localStorage.removeItem(`lightnvr-${storagePrefix}-cols`);
+    localStorage.removeItem(`lightnvr-${storagePrefix}-rows`);
+    localStorage.removeItem(`lightnvr-${storagePrefix}-layout`);
+    if (isSingleStream && selectedStream) sessionStorage.setItem(`${storagePrefix}_selected_stream`, selectedStream);
+    else sessionStorage.removeItem(`${storagePrefix}_selected_stream`);
   }, [currentPage, cols, rows, isSingleStream, selectedStream, streams.length]);
 
   // Sync UI preference controls (group, labels, controls) to URL and localStorage.
@@ -382,12 +334,76 @@ export function LiveView({isWebRTCDisabled}) {
     window.history.replaceState({}, '', url);
 
     // Persist to localStorage for sessions without URL
-    if (tagFilter) localStorage.setItem('lightnvr-hls-tag-filter', tagFilter);
-    else localStorage.removeItem('lightnvr-hls-tag-filter');
+    if (tagFilter) localStorage.setItem(`lightnvr-${storagePrefix}-tag-filter`, tagFilter);
+    else localStorage.removeItem(`lightnvr-${storagePrefix}-tag-filter`);
     localStorage.setItem('lightnvr-show-labels', String(showLabels));
     localStorage.setItem('lightnvr-show-controls', String(showControls));
     localStorage.setItem('lightnvr-show-detections', String(showDetections));
-  }, [tagFilter, showLabels, showControls, showDetections]);
+  }, [tagFilter, showLabels, showControls, showDetections, storagePrefix]);
+
+  const filterStreamsForLiveView = async (sourceStreams) => {
+    try {
+      if (!sourceStreams || !Array.isArray(sourceStreams)) {
+        console.warn('No streams data provided to filter');
+        return [];
+      }
+
+      const fetchStreamDetails = async (stream) => {
+        try {
+          const streamId = stream.id || stream.name;
+          return await queryClient.fetchQuery({
+            queryKey: ['stream-details', streamId],
+            queryFn: async () => {
+              const response = await fetch(`/api/streams/${encodeURIComponent(streamId)}`);
+              if (!response.ok) {
+                throw new Error(`Failed to load details for stream ${stream.name}`);
+              }
+              return response.json();
+            },
+            staleTime: 30000
+          });
+        } catch (error) {
+          console.error(`Error loading details for stream ${stream.name}:`, error);
+          return stream;
+        }
+      };
+
+      const detailedStreams = [];
+      if (isWebRTC) {
+        detailedStreams.push(...await Promise.all(sourceStreams.map(fetchStreamDetails)));
+      } else {
+        const batchSize = 3;
+        for (let i = 0; i < sourceStreams.length; i += batchSize) {
+          const batch = sourceStreams.slice(i, i + batchSize);
+          detailedStreams.push(...await Promise.all(batch.map(fetchStreamDetails)));
+        }
+      }
+      console.log(`Loaded detailed streams for ${logLabel} view:`, detailedStreams);
+
+      const filteredStreams = detailedStreams.filter(stream => {
+        if (stream.is_deleted) {
+          console.log(`Stream ${stream.name} is soft deleted, filtering out`);
+          return false;
+        }
+        if (!stream.enabled) {
+          console.log(`Stream ${stream.name} is administratively disabled, filtering out`);
+          return false;
+        }
+        if (!stream.streaming_enabled) {
+          console.log(`Stream ${stream.name} is not configured for streaming, filtering out`);
+          return false;
+        }
+        return true;
+      });
+
+      console.log(`Filtered streams for ${logLabel} view:`, filteredStreams);
+      return filteredStreams;
+    } catch (error) {
+      console.error(`Error filtering streams for ${logLabel} view:`, error);
+      showStatusMessage(t('live.errorProcessingStreams', { message: error.message }));
+      return [];
+    }
+  };
 
   const buildingTree = useMemo(() => buildBuildingTree(
     streams,
@@ -409,7 +425,7 @@ export function LiveView({isWebRTCDisabled}) {
   // Apply tag filter before passing to the order hook
   const tagFilteredStreams = useMemo(() => {
     if (!tagFilter) return streams;
-    return streams.filter(s => s.tags && s.tags.split(',').map(t => t.trim()).includes(tagFilter));
+    return streams.filter(s => s.tags && s.tags.split(',').some(t => t.trim() === tagFilter));
   }, [streams, tagFilter]);
 
   // Camera ordering hook (operates on group-filtered streams)
@@ -422,7 +438,7 @@ export function LiveView({isWebRTCDisabled}) {
     handleDragOver,
     handleDrop,
     handleDragEnd,
-  } = useCameraOrder(tagFilteredStreams, 'hls');
+  } = useCameraOrder(tagFilteredStreams, storagePrefix);
 
   // Ensure current page is valid when orderedStreams or layout changes
   useEffect(() => {
@@ -464,7 +480,7 @@ export function LiveView({isWebRTCDisabled}) {
       console.log('Entering fullscreen mode for video cell');
       cellElement.requestFullscreen().catch(err => {
         console.error(`Error attempting to enable fullscreen: ${err.message}`);
-        showStatusMessage(t('live.couldNotEnableFullscreen', { message: err.message }));
+        showStatusMessage(isWebRTC ? `Could not enable fullscreen mode: ${err.message}` : t('live.couldNotEnableFullscreen', { message: err.message }));
       });
     } else {
       console.log('Exiting fullscreen mode');
@@ -499,8 +515,8 @@ export function LiveView({isWebRTCDisabled}) {
       }
     }
 
-    console.log(`[LiveView] streamsToShow computed: ${result.length} streams`, result.map(s => s.name));
-    console.log(`[LiveView] cols=${cols}, rows=${rows}, currentPage=${currentPage}, totalStreams=${orderedStreams.length}`);
+    console.log(`[${logLabel}View] streamsToShow computed: ${result.length} streams`, result.map(s => s.name));
+    console.log(`[${logLabel}View] cols=${cols}, rows=${rows}, currentPage=${currentPage}, totalStreams=${orderedStreams.length}`);
     return result;
   }, [orderedStreams, isSingleStream, selectedStream, currentPage, maxStreams, cols, rows]);
 
@@ -533,7 +549,11 @@ export function LiveView({isWebRTCDisabled}) {
           <h2 className="text-xl font-bold whitespace-nowrap">{t('live.liveView')}</h2>
           {/* View-mode tab strip: WebRTC | HLS | MSE */}
           <div className="inline-flex items-center bg-muted rounded-lg p-1 gap-1" style={{ position: 'relative', zIndex: 50 }}>
-            {!isWebRTCDisabled && (
+            {isWebRTC ? (
+              <span className="px-3 py-1.5 rounded text-sm font-medium bg-primary text-primary-foreground select-none">
+                WebRTC
+              </span>
+            ) : !isWebRTCDisabled && (
               <a
                 href="/index.html"
                 className="px-3 py-1.5 rounded text-sm font-medium transition-colors no-underline text-muted-foreground hover:bg-background hover:text-foreground focus:outline-none"
@@ -541,33 +561,51 @@ export function LiveView({isWebRTCDisabled}) {
                 WebRTC
               </a>
             )}
-            <button
-              className={`px-3 py-1.5 rounded text-sm font-medium transition-colors focus:outline-none ${!useMSE ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-background hover:text-foreground'}`}
-              onClick={() => {
-                if (useMSE) {
-                  setUseMSE(false);
-                  const url = new URL(window.location);
-                  url.searchParams.delete('mode');
-                  window.history.replaceState({}, '', url);
-                }
-              }}
-            >
-              {t('live.hlsShort')}
-            </button>
-            {go2rtcAvailable && (
+            {isWebRTC ? (
+              <a
+                href="/hls.html"
+                className="px-3 py-1.5 rounded text-sm font-medium transition-colors no-underline text-muted-foreground hover:bg-background hover:text-foreground focus:outline-none"
+              >
+                {t('live.hlsShort')}
+              </a>
+            ) : (
               <button
-                className={`px-3 py-1.5 rounded text-sm font-medium transition-colors focus:outline-none ${useMSE ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-background hover:text-foreground'}`}
+                className={`px-3 py-1.5 rounded text-sm font-medium transition-colors focus:outline-none ${!useMSE ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-background hover:text-foreground'}`}
                 onClick={() => {
-                  if (!useMSE) {
-                    setUseMSE(true);
+                  if (useMSE) {
+                    setUseMSE(false);
                     const url = new URL(window.location);
-                    url.searchParams.set('mode', 'mse');
+                    url.searchParams.delete('mode');
                     window.history.replaceState({}, '', url);
                   }
                 }}
               >
-                {t('live.mseShort')}
+                {t('live.hlsShort')}
               </button>
+            )}
+            {go2rtcAvailable && (
+              isWebRTC ? (
+                <a
+                  href="/hls.html?mode=mse"
+                  className="px-3 py-1.5 rounded text-sm font-medium transition-colors no-underline text-muted-foreground hover:bg-background hover:text-foreground focus:outline-none"
+                >
+                  {t('live.mseShort')}
+                </a>
+              ) : (
+                <button
+                  className={`px-3 py-1.5 rounded text-sm font-medium transition-colors focus:outline-none ${useMSE ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-background hover:text-foreground'}`}
+                  onClick={() => {
+                    if (!useMSE) {
+                      setUseMSE(true);
+                      const url = new URL(window.location);
+                      url.searchParams.set('mode', 'mse');
+                      window.history.replaceState({}, '', url);
+                    }
+                  }}
+                >
+                  {t('live.mseShort')}
+                </button>
+              )
             )}
           </div>
         </div>
@@ -619,7 +657,7 @@ export function LiveView({isWebRTCDisabled}) {
 
           {isSingleStream && (
             <div className="flex items-center gap-1.5">
-              <label htmlFor="stream-selector" className="text-sm whitespace-nowrap">{t('nav.streams')}:</label>
+              <label htmlFor="stream-selector" className="text-sm whitespace-nowrap">{isWebRTC ? t('live.stream') : t('nav.streams')}:</label>
               <select
                 id="stream-selector"
                 className="px-3 py-2 border border-border rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-primary bg-background text-foreground"
@@ -713,9 +751,9 @@ export function LiveView({isWebRTCDisabled}) {
 
           <button
             id="fullscreen-btn"
-            className="p-2 rounded-full bg-secondary hover:bg-secondary/80 text-secondary-foreground focus:outline-none"
+            className="p-2 rounded-full bg-secondary hover:bg-secondary/80 text-secondary-foreground focus:outline-none focus:ring-2 focus:ring-primary"
             onClick={() => toggleFullscreen()}
-            title={t('timeline.fullscreen')}
+            title={isWebRTC ? t('live.toggleFullscreen') : t('timeline.fullscreen')}
           >
             <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none"
                  stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -771,9 +809,10 @@ export function LiveView({isWebRTCDisabled}) {
               <a href="streams.html" className="btn-primary">{t('live.configureStreams')}</a>
             </div>
           ) : (
-            // Render video cells using MSEVideoCell (when go2rtc enabled) or HLSVideoCell (fallback)
+            // Render video cells using the active transport.
             //
             // Stagger strategy:
+            //   WebRTC:                 300ms per stream — avoid concurrent offer bursts
             //   MSE (go2rtc WebSocket): 200ms per stream — short burst for WS negotiation
             //   HLS via go2rtc:        no stagger — go2rtc is an HLS server built for many
             //                          concurrent clients; staggering 68 streams over 40 s caused
@@ -782,12 +821,14 @@ export function LiveView({isWebRTCDisabled}) {
             //                          triggering a stampede of HLS.js error-recovery re-registrations
             //   HLS native (FFmpeg):   300ms per stream — avoids N simultaneous ffmpeg spawns
             streamsToShow.map((stream, index) => {
-              const VideoCell = useMSE ? MSEVideoCell : HLSVideoCell;
-              const initDelay = useMSE
-                ? (index * 200)
-                : go2rtcAvailable
-                  ? 0               // go2rtc HLS: no stagger needed, go2rtc handles concurrency
-                  : (index * 300);  // native FFmpeg HLS: gentle stagger to avoid process-spawn burst
+              const VideoCell = isWebRTC ? WebRTCVideoCell : useMSE ? MSEVideoCell : HLSVideoCell;
+              const initDelay = isWebRTC
+                ? (index * 300)
+                : useMSE
+                  ? (index * 200)
+                  : go2rtcAvailable
+                    ? 0               // go2rtc HLS: no stagger needed, go2rtc handles concurrency
+                    : (index * 300);  // native FFmpeg HLS: gentle stagger to avoid process-spawn burst
               // Global index in orderedStreams for drag-and-drop (pagination offset)
               const globalIndex = currentPage * maxStreams + index;
 
@@ -835,7 +876,7 @@ export function LiveView({isWebRTCDisabled}) {
           )}
         </div>
 
-        {isFullscreen && isSingleStream && selectedStream && (
+        {!isWebRTC && isFullscreen && isSingleStream && selectedStream && (
           <FullscreenTimelineOverlay
             streamName={selectedStream}
             isVisible={true}
