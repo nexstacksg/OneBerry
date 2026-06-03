@@ -5,13 +5,12 @@
  */
 
 import { useState, useEffect, useRef } from 'preact/hooks';
-import { DetectionOverlay, drawDetectionsOnCanvas } from './DetectionOverlay.jsx';
+import { DetectionOverlay } from './DetectionOverlay.jsx';
 import { SnapshotButton } from './SnapshotManager.jsx';
 import { LoadingIndicator } from './LoadingIndicator.jsx';
 import { showStatusMessage } from './ToastContainer.jsx';
 import { PTZControls } from './PTZControls.jsx';
 import { getGo2rtcWebSocketUrl } from '../../utils/settings-utils.js';
-import { formatFilenameTimestamp } from '../../utils/date-utils.js';
 import { forceNavigation } from '../../utils/navigation-utils.js';
 import { formatUtils } from './recordings/formatUtils.js';
 import { useI18n } from '../../i18n.js';
@@ -20,6 +19,8 @@ import { createPlayerTelemetry } from '../../utils/player-telemetry.js';
 import { StreamQualitySelector } from './StreamQualitySelector.jsx';
 import { useStreamQuality } from './useStreamQuality.js';
 import { updateStreamRecordingQuality } from '../../utils/stream-quality-utils.js';
+import { captureVideoSnapshot, createPrivacyHandlers } from './video-cell-helpers.js';
+import { PrivacyModeOverlays } from './VideoCellOverlays.jsx';
 
 /**
  * MSEVideoCell component
@@ -416,108 +417,24 @@ export function MSEVideoCell({
     setIsLoading(true);
   };
 
-  /**
-   * Pause stream for privacy — sets privacy_mode=true without touching the enabled flag.
-   */
-  const handlePauseForPrivacy = async () => {
-    setIsTogglingEnabled(true);
-    try {
-      const res = await fetch(`/api/streams/${encodeURIComponent(stream.name)}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ set_privacy_mode: true }),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      setPrivacyActive(true);
-      setShowPrivacyConfirm(false);
-      queryClient.invalidateQueries({ queryKey: ['streams'] });
-    } catch (err) {
-      showStatusMessage(`${t('live.pauseForPrivacy')}: ${err.message}`, 'error', 5000);
-      setShowPrivacyConfirm(false);
-    } finally {
-      setIsTogglingEnabled(false);
-    }
-  };
-
-  /**
-   * Resume stream from privacy mode.
-   */
-  const handleResumeFromPrivacy = async () => {
-    setIsTogglingEnabled(true);
-    try {
-      const res = await fetch(`/api/streams/${encodeURIComponent(stream.name)}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ set_privacy_mode: false }),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      setPrivacyActive(false);
-      queryClient.invalidateQueries({ queryKey: ['streams'] });
-    } catch (err) {
-      showStatusMessage(`${t('live.resumeStream')}: ${err.message}`, 'error', 5000);
-    } finally {
-      setIsTogglingEnabled(false);
-    }
-  };
+  const { handlePauseForPrivacy, handleResumeFromPrivacy } = createPrivacyHandlers({
+    stream,
+    t,
+    queryClient,
+    setIsTogglingEnabled,
+    setPrivacyActive,
+    setShowPrivacyConfirm,
+  });
 
   /**
    * Handle snapshot button click
    */
-  const handleSnapshot = () => {
-    if (!videoRef.current) return;
-
-    const videoElement = videoRef.current;
-
-    // Ensure valid video dimensions for native resolution capture
-    if (!videoElement.videoWidth || !videoElement.videoHeight) {
-      showStatusMessage(t('live.cannotTakeSnapshotVideoNotLoaded'), 'error');
-      return;
-    }
-
-    // Create canvas at native video resolution
-    const canvas = document.createElement('canvas');
-    canvas.width = videoElement.videoWidth;
-    canvas.height = videoElement.videoHeight;
-    const ctx = canvas.getContext('2d');
-
-    // Draw video frame at native resolution
-    ctx.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
-
-    // Draw detections at native resolution if available (fixes boundary shift)
-    if (detectionOverlayRef.current && typeof detectionOverlayRef.current.getDetections === 'function') {
-      const detections = detectionOverlayRef.current.getDetections();
-      if (detections && detections.length > 0) {
-        drawDetectionsOnCanvas(ctx, canvas.width, canvas.height, detections);
-      }
-    }
-
-    // Auto-download for rapid-fire capability (also works in fullscreen)
-    const timestamp = formatFilenameTimestamp();
-    const fileName = `snapshot-${stream.name.replace(/\s+/g, '-')}-${timestamp}.jpg`;
-
-    canvas.toBlob((blob) => {
-      if (!blob) {
-        showStatusMessage(t('timeline.failedToCreateSnapshot'), 'error');
-        return;
-      }
-
-      const blobUrl = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = blobUrl;
-      link.download = fileName;
-      document.body.appendChild(link);
-      link.click();
-
-      setTimeout(() => {
-        if (document.body.contains(link)) {
-          document.body.removeChild(link);
-        }
-        URL.revokeObjectURL(blobUrl);
-      }, 1000);
-
-      showStatusMessage(t('live.snapshotSaved', { fileName }), 'success', 2000);
-    }, 'image/jpeg', 0.95);
-  };
+  const handleSnapshot = () => captureVideoSnapshot({
+    videoElement: videoRef.current,
+    detectionOverlay: detectionOverlayRef.current,
+    streamName: stream.name,
+    t,
+  });
 
   // Initialize MSE when component mounts or retry is triggered
   useEffect(() => {
@@ -928,68 +845,15 @@ export function MSEVideoCell({
         />
       )}
 
-      {/* Inline pause-for-privacy confirmation overlay */}
-      {showPrivacyConfirm && (
-        <div style={{
-          position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-          backgroundColor: 'rgba(0,0,0,0.75)', zIndex: 20,
-          display: 'flex', flexDirection: 'column',
-          alignItems: 'center', justifyContent: 'center', gap: '12px',
-          padding: '16px', textAlign: 'center'
-        }}>
-          <p style={{ color: 'white', fontSize: '14px', maxWidth: '240px', lineHeight: '1.4' }}>
-            {t('live.pauseForPrivacyConfirm')}
-          </p>
-          <div style={{ display: 'flex', gap: '8px' }}>
-            <button
-              onClick={handlePauseForPrivacy}
-              disabled={isTogglingEnabled}
-              style={{
-                padding: '6px 16px', backgroundColor: '#7c3aed', color: 'white',
-                border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '13px'
-              }}
-            >
-              {t('live.pauseForPrivacy')}
-            </button>
-            <button
-              onClick={() => setShowPrivacyConfirm(false)}
-              style={{
-                padding: '6px 16px', backgroundColor: 'rgba(255,255,255,0.2)', color: 'white',
-                border: '1px solid rgba(255,255,255,0.4)', borderRadius: '4px', cursor: 'pointer', fontSize: '13px'
-              }}
-            >
-              {t('common.cancel')}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Privacy mode overlay */}
-      {privacyActive && (
-        <div style={{
-          position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-          backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 15,
-          display: 'flex', flexDirection: 'column',
-          alignItems: 'center', justifyContent: 'center', gap: '12px'
-        }}>
-          <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.5)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/>
-            <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/>
-            <line x1="1" y1="1" x2="23" y2="23"/>
-          </svg>
-          <p style={{ color: 'rgba(255,255,255,0.7)', fontSize: '14px' }}>{t('live.streamPausedForPrivacy')}</p>
-          <button
-            onClick={handleResumeFromPrivacy}
-            disabled={isTogglingEnabled}
-            style={{
-              padding: '6px 16px', backgroundColor: '#16a34a', color: 'white',
-              border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '13px'
-            }}
-          >
-            {t('live.resumeStream')}
-          </button>
-        </div>
-      )}
+      <PrivacyModeOverlays
+        showPrivacyConfirm={showPrivacyConfirm}
+        privacyActive={privacyActive}
+        isTogglingEnabled={isTogglingEnabled}
+        onPauseForPrivacy={handlePauseForPrivacy}
+        onResumeFromPrivacy={handleResumeFromPrivacy}
+        onCancelPause={() => setShowPrivacyConfirm(false)}
+        t={t}
+      />
 
       {/* MSE mode indicator */}
       {showLabels && isPlaying && (

@@ -3,6 +3,11 @@
   "version": "1.0.0",
   "description": "LightNVR Integration Tests",
   "scripts": {
+    "fallow": "fallow",
+    "fallow:dupes": "fallow dupes --baseline .fallow-baselines/dupes.json --fail-on-issues",
+    "fallow:dupes:all": "fallow dupes",
+    "fallow:dupes:semantic": "fallow dupes --mode semantic",
+    "fallow:audit": "fallow audit --dupes-baseline .fallow-baselines/dupes.json",
     "test": "npx playwright test",
     "test:api": "npx playwright test --grep @api",
     "test:ui": "npx playwright test --grep @ui",
@@ -15,6 +20,7 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.56.1",
+    "fallow": "^2.86.0",
     "playwright": "^1.56.1",
     "puppeteer": "^24.37.3",
     "sharp": "^0.34.5"

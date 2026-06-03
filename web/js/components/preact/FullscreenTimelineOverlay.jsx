@@ -18,9 +18,11 @@ import {
   findContainingSegmentIndex,
   findNearestSegmentIndex,
   formatTimestampAsLocalDate,
+  clampTimelineValue,
   getClippedSegmentHourRange,
   getLocalDayBounds,
   getPlayableSegmentTimestamp,
+  getTimelinePreviewFrameIndex,
   getTimelineDayLengthHours,
   timestampToTimelineOffset,
   zoomTimelineRange
@@ -75,10 +77,6 @@ function stripHours(hours) {
   return Math.max(hours, 0);
 }
 
-function clamp(value, min, max) {
-  return Math.min(Math.max(value, min), max);
-}
-
 const MIN_FULLSCREEN_TIMELINE_VIEW_HOURS = 1 / 3600;
 const PLAYBACK_SPEEDS = [0.25, 0.5, 1, 1.5, 2, 4];
 const SEEK_SETTLE_TOLERANCE_SECONDS = 1.5;
@@ -95,19 +93,6 @@ function formatDurationLabel(seconds) {
     return `${remainingSeconds}s`;
   }
   return `${minutes}m ${remainingSeconds.toString().padStart(2, '0')}s`;
-}
-
-function getPreviewFrameIndex(segment, sampleTimestamp) {
-  const start = Number(segment?.start_timestamp);
-  const end = Number(segment?.end_timestamp);
-  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
-    return 1;
-  }
-
-  const ratio = clamp((sampleTimestamp - start) / (end - start), 0, 1);
-  if (ratio < 0.33) return 0;
-  if (ratio < 0.66) return 1;
-  return 2;
 }
 
 function formatTickLabel(offsetHours, selectedDate, stepSeconds = 3600) {
@@ -293,7 +278,7 @@ export function FullscreenTimelineOverlay({
     const nextDayLengthHours = getTimelineDayLengthHours(safeNextDate);
     const nextBounds = getLocalDayBounds(safeNextDate);
     const nextHour = Number.isFinite(currentHour)
-      ? clamp(currentHour, 0, nextDayLengthHours)
+      ? clampTimelineValue(currentHour, 0, nextDayLengthHours)
       : 0;
 
     setSelectedDate(safeNextDate);
@@ -358,7 +343,7 @@ export function FullscreenTimelineOverlay({
     }
 
     const visibleRange = Math.max(endHour - startHour, 0.001);
-    const ratio = clamp((event.clientX - rect.left) / rect.width, 0, 1);
+    const ratio = clampTimelineValue((event.clientX - rect.left) / rect.width, 0, 1);
     const clickHour = startHour + (ratio * visibleRange);
     const timestamp = clampTimestampToSelectableRange(Math.round(bounds.startTimestamp + (clickHour * 3600)));
 
@@ -390,7 +375,7 @@ export function FullscreenTimelineOverlay({
       segmentStartTimestamp: segmentStart,
       segmentEndTimestamp: segmentEnd,
       offsetSeconds,
-      thumbUrl: `/api/recordings/thumbnail/${segment.id}/${getPreviewFrameIndex(segment, safeTimestamp)}`,
+      thumbUrl: `/api/recordings/thumbnail/${segment.id}/${getTimelinePreviewFrameIndex(segment, safeTimestamp)}`,
       playbackUrl: `/api/recordings/play/${segment.id}?v=${safeTimestamp}`,
       href: formatUtils.getTimelineUrl(streamName, safeTimestamp, true)
     };

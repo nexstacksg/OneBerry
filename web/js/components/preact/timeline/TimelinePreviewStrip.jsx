@@ -10,25 +10,10 @@ import { TimelineThumbnailTile } from './TimelineThumbnailTile.jsx';
 import {
   findContainingSegmentIndex,
   findNearestSegmentIndex,
+  clampTimelineValue,
+  getTimelinePreviewFrameIndex,
   getTimelineDayLengthHours
 } from './timelineUtils.js';
-
-function clamp(value, min, max) {
-  return Math.min(Math.max(value, min), max);
-}
-
-function getPreviewFrameIndex(segment, sampleTimestamp) {
-  const start = Number(segment?.start_timestamp);
-  const end = Number(segment?.end_timestamp);
-  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
-    return 1;
-  }
-
-  const ratio = clamp((sampleTimestamp - start) / (end - start), 0, 1);
-  if (ratio < 0.33) return 0;
-  if (ratio < 0.66) return 1;
-  return 2;
-}
 
 function formatPreviewLabel(timestamp) {
   if (!Number.isFinite(timestamp)) {
@@ -107,7 +92,7 @@ export function TimelinePreviewStrip({ segments: propSegments }) {
               ? 60
               : 66;
     const measuredWidth = stripWidth > 0 ? stripWidth : 1200;
-    const sampleCount = clamp(
+    const sampleCount = clampTimelineValue(
       Math.round(measuredWidth / desiredTileWidth),
       visibleRange <= 1 ? 16 : 10,
       visibleRange <= 0.25 ? 40 : 28
@@ -139,7 +124,7 @@ export function TimelinePreviewStrip({ segments: propSegments }) {
         key: `preview-${index}`,
         timestamp: sampleTimestamp,
         thumbUrl: segment
-          ? `/api/recordings/thumbnail/${segment.id}/${getPreviewFrameIndex(segment, sampleTimestamp)}`
+          ? `/api/recordings/thumbnail/${segment.id}/${getTimelinePreviewFrameIndex(segment, sampleTimestamp)}`
           : null,
         segmentId: segment?.id ?? null
       };

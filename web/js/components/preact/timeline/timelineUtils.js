@@ -7,8 +7,21 @@ import dayjs from 'dayjs';
 export const MIN_TIMELINE_VIEW_HOURS = 1 / 3600;
 export const MAX_TIMELINE_VIEW_HOURS = 24;
 
-function clamp(value, min, max) {
+export function clampTimelineValue(value, min, max) {
   return Math.min(Math.max(value, min), max);
+}
+
+export function getTimelinePreviewFrameIndex(segment, sampleTimestamp) {
+  const start = Number(segment?.start_timestamp);
+  const end = Number(segment?.end_timestamp);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
+    return 1;
+  }
+
+  const ratio = clampTimelineValue((sampleTimestamp - start) / (end - start), 0, 1);
+  if (ratio < 0.33) return 0;
+  if (ratio < 0.66) return 1;
+  return 2;
 }
 
 function getLocalDayStart(selectedDate) {
@@ -32,9 +45,9 @@ export function normalizeTimelineRange(startHour, endHour, maxHours = MAX_TIMELI
   const safeStart = Number.isFinite(startHour) ? startHour : 0;
   const safeEnd = Number.isFinite(endHour) ? endHour : cappedMaxHours;
   const requestedRange = safeEnd - safeStart;
-  const range = clamp(requestedRange, MIN_TIMELINE_VIEW_HOURS, cappedMaxHours);
+  const range = clampTimelineValue(requestedRange, MIN_TIMELINE_VIEW_HOURS, cappedMaxHours);
   const maxStart = cappedMaxHours - range;
-  const start = clamp(safeStart, 0, maxStart);
+  const start = clampTimelineValue(safeStart, 0, maxStart);
 
   return {
     startHour: start,
@@ -65,10 +78,10 @@ export function scaleTimelineWindowHours(
     : MIN_TIMELINE_VIEW_HOURS;
 
   if (!Number.isFinite(zoomFactor) || zoomFactor <= 0 || zoomFactor === 1) {
-    return clamp(safeWindow, safeMinHours, cappedMaxHours);
+    return clampTimelineValue(safeWindow, safeMinHours, cappedMaxHours);
   }
 
-  return clamp(safeWindow * zoomFactor, safeMinHours, cappedMaxHours);
+  return clampTimelineValue(safeWindow * zoomFactor, safeMinHours, cappedMaxHours);
 }
 
 export function panTimelineRange(startHour, endHour, deltaHours, maxHours = MAX_TIMELINE_VIEW_HOURS) {
@@ -82,7 +95,7 @@ export function panTimelineRange(startHour, endHour, deltaHours, maxHours = MAX_
     ? maxHours
     : MAX_TIMELINE_VIEW_HOURS;
   const maxStart = cappedMaxHours - range;
-  const nextStart = clamp(normalized.startHour + deltaHours, 0, maxStart);
+  const nextStart = clampTimelineValue(normalized.startHour + deltaHours, 0, maxStart);
 
   return {
     startHour: nextStart,
@@ -110,8 +123,8 @@ export function zoomTimelineRange(
   const safeMinHours = Number.isFinite(minHours) && minHours > 0
     ? minHours
     : MIN_TIMELINE_VIEW_HOURS;
-  const nextRange = clamp(currentRange * zoomFactor, safeMinHours, cappedMaxHours);
-  const resolvedAnchorHour = clamp(
+  const nextRange = clampTimelineValue(currentRange * zoomFactor, safeMinHours, cappedMaxHours);
+  const resolvedAnchorHour = clampTimelineValue(
     Number.isFinite(anchorHour) ? anchorHour : ((normalized.startHour + normalized.endHour) / 2),
     normalized.startHour,
     normalized.endHour
@@ -250,7 +263,7 @@ export function timelineOffsetToTimestamp(offsetHours, selectedDate) {
     throw new Error(`timelineOffsetToTimestamp: invalid offset value "${offsetHours}"`);
   }
 
-  const normalizedOffset = clamp(numericOffset, 0, bounds.durationHours);
+  const normalizedOffset = clampTimelineValue(numericOffset, 0, bounds.durationHours);
   return Math.round(bounds.startTimestamp + normalizedOffset * 3600);
 }
 
@@ -445,7 +458,7 @@ export function getSteppedVideoTime(currentTimeSeconds, directionSeconds, durati
   }
 
   const safeDuration = Math.max(durationSeconds, 0);
-  return clamp(nextTime, 0, safeDuration);
+  return clampTimelineValue(nextTime, 0, safeDuration);
 }
 
 export function getClippedSegmentHourRange(segment, selectedDate) {
