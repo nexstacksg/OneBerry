@@ -20,36 +20,25 @@
 
 const { chromium } = require('playwright');
 const fs = require('fs');
+const { parseScriptArgs } = require('./script-utils.js');
 
-// Parse command line arguments
-const args = process.argv.slice(2);
-const config = {
+const config = parseScriptArgs(
+  process.argv.slice(2),
+  {
   url: 'http://localhost:8080',
   username: 'admin',
   password: 'admin',
   outputDir: 'docs/videos',
   demo: 'all',
-};
-
-for (let i = 0; i < args.length; i++) {
-  switch (args[i]) {
-    case '--url':
-      config.url = args[++i];
-      break;
-    case '--username':
-      config.username = args[++i];
-      break;
-    case '--password':
-      config.password = args[++i];
-      break;
-    case '--output':
-      config.outputDir = args[++i];
-      break;
-    case '--demo':
-      config.demo = args[++i];
-      break;
+  },
+  {
+    '--url': { key: 'url' },
+    '--username': { key: 'username' },
+    '--password': { key: 'password' },
+    '--output': { key: 'outputDir' },
+    '--demo': { key: 'demo' },
   }
-}
+);
 
 // Ensure output directory exists
 if (!fs.existsSync(config.outputDir)) {
@@ -341,4 +330,3 @@ async function main() {
 }
 
 main();
-

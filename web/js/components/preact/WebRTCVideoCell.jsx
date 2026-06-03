@@ -23,7 +23,7 @@ import { StreamQualitySelector } from './StreamQualitySelector.jsx';
 import { useStreamQuality } from './useStreamQuality.js';
 import { updateStreamRecordingQuality } from '../../utils/stream-quality-utils.js';
 import { captureVideoSnapshot, createPrivacyHandlers } from './video-cell-helpers.js';
-import { PrivacyModeOverlays } from './VideoCellOverlays.jsx';
+import { PrivacyModeOverlays, StreamStatusBadge } from './VideoCellOverlays.jsx';
 import 'webrtc-adapter';
 import {
   findContainingSegmentIndex,
@@ -1854,71 +1854,19 @@ export function WebRTCVideoCell({
       )}
 
       {/* Stream name overlay with connection quality indicator */}
-      {showLabels && !isFullscreenCell && (
-        <div
-          className="stream-name-overlay"
-          style={{
-            position: 'absolute',
-            top: '10px',
-            left: '10px',
-            padding: '5px 10px',
-            backgroundColor: 'rgba(0, 0, 0, 0.5)',
-            color: 'white',
-            borderRadius: '4px',
-            fontSize: '14px',
-            zIndex: 3,
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px'
-          }}
-        >
-          <span
-            style={{
-              width: '8px',
-              height: '8px',
-              borderRadius: '50%',
-              flexShrink: 0,
-              backgroundColor:
-                stream.status === 'Running'      ? 'rgba(34, 197, 94, 0.9)'  :
-                stream.status === 'Starting'     ? 'rgba(234, 179, 8, 0.9)'  :
-                stream.status === 'Reconnecting' ? 'rgba(234, 179, 8, 0.9)'  :
-                stream.status === 'Error'        ? 'rgba(239, 68, 68, 0.9)'  :
-                stream.status === 'Stopping'     ? 'rgba(234, 179, 8, 0.9)'  :
-                'rgba(148, 163, 184, 0.9)'
-            }}
-            title={`${t('streams.streamStatus')}: ${
-              stream.status === 'Running'      ? t('streams.running')      :
-              stream.status === 'Starting'     ? t('streams.starting')     :
-              stream.status === 'Reconnecting' ? t('streams.reconnecting') :
-              stream.status === 'Error'        ? t('streams.error')        :
-              stream.status === 'Stopping'     ? t('streams.stopping')     :
-              stream.status === 'Stopped'      ? t('streams.stopped')      :
-              (stream.status || t('common.unknown'))
-            }`}
-          />
-          {stream.name}
-
-          {/* Connection quality indicator - only show when we have quality data and stream is playing */}
-          {isPlaying && connectionQuality !== 'unknown' && (
-            <div
-              className={`connection-quality-indicator quality-${connectionQuality}`}
-              title={t('live.connectionQuality', { quality: t(`live.connectionQuality.${connectionQuality}`) })}
-              style={{
-                width: '10px',
-                height: '10px',
-                borderRadius: '50%',
-                backgroundColor:
-                  connectionQuality === 'good' ? '#10B981' :  // Green
-                  connectionQuality === 'fair' ? '#FBBF24' :  // Yellow
-                  connectionQuality === 'poor' ? '#F97316' :  // Orange
-                  connectionQuality === 'bad' ? '#EF4444' :   // Red
-                  '#6B7280',                                  // Gray (unknown)
-                boxShadow: '0 0 4px rgba(0, 0, 0, 0.3)'
-              }}
-            />
-          )}
-        </div>
-      )}
+      <StreamStatusBadge
+        stream={stream}
+        t={t}
+        show={showLabels && !isFullscreenCell}
+        className="stream-name-overlay"
+        style={{
+          zIndex: 3,
+          gap: '8px',
+        }}
+        isPlaying={isPlaying}
+        connectionQuality={connectionQuality}
+        showConnectionQuality
+      />
 
       {/* Stream controls */}
       {showControls && (

@@ -19,32 +19,23 @@ const http = require('http');
 const https = require('https');
 const fs = require('fs');
 const path = require('path');
+const { parseScriptArgs } = require('./script-utils.js');
 
-// Parse command line arguments
-const args = process.argv.slice(2);
-const config = {
+const config = parseScriptArgs(
+  process.argv.slice(2),
+  {
   url: 'http://localhost:8080',
   username: 'admin',
   password: 'admin',
   configFile: path.join(__dirname, 'demo-cameras.json'),
-};
-
-for (let i = 0; i < args.length; i++) {
-  switch (args[i]) {
-    case '--url':
-      config.url = args[++i];
-      break;
-    case '--username':
-      config.username = args[++i];
-      break;
-    case '--password':
-      config.password = args[++i];
-      break;
-    case '--config':
-      config.configFile = args[++i];
-      break;
+  },
+  {
+    '--url': { key: 'url' },
+    '--username': { key: 'username' },
+    '--password': { key: 'password' },
+    '--config': { key: 'configFile' },
   }
-}
+);
 
 // Load demo streams from configuration file
 let DEMO_STREAMS = [];
@@ -283,4 +274,3 @@ async function main() {
 }
 
 main();
-

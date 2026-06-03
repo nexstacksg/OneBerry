@@ -1,3 +1,102 @@
+const STREAM_STATUS_STYLE_MAP = {
+  Running: 'rgba(34, 197, 94, 0.9)',
+  Starting: 'rgba(234, 179, 8, 0.9)',
+  Reconnecting: 'rgba(234, 179, 8, 0.9)',
+  Error: 'rgba(239, 68, 68, 0.9)',
+  Stopping: 'rgba(234, 179, 8, 0.9)',
+  default: 'rgba(148, 163, 184, 0.9)'
+};
+
+function getStreamStatusColor(status) {
+  return STREAM_STATUS_STYLE_MAP[status] || STREAM_STATUS_STYLE_MAP.default;
+}
+
+function getStreamStatusText(t, status) {
+  return status === 'Running' ? t('streams.running')
+    : status === 'Starting' ? t('streams.starting')
+    : status === 'Reconnecting' ? t('streams.reconnecting')
+    : status === 'Error' ? t('streams.error')
+    : status === 'Stopping' ? t('streams.stopping')
+    : status === 'Stopped' ? t('streams.stopped')
+    : (status || t('common.unknown'));
+}
+
+export function StreamStatusBadge({
+  stream,
+  t,
+  show = true,
+  className = 'stream-name-overlay',
+  style = {},
+  isPlaying = false,
+  connectionQuality,
+  showConnectionQuality = false,
+  children,
+  childrenPosition = 'end'
+}) {
+  if (!show) {
+    return null;
+  }
+
+  const status = stream?.status;
+  const statusColor = getStreamStatusColor(status);
+  const statusText = getStreamStatusText(t, status);
+
+  const connectionColor =
+    connectionQuality === 'good' ? '#10B981' :
+    connectionQuality === 'fair' ? '#FBBF24' :
+    connectionQuality === 'poor' ? '#F97316' :
+    connectionQuality === 'bad' ? '#EF4444' : '#6B7280';
+
+  return (
+    <div
+      className={className}
+      style={{
+        position: 'absolute',
+        top: '10px',
+        left: '10px',
+        padding: '5px 10px',
+        backgroundColor: 'rgba(0, 0, 0, 0.5)',
+        color: 'white',
+        borderRadius: '4px',
+        fontSize: '14px',
+        zIndex: 10,
+        display: 'flex',
+        alignItems: 'center',
+        gap: '6px',
+        ...style,
+      }}
+    >
+      <span
+        style={{
+          width: '8px',
+          height: '8px',
+          borderRadius: '50%',
+          flexShrink: 0,
+          backgroundColor: statusColor,
+        }}
+        title={`${t('streams.streamStatus')}: ${statusText}`}
+      />
+      {childrenPosition === 'start' && children}
+      {stream?.name}
+      {childrenPosition === 'end' && children}
+
+      {showConnectionQuality && isPlaying && connectionQuality && connectionQuality !== 'unknown' && (
+        <div
+          className={`connection-quality-indicator quality-${connectionQuality}`}
+          title={t('live.connectionQuality', { quality: t(`live.connectionQuality.${connectionQuality}`) })}
+          style={{
+            width: '10px',
+            height: '10px',
+            borderRadius: '50%',
+            backgroundColor: connectionColor,
+            boxShadow: '0 0 4px rgba(0, 0, 0, 0.3)'
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
 export function PrivacyModeOverlays({
   showPrivacyConfirm,
   privacyActive,
