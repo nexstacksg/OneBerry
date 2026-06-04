@@ -3,6 +3,7 @@
  */
 
 import { useQuery } from '../../query-client.js';
+import { drawDetectionBoxes, setupDetectionCanvasLayout } from './detection-overlay-utils.js';
 
 /**
  * Custom hook to fetch detection results
@@ -39,69 +40,32 @@ export function useDetectionResults(streamName, enabled = true, pollingInterval 
  */
 export function drawDetections(canvas, videoElement, detections) {
   if (!canvas || !videoElement || !detections || !detections.length) return;
-  
-  const ctx = canvas.getContext('2d');
-  if (!ctx) return;
-  
-  // Set canvas dimensions to match the displayed video element
-  canvas.width = videoElement.clientWidth;
-  canvas.height = videoElement.clientHeight;
-  
-  // Clear previous drawings
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  
-  // Get the actual video dimensions
-  const videoWidth = videoElement.videoWidth;
-  const videoHeight = videoElement.videoHeight;
-  
-  // If video dimensions aren't available yet, skip drawing
-  if (!videoWidth || !videoHeight) {
+
+  const layout = setupDetectionCanvasLayout({
+    canvas,
+    videoElement
+  });
+
+  if (!layout) {
     console.log('Video dimensions not available yet, skipping detection drawing');
     return;
   }
-  
-  // Calculate the scaling and positioning to maintain aspect ratio
-  const videoAspect = videoWidth / videoHeight;
-  const canvasAspect = canvas.width / canvas.height;
-  
-  let drawWidth, drawHeight, offsetX = 0, offsetY = 0;
-  
-  if (videoAspect > canvasAspect) {
-    // Video is wider than canvas (letterboxing - black bars on top and bottom)
-    drawWidth = canvas.width;
-    drawHeight = canvas.width / videoAspect;
-    offsetY = (canvas.height - drawHeight) / 2;
-  } else {
-    // Video is taller than canvas (pillarboxing - black bars on sides)
-    drawHeight = canvas.height;
-    drawWidth = canvas.height * videoAspect;
-    offsetX = (canvas.width - drawWidth) / 2;
-  }
-  
-  // Draw each detection
-  detections.forEach(detection => {
-    // Calculate pixel coordinates based on normalized values (0-1)
-    // and adjust for the actual display area
-    const x = (detection.x * drawWidth) + offsetX;
-    const y = (detection.y * drawHeight) + offsetY;
-    const width = detection.width * drawWidth;
-    const height = detection.height * drawHeight;
-    
-    // Draw bounding box
-    ctx.strokeStyle = 'rgba(255, 0, 0, 0.8)';
-    ctx.lineWidth = 3;
-    ctx.strokeRect(x, y, width, height);
-    
-    // Draw label background
-    const label = `${detection.label} (${Math.round(detection.confidence * 100)}%)`;
-    ctx.font = '14px Arial';
-    const textWidth = ctx.measureText(label).width;
-    ctx.fillStyle = 'rgba(255, 0, 0, 0.7)';
-    ctx.fillRect(x, y - 20, textWidth + 10, 20);
-    
-    // Draw label text
-    ctx.fillStyle = 'white';
-    ctx.fillText(label, x + 5, y - 5);
+
+  const {
+    ctx: layoutCtx,
+    drawWidth,
+    drawHeight,
+    offsetX,
+    offsetY
+  } = layout;
+
+  drawDetectionBoxes({
+    ctx: layoutCtx,
+    detections,
+    drawWidth,
+    drawHeight,
+    offsetX,
+    offsetY
   });
 }
 
