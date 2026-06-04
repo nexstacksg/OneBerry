@@ -11,6 +11,7 @@ import { showStatusMessage } from '../ToastContainer.jsx';
 import { ConfirmDialog } from '../UI.jsx';
 import { formatFilenameTimestamp, toUnixSeconds } from '../../../utils/date-utils.js';
 import { useI18n } from '../../../i18n.js';
+import { drawDetectionBoxes } from '../detection-overlay-utils.js';
 
 // Timeout for cleaning up preloaded temporary video elements (in milliseconds).
 const PRELOAD_CLEANUP_TIMEOUT_MS = 15000;
@@ -710,25 +711,19 @@ export function TimelinePlayer({ videoElementRef = null, autoFullscreen = false 
 
     const scale = Math.max(1, Math.min(drawWidth, drawHeight) / DETECTION_SCALE_BASE);
 
-    visibleDetections.forEach(detection => {
-      const x = (detection.x * drawWidth) + offsetX;
-      const y = (detection.y * drawHeight) + offsetY;
-      const width = detection.width * drawWidth;
-      const height = detection.height * drawHeight;
-
-      ctx.strokeStyle = 'rgba(0, 255, 0, 0.8)';
-      ctx.lineWidth = Math.max(2, 3 * scale);
-      ctx.strokeRect(x, y, width, height);
-
-      const fontSize = Math.round(Math.max(12, 14 * scale));
-      ctx.font = `${fontSize}px Arial`;
-      const labelText = `${detection.label} (${Math.round(detection.confidence * 100)}%)`;
-      const labelWidth = ctx.measureText(labelText).width + 10;
-      const labelHeight = fontSize + 8;
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-      ctx.fillRect(x, y - labelHeight, labelWidth, labelHeight);
-      ctx.fillStyle = 'white';
-      ctx.fillText(labelText, x + 5, y - 5);
+    const fontSize = Math.round(Math.max(12, 14 * scale));
+    drawDetectionBoxes({
+      ctx,
+      detections: visibleDetections,
+      drawWidth,
+      drawHeight,
+      offsetX,
+      offsetY,
+      boxStrokeStyle: 'rgba(0, 255, 0, 0.8)',
+      boxLineWidth: Math.max(2, 3 * scale),
+      labelFont: `${fontSize}px Arial`,
+      labelBackgroundStyle: 'rgba(0, 0, 0, 0.7)',
+      labelHeight: fontSize + 8
     });
 
     // Continue animation if playing

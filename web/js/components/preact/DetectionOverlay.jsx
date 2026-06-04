@@ -5,6 +5,7 @@
 import { useState, useEffect, useRef, useCallback } from 'preact/hooks';
 import { showStatusMessage } from './ToastContainer.jsx';
 import { formatFilenameTimestamp } from '../../utils/date-utils.js';
+import { drawDetectionBoxes, setupDetectionCanvasLayout } from './detection-overlay-utils.js';
 
 import { forwardRef, useImperativeHandle } from 'preact/compat';
 
@@ -111,40 +112,10 @@ export const DetectionOverlay = forwardRef(({
   const getLayout = useCallback(() => {
     if (!canvasRef.current || !videoRef.current) return null;
 
-    const canvas = canvasRef.current;
-    const videoElement = videoRef.current;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return null;
-
-    canvas.width = videoElement.clientWidth;
-    canvas.height = videoElement.clientHeight;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-    const videoWidth = videoElement.videoWidth;
-    const videoHeight = videoElement.videoHeight;
-    if (!videoWidth || !videoHeight || canvas.width === 0 || canvas.height === 0) {
-      return null;
-    }
-
-    const videoAspect = videoWidth / videoHeight;
-    const canvasAspect = canvas.width / canvas.height;
-
-    let drawWidth;
-    let drawHeight;
-    let offsetX = 0;
-    let offsetY = 0;
-
-    if (videoAspect > canvasAspect) {
-      drawWidth = canvas.width;
-      drawHeight = canvas.width / videoAspect;
-      offsetY = (canvas.height - drawHeight) / 2;
-    } else {
-      drawHeight = canvas.height;
-      drawWidth = canvas.height * videoAspect;
-      offsetX = (canvas.width - drawWidth) / 2;
-    }
-
-    return { canvas, ctx, drawWidth, drawHeight, offsetX, offsetY };
+    return setupDetectionCanvasLayout({
+      canvas: canvasRef.current,
+      videoElement: videoRef.current
+    });
   }, [videoRef]);
 
   const drawMotionGrid = useCallback((nowMs = performance.now()) => {
@@ -407,27 +378,14 @@ export const DetectionOverlay = forwardRef(({
       }
     });
 
-    if (detections && detections.length > 0) {
-      detections.forEach(detection => {
-        const x = (detection.x * drawWidth) + offsetX;
-        const y = (detection.y * drawHeight) + offsetY;
-        const width = detection.width * drawWidth;
-        const height = detection.height * drawHeight;
-
-        ctx.strokeStyle = 'rgba(255, 0, 0, 0.8)';
-        ctx.lineWidth = 3;
-        ctx.strokeRect(x, y, width, height);
-
-        const label = `${detection.label} (${Math.round(detection.confidence * 100)}%)`;
-        ctx.font = '14px Arial';
-        const textWidth = ctx.measureText(label).width;
-        ctx.fillStyle = 'rgba(255, 0, 0, 0.7)';
-        ctx.fillRect(x, y - 20, textWidth + 10, 20);
-
-        ctx.fillStyle = 'white';
-        ctx.fillText(label, x + 5, y - 5);
-      });
-    }
+    drawDetectionBoxes({
+      ctx,
+      detections,
+      drawWidth,
+      drawHeight,
+      offsetX,
+      offsetY
+    });
   }, [detections, getLayout, zones]);
 
   const pollDetections = useCallback(() => {

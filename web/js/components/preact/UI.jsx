@@ -9,6 +9,7 @@ import { createPortal } from 'preact/compat';
 import { showStatusMessage } from './ToastContainer.jsx';
 import { formatUtils } from './recordings/formatUtils.js';
 import { formatFilenameTimestamp, nowMilliseconds } from '../../utils/date-utils.js';
+import { drawDetectionBoxes } from './detection-overlay-utils.js';
 import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc';
 import customParseFormat from 'dayjs/plugin/customParseFormat';
@@ -665,33 +666,20 @@ export function VideoModal({ isOpen, onClose, videoUrl, title, downloadUrl }) {
       setDetectionStatus(`No detections at current time (${detections.length} total)`);
     }
 
-    // Draw each visible detection using letterbox-aware coordinates
-    visibleDetections.forEach(detection => {
-      const x = (detection.x * drawWidth) + offsetX;
-      const y = (detection.y * drawHeight) + offsetY;
-      const width = detection.width * drawWidth;
-      const height = detection.height * drawHeight;
-
-      // Scale line width for visibility
-      const scale = Math.max(1, Math.min(drawWidth, drawHeight) / 400);
-
-      // Draw bounding box
-      ctx.strokeStyle = 'rgba(0, 255, 0, 0.8)';
-      ctx.lineWidth = Math.max(2, 3 * scale);
-      ctx.strokeRect(x, y, width, height);
-
-      // Draw label background
-      const fontSize = Math.round(Math.max(12, 14 * scale));
-      ctx.font = `${fontSize}px Arial`;
-      const labelText = `${detection.label} (${Math.round(detection.confidence * 100)}%)`;
-      const labelWidth = ctx.measureText(labelText).width + 10;
-      const labelHeight = fontSize + 8;
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-      ctx.fillRect(x, y - labelHeight, labelWidth, labelHeight);
-
-      // Draw label text
-      ctx.fillStyle = 'white';
-      ctx.fillText(labelText, x + 5, y - 5);
+    const scale = Math.max(1, Math.min(drawWidth, drawHeight) / 400);
+    const fontSize = Math.round(Math.max(12, 14 * scale));
+    drawDetectionBoxes({
+      ctx,
+      detections: visibleDetections,
+      drawWidth,
+      drawHeight,
+      offsetX,
+      offsetY,
+      boxStrokeStyle: 'rgba(0, 255, 0, 0.8)',
+      boxLineWidth: Math.max(2, 3 * scale),
+      labelFont: `${fontSize}px Arial`,
+      labelBackgroundStyle: 'rgba(0, 0, 0, 0.7)',
+      labelHeight: fontSize + 8
     });
 
     // Request next frame if video is playing
