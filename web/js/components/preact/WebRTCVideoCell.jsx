@@ -41,8 +41,8 @@ const MAX_VIDEO_DATA_CHECKS = 6; // 6 checks × 15,000 ms (15s) interval = 90s t
 const VIDEO_DATA_CHECK_INTERVAL_MS = 15000; // 15 seconds between checks
 const MIN_NO_DATA_CHECKS_BEFORE_RETRY = 2;
 const MAX_NO_DATA_RECONNECT_ATTEMPTS = 3;
-const MAX_OFFER_RETRIES = 4;
-const BASE_RETRY_DELAY_MS = 1500; // base delay for exponential backoff: 1.5s, 3s, 6s, 12s, 24s, ...
+const OFFER_RETRY_DELAYS_MS = [250, 500, 750, 1000, 1500, 2000, 3000, 4000];
+const WEBRTC_OFFER_TIMEOUT_MS = 6000;
 const FULLSCREEN_ARROW_SEEK_SECONDS = 10;
 const FULLSCREEN_SEEK_SETTLE_TOLERANCE_SECONDS = 1.5;
 const DEFAULT_ICE_SERVERS = [{ urls: 'stun:stun.l.google.com:19302' }];
@@ -1285,15 +1285,22 @@ export function WebRTCVideoCell({
 
         console.log(`Sending offer directly to go2rtc for stream ${stream.name} using source ${activeStreamSource}`);
 
-        // Send the offer directly to go2rtc with retry logic for 404 responses.
-        // On slower devices, go2rtc may not have the stream ready yet when we
-        // first try to send the offer, resulting in a 404. We retry with
-        // exponential backoff to give it time.
-        const maxOfferRetries = MAX_OFFER_RETRIES;
-        const baseRetryDelayMs = BASE_RETRY_DELAY_MS;
+        // Probe go2rtc quickly while the RTSP producer is warming. Long
+        // exponential backoff makes a ready stream look stalled for 20s+.
+        const maxOfferRetries = OFFER_RETRY_DELAYS_MS.length;
+        const getOfferRetryDelay = (attempt) => OFFER_RETRY_DELAYS_MS[
+          Math.min(attempt, OFFER_RETRY_DELAYS_MS.length - 1)
+        ];
+        const shouldRetryOfferStatus = (status) =>
+          status === 404 || status === 500 || status === 502 || status === 503 || status === 504;
 
         const sendOfferWithRetry = async (attempt, baseUrl = go2rtcBaseUrl, triedConfiguredFallback = false) => {
           let response;
+          const offerAbortController = new AbortController();
+          abortControllerRef.current = offerAbortController;
+          const offerTimeout = setTimeout(() => {
+            offerAbortController.abort();
+          }, WEBRTC_OFFER_TIMEOUT_MS);
           try {
             response = await fetch(`${baseUrl}/api/webrtc?src=${encodeURIComponent(activeStreamSource)}`, {
               method: 'POST',
@@ -1301,6 +1308,7 @@ export function WebRTCVideoCell({
                 'Content-Type': 'application/sdp',
               },
               body: pc.localDescription.sdp,
+              signal: offerAbortController.signal,
             });
           } catch (fetchError) {
             if (!triedConfiguredFallback && baseUrl === getSameOriginGo2rtcBaseUrl()) {
@@ -1310,7 +1318,15 @@ export function WebRTCVideoCell({
                 return sendOfferWithRetry(attempt, configuredBaseUrl, true);
               }
             }
+            if (attempt < maxOfferRetries) {
+              const delay = getOfferRetryDelay(attempt);
+              console.warn(`go2rtc offer request failed for stream ${stream.name} (attempt ${attempt + 1}/${maxOfferRetries + 1}), retrying in ${delay}ms...`, fetchError);
+              await new Promise(resolve => setTimeout(resolve, delay));
+              return sendOfferWithRetry(attempt + 1, baseUrl, triedConfiguredFallback);
+            }
             throw fetchError;
+          } finally {
+            clearTimeout(offerTimeout);
           }
 
           const bodyText = await response.text().catch(() => '');
@@ -1329,9 +1345,8 @@ export function WebRTCVideoCell({
               }
             }
 
-            // Retry on 404 (stream not ready) or 500 (server overloaded / race condition) with exponential backoff
-            if ((response.status === 404 || response.status === 500) && attempt < maxOfferRetries) {
-              const delay = baseRetryDelayMs * Math.pow(2, attempt);
+            if (shouldRetryOfferStatus(response.status) && attempt < maxOfferRetries) {
+              const delay = getOfferRetryDelay(attempt);
               console.warn(`go2rtc returned ${response.status} for stream ${stream.name} (attempt ${attempt + 1}/${maxOfferRetries + 1}), retrying in ${delay}ms...`);
               await new Promise(resolve => setTimeout(resolve, delay));
               return sendOfferWithRetry(attempt + 1, baseUrl, triedConfiguredFallback);

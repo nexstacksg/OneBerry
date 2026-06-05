@@ -214,8 +214,9 @@ void handle_go2rtc_proxy(const http_request_t *req, http_response_t *res) {
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &ctx);
     curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, buffered_header_cb);
     curl_easy_setopt(curl, CURLOPT_HEADERDATA, &ctx);
-    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
-    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 5L);
+    bool is_webrtc_offer = strstr(req->path, "/api/webrtc") != NULL;
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, is_webrtc_offer ? 6L : 30L);
+    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, is_webrtc_offer ? 2L : 5L);
     curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
     curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 3L);
