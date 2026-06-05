@@ -468,6 +468,21 @@ static void queue_live_view_preload_if_needed(const stream_config_t *config) {
     }
 }
 
+bool go2rtc_integration_warm_stream_for_live_view(const stream_config_t *config) {
+    if (!g_initialized || !go2rtc_stream_is_ready()) {
+        return false;
+    }
+    if (!config || config->name[0] == '\0') {
+        return false;
+    }
+    if (!config->enabled || !config->streaming_enabled || config->privacy_mode) {
+        return false;
+    }
+
+    queue_live_view_preload_if_needed(config);
+    return true;
+}
+
 /**
  * @brief Check if a stream is registered with go2rtc
  *

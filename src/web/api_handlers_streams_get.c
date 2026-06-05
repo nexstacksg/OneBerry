@@ -176,6 +176,10 @@ void handle_get_streams(const http_request_t *req, http_response_t *res) {
             }
         }
 
+        if (db_streams[i].enabled && db_streams[i].streaming_enabled && !db_streams[i].privacy_mode) {
+            go2rtc_integration_warm_stream_for_live_view(&db_streams[i]);
+        }
+
         cJSON *stream_obj = cJSON_CreateObject();
         if (!stream_obj) {
             log_error("Failed to create stream JSON object");

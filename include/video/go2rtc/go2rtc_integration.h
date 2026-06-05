@@ -74,6 +74,17 @@ bool go2rtc_integration_is_using_go2rtc_for_hls(const char *stream_name);
 bool go2rtc_integration_register_all_streams(void);
 
 /**
+ * @brief Queue a non-blocking live-view preload for a stream if it can be shown
+ *
+ * This keeps go2rtc's RTSP producer warm so the first WebRTC viewer does not
+ * pay the camera connection cost.
+ *
+ * @param config Stream configuration to warm
+ * @return true when a preload is already active or was queued, false otherwise
+ */
+bool go2rtc_integration_warm_stream_for_live_view(const stream_config_t *config);
+
+/**
  * @brief Sync database streams to go2rtc
  *
  * This function reads all enabled streams from the database and ensures
