@@ -8,8 +8,8 @@
     "build": "vite build",
     "build:maps": "BUILD_SOURCEMAPS=true vite build",
     "preview": "vite preview",
-    "test": "jest --config=jest.config.cjs",
-    "test:e2e": "jest tests/e2e --config=jest.config.cjs --runInBand"
+    "test": "TZ=America/New_York jest --config=jest.config.cjs",
+    "test:e2e": "TZ=America/New_York jest tests/e2e --config=jest.config.cjs --runInBand"
   },
   "author": "",
   "license": "ISC",
@@ -36,7 +36,7 @@
     "@vitejs/plugin-legacy": "^7.2.1",
     "autoprefixer": "^10.4.24",
     "babel-jest": "^30.2.0",
-    "chromedriver": "^145.0.3",
+    "chromedriver": "^148.0.4",
     "geckodriver": "^6.1.0",
     "jest": "^30.2.0",
     "postcss": "^8.5.6",

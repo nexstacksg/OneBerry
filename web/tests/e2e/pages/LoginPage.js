@@ -10,7 +10,7 @@ class LoginPage {
   get usernameInput() { return '#username'; }
   get passwordInput() { return '#password'; }
   get loginButton() { return 'form#login-form button[type="submit"]'; }
-  get errorMessage() { return 'div[class*="bg-red-100"]'; }
+  get errorMessage() { return '.badge-danger'; }
   get rememberMeCheckbox() { return '#remember-me'; }
 
   /**

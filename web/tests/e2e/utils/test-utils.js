@@ -40,6 +40,8 @@ async function createDriver(browserName = 'chrome', headless = false) {
     throw new Error(`Unsupported browser: ${browserName}`);
   }
   
+  await driver.manage().window().setRect({ width: 1366, height: 768 });
+
   // Set implicit wait time
   await driver.manage().setTimeouts({ implicit: 5000 });
   

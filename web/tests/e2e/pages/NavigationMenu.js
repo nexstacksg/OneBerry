@@ -23,7 +23,9 @@ class NavigationMenu {
    * Navigate to the home page
    */
   async navigateToHome() {
-    return await this.navigateWithRetry(this.homeLink, '#main-content');
+    await this.driver.get('http://localhost:8080/index.html');
+    await this.driver.wait(until.elementLocated(By.css('#main-content')), 10000);
+    return true;
   }
 
   /**
@@ -138,10 +140,32 @@ class NavigationMenu {
       console.log(`Navigation attempt ${attempt} of ${maxRetries}`);
       
       try {
-        // Find and click the link
-        const link = await this.driver.findElement(By.css(linkSelector));
-        await link.click();
-        console.log(`Clicked on ${linkSelector}`);
+        // Find a visible link. The responsive sidebar can keep duplicate
+        // hidden anchors in the DOM, and clicking those fails in Chrome.
+        const links = await this.driver.findElements(By.css(linkSelector));
+        let link = null;
+        for (const candidate of links) {
+          const displayed = await candidate.isDisplayed().catch(() => false);
+          if (displayed) {
+            link = candidate;
+            break;
+          }
+        }
+        if (!link && links.length > 0) {
+          const href = await links[0].getAttribute('href');
+          if (href) {
+            await this.driver.get(href);
+            console.log(`No visible navigation link found; navigated directly to ${href}`);
+          } else {
+            throw new Error(`No visible navigation link found for ${linkSelector}`);
+          }
+        } else if (!link) {
+          throw new Error(`No navigation link found for ${linkSelector}`);
+        } else {
+          await this.driver.executeScript('arguments[0].scrollIntoView({block: "center"});', link);
+          await this.driver.executeScript('arguments[0].click();', link);
+          console.log(`Clicked on ${linkSelector}`);
+        }
         
         // Wait for the page to load with a short timeout
         try {

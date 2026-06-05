@@ -166,7 +166,8 @@ describe('i18n locale selection', () => {
       });
     });
 
-    await expect(initI18n()).resolves.toBeUndefined();
+    await expect(initI18n()).resolves.toBe('en');
+    expect(getLocale()).toBe('en');
 
     // Even if translations fail to load, t should still be callable without throwing.
     expect(() => t('nav.settings')).not.toThrow();

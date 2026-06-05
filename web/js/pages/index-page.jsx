@@ -7,13 +7,34 @@ import { render } from 'preact';
 import { useState, useEffect } from 'preact/hooks';
 import { LiveView } from '../components/preact/LiveView.jsx';
 import { WebRTCView } from '../components/preact/WebRTCView.jsx';
-import { QueryClientProvider, queryClient } from '../query-client.js';
+import { QueryClientProvider, queryClient, prefetchQuery } from '../query-client.js';
 import { Header } from "../components/preact/Header.jsx";
 import { Footer } from "../components/preact/Footer.jsx";
 import { ToastContainer } from "../components/preact/ToastContainer.jsx";
 import { setupSessionValidation } from '../utils/auth-utils.js';
 import { SetupWizard } from '../components/preact/SetupWizard.jsx';
 import { initI18n } from '../i18n.js';
+
+const prefetchLiveViewData = () => {
+    void prefetchQuery(
+        'streams',
+        '/api/streams',
+        {
+            timeout: 15000,
+            retries: 2,
+            retryDelay: 1000
+        }
+    );
+    void prefetchQuery(
+        ['locations'],
+        '/api/locations',
+        {
+            timeout: 10000,
+            retries: 1,
+            retryDelay: 1000
+        }
+    );
+};
 
 /**
  * Main App component that conditionally renders WebRTCView or LiveView
@@ -77,6 +98,7 @@ function App() {
 
 // Render the App component when the DOM is loaded
 document.addEventListener('DOMContentLoaded', async () => {
+    prefetchLiveViewData();
     await initI18n();
     // Setup session validation (checks every 5 minutes)
     setupSessionValidation();

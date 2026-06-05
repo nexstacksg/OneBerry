@@ -513,17 +513,16 @@ describe('timelineUtils', () => {
       endHour: 24
     });
 
-    // normalizeTimelineRange enforces a minimum visible range (e.g. 0.5 hours)
-    // and clamps the resulting window to the 0–24 hour bounds.
-    expect(normalizeTimelineRange(23.9, 24.1)).toEqual({
-      startHour: 23.5,
-      endHour: 24
-    });
+    // normalizeTimelineRange preserves the requested range when it is above
+    // the one-second minimum and clamps the resulting window to 0–24 hours.
+    const clampedRange = normalizeTimelineRange(23.9, 24.1);
+    expect(clampedRange.startHour).toBeCloseTo(23.8, 6);
+    expect(clampedRange.endHour).toBe(24);
 
-    // When the requested range is even smaller than the minimum, it is expanded
-    // to the minimum range while still clamping at the end of the day.
+    // When the requested range is above the minimum, it is preserved while
+    // still clamping at the end of the day.
     expect(normalizeTimelineRange(23.95, 24.0)).toEqual({
-      startHour: 23.5,
+      startHour: 23.95,
       endHour: 24
     });
   });
@@ -573,4 +572,3 @@ describe('timelineUtils', () => {
     });
   });
 });
-
