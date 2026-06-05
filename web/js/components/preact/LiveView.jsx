@@ -777,8 +777,8 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
             // Render video cells using the active transport.
             //
             // Stagger strategy:
-            //   WebRTC:                no delay for small visible grids, then 100ms per extra
-            //                          stream so the first page starts immediately on reload
+            //   WebRTC:                no delay. Visible cameras should negotiate immediately
+            //                          on reload; go2rtc handles concurrent WebRTC consumers.
             //   MSE (go2rtc WebSocket): 200ms per stream — short burst for WS negotiation
             //   HLS via go2rtc:        no stagger — go2rtc is an HLS server built for many
             //                          concurrent clients; staggering 68 streams over 40 s caused
@@ -789,7 +789,7 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
             streamsToShow.map((stream, index) => {
               const VideoCell = isWebRTC ? WebRTCVideoCell : useMSE ? MSEVideoCell : HLSVideoCell;
               const initDelay = isWebRTC
-                ? Math.max(0, index - 3) * 100
+                ? 0
                 : useMSE
                   ? (index * 200)
                   : go2rtcAvailable

@@ -45,6 +45,67 @@ const MAX_OFFER_RETRIES = 4;
 const BASE_RETRY_DELAY_MS = 1500; // base delay for exponential backoff: 1.5s, 3s, 6s, 12s, 24s, ...
 const FULLSCREEN_ARROW_SEEK_SECONDS = 10;
 const FULLSCREEN_SEEK_SETTLE_TOLERANCE_SECONDS = 1.5;
+const DEFAULT_ICE_SERVERS = [{ urls: 'stun:stun.l.google.com:19302' }];
+
+let iceServersCache = null;
+let iceServersInflight = null;
+let configuredGo2rtcBaseUrlInflight = null;
+
+function getSameOriginGo2rtcBaseUrl() {
+  return `${window.location.origin}/go2rtc`;
+}
+
+async function getConfiguredGo2rtcBaseUrlCached() {
+  if (!configuredGo2rtcBaseUrlInflight) {
+    configuredGo2rtcBaseUrlInflight = getGo2rtcBaseUrl()
+      .catch((err) => {
+        console.warn('Failed to get configured go2rtc URL from settings, using same-origin proxy:', err);
+        return getSameOriginGo2rtcBaseUrl();
+      });
+  }
+
+  return configuredGo2rtcBaseUrlInflight;
+}
+
+function primeIceServersCache() {
+  if (iceServersCache) {
+    return;
+  }
+
+  if (!iceServersInflight) {
+    iceServersInflight = fetch('/api/ice-servers')
+      .then(async (iceResponse) => {
+        if (!iceResponse.ok) {
+          return DEFAULT_ICE_SERVERS;
+        }
+
+        const iceConfig = await iceResponse.json();
+        if (iceConfig.ice_servers && iceConfig.ice_servers.length > 0) {
+          console.log(`Using ${iceConfig.ice_servers.length} ICE servers from config`);
+          return iceConfig.ice_servers;
+        }
+
+        return DEFAULT_ICE_SERVERS;
+      })
+      .catch((err) => {
+        console.warn('Failed to fetch ICE servers config, using defaults:', err);
+        return DEFAULT_ICE_SERVERS;
+      })
+      .then((iceServers) => {
+        iceServersCache = iceServers;
+        return iceServers;
+      });
+  }
+}
+
+function getIceServersForStartup() {
+  if (iceServersCache) {
+    return iceServersCache;
+  }
+
+  primeIceServersCache();
+  return DEFAULT_ICE_SERVERS;
+}
 
 function clamp(value, min, max) {
   if (!Number.isFinite(value)) {
@@ -773,29 +834,15 @@ export function WebRTCVideoCell({
 
     // Async function to initialize WebRTC
     const initWebRTC = async () => {
-      // Get the go2rtc base URL from settings
-      try {
-        go2rtcBaseUrl = await getGo2rtcBaseUrl();
-        console.log(`Using go2rtc base URL: ${go2rtcBaseUrl}`);
-      } catch (err) {
-        console.warn('Failed to get go2rtc URL from settings, using default:', err);
-        go2rtcBaseUrl = `${window.location.origin}/go2rtc`;
-      }
+      // Start with the same-origin HTTP proxy. This avoids waiting on
+      // /api/settings for every visible camera before WebRTC negotiation can
+      // begin; if a deployment needs the configured direct URL, offer retry
+      // falls back to it below.
+      go2rtcBaseUrl = getSameOriginGo2rtcBaseUrl();
+      console.log(`Using initial go2rtc base URL: ${go2rtcBaseUrl}`);
 
       // Fetch ICE server configuration from API (includes TURN if configured)
-      let iceServers = [{ urls: 'stun:stun.l.google.com:19302' }];
-      try {
-        const iceResponse = await fetch('/api/ice-servers');
-        if (iceResponse.ok) {
-          const iceConfig = await iceResponse.json();
-          if (iceConfig.ice_servers && iceConfig.ice_servers.length > 0) {
-            iceServers = iceConfig.ice_servers;
-            console.log(`Using ${iceServers.length} ICE servers from config`);
-          }
-        }
-      } catch (err) {
-        console.warn('Failed to fetch ICE servers config, using defaults:', err);
-      }
+      const iceServers = getIceServersForStartup();
 
       // Create a new RTCPeerConnection
       const pc = new RTCPeerConnection({
@@ -1245,24 +1292,49 @@ export function WebRTCVideoCell({
         const maxOfferRetries = MAX_OFFER_RETRIES;
         const baseRetryDelayMs = BASE_RETRY_DELAY_MS;
 
-        const sendOfferWithRetry = async (attempt) => {
-          const response = await fetch(`${go2rtcBaseUrl}/api/webrtc?src=${encodeURIComponent(activeStreamSource)}`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/sdp',
-            },
-            body: pc.localDescription.sdp,
-          });
+        const sendOfferWithRetry = async (attempt, baseUrl = go2rtcBaseUrl, triedConfiguredFallback = false) => {
+          let response;
+          try {
+            response = await fetch(`${baseUrl}/api/webrtc?src=${encodeURIComponent(activeStreamSource)}`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/sdp',
+              },
+              body: pc.localDescription.sdp,
+            });
+          } catch (fetchError) {
+            if (!triedConfiguredFallback && baseUrl === getSameOriginGo2rtcBaseUrl()) {
+              const configuredBaseUrl = await getConfiguredGo2rtcBaseUrlCached();
+              if (configuredBaseUrl !== baseUrl) {
+                console.warn(`go2rtc proxy request failed for ${stream.name}; retrying configured URL ${configuredBaseUrl}`, fetchError);
+                return sendOfferWithRetry(attempt, configuredBaseUrl, true);
+              }
+            }
+            throw fetchError;
+          }
 
           const bodyText = await response.text().catch(() => '');
 
           if (!response.ok) {
+            if (
+              !triedConfiguredFallback &&
+              response.status >= 400 &&
+              response.status !== 404 &&
+              baseUrl === getSameOriginGo2rtcBaseUrl()
+            ) {
+              const configuredBaseUrl = await getConfiguredGo2rtcBaseUrlCached();
+              if (configuredBaseUrl !== baseUrl) {
+                console.warn(`go2rtc proxy returned ${response.status} for ${stream.name}; retrying configured URL ${configuredBaseUrl}`);
+                return sendOfferWithRetry(attempt, configuredBaseUrl, true);
+              }
+            }
+
             // Retry on 404 (stream not ready) or 500 (server overloaded / race condition) with exponential backoff
             if ((response.status === 404 || response.status === 500) && attempt < maxOfferRetries) {
               const delay = baseRetryDelayMs * Math.pow(2, attempt);
               console.warn(`go2rtc returned ${response.status} for stream ${stream.name} (attempt ${attempt + 1}/${maxOfferRetries + 1}), retrying in ${delay}ms...`);
               await new Promise(resolve => setTimeout(resolve, delay));
-              return sendOfferWithRetry(attempt + 1);
+              return sendOfferWithRetry(attempt + 1, baseUrl, triedConfiguredFallback);
             }
             console.error(`go2rtc /api/webrtc error for stream ${stream.name}: status=${response.status}, body="${bodyText}"`);
             // Check whether the go2rtc error body indicates the camera source is

@@ -438,6 +438,36 @@ static go2rtc_stream_tracking_t *add_tracked_stream(const char *stream_name) {
     return NULL;
 }
 
+static void queue_live_view_preload_if_needed(const stream_config_t *config) {
+    if (!config || config->name[0] == '\0') {
+        return;
+    }
+
+    if (!config->enabled || !config->streaming_enabled || config->privacy_mode) {
+        return;
+    }
+
+    go2rtc_stream_tracking_t *tracking = add_tracked_stream(config->name);
+    if (tracking && tracking->using_go2rtc_for_hls) {
+        log_debug("Stream %s already has an active go2rtc preload, skipping live-view warmup",
+                  config->name);
+        return;
+    }
+
+    if (tracking) {
+        tracking->using_go2rtc_for_hls = true;
+    }
+
+    if (!go2rtc_api_preload_stream_async(config->name)) {
+        log_warn("Failed to queue live-view warmup preload for stream %s", config->name);
+        if (tracking) {
+            tracking->using_go2rtc_for_hls = false;
+        }
+    } else {
+        log_info("Queued live-view warmup preload for stream %s", config->name);
+    }
+}
+
 /**
  * @brief Check if a stream is registered with go2rtc
  *
@@ -1378,6 +1408,7 @@ bool go2rtc_integration_register_all_streams(void) {
                 // Continue with other streams
             } else {
                 log_info("Successfully registered stream %s with go2rtc", streams[i].name);
+                queue_live_view_preload_if_needed(&streams[i]);
             }
         }
     }
@@ -1448,6 +1479,7 @@ bool go2rtc_sync_streams_from_database(void) {
         // Check if stream already exists in go2rtc
         if (go2rtc_api_stream_exists(db_streams[i].name)) {
             log_debug("Stream %s already exists in go2rtc, skipping", db_streams[i].name);
+            queue_live_view_preload_if_needed(&db_streams[i]);
             skipped++;
             continue;
         }
@@ -1476,6 +1508,7 @@ bool go2rtc_sync_streams_from_database(void) {
             failed++;
         } else {
             log_info("Successfully synced stream %s to go2rtc", db_streams[i].name);
+            queue_live_view_preload_if_needed(&db_streams[i]);
             synced++;
         }
     }
@@ -1717,6 +1750,10 @@ bool go2rtc_integration_reload_stream_config(const char *stream_name,
         return false;
     }
 
+    if (have_config) {
+        queue_live_view_preload_if_needed(&config);
+    }
+
     log_info("Successfully reloaded stream %s in go2rtc with URL: %s, secondary=%s (protocol=%s)",
              stream_name, url, secondary_url && secondary_url[0] ? "present" : "none",
              protocol == STREAM_PROTOCOL_UDP ? "UDP" : "TCP");
@@ -1777,6 +1814,13 @@ bool go2rtc_integration_register_stream(const char *stream_name) {
     // This prevents re-registering streams that were pre-registered (e.g., in tests)
     if (is_stream_registered_with_go2rtc(stream_name)) {
         log_debug("Stream %s is already registered with go2rtc, skipping re-registration", stream_name);
+        stream_handle_t existing_stream = get_stream_by_name(stream_name);
+        if (existing_stream) {
+            stream_config_t existing_config;
+            if (get_stream_config(existing_stream, &existing_config) == 0) {
+                queue_live_view_preload_if_needed(&existing_config);
+            }
+        }
         return true;
     }
 
@@ -1841,6 +1885,7 @@ bool go2rtc_integration_register_stream(const char *stream_name) {
                                config.backchannel_enabled, config.protocol,
                                config.record_audio)) {
         log_info("Successfully registered stream %s with go2rtc", stream_name);
+        queue_live_view_preload_if_needed(&config);
         return true;
     }
 
