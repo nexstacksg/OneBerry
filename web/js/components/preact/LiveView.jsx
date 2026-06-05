@@ -6,7 +6,7 @@
 import { useState, useEffect, useMemo } from 'preact/hooks';
 import { showStatusMessage } from './ToastContainer.jsx';
 import { useFullscreenManager, FullscreenManager, useFullscreenGridNav } from './FullscreenManager.jsx';
-import { useQuery, useQueryClient } from '../../query-client.js';
+import { useQuery } from '../../query-client.js';
 import { SnapshotManager, useSnapshotManager } from './SnapshotManager.jsx';
 import { HLSVideoCell } from './HLSVideoCell.jsx';
 import { MSEVideoCell } from './MSEVideoCell.jsx';
@@ -171,9 +171,6 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
     return 0;
   });
 
-  // Get query client for fetching and invalidating queries
-  const queryClient = useQueryClient();
-
   // Check if go2rtc is enabled (for showing mode toggle)
   useEffect(() => {
     const checkGo2rtcMode = async () => {
@@ -275,7 +272,7 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
     // Note: We intentionally only re-run when streamsData changes
     // selectedStream is read but we don't want to trigger refetch when it changes
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [streamsData, queryClient, autoGrid]);
+  }, [streamsData, autoGrid]);
 
   // Sync layout/page/stream to URL — only meaningful once streams are loaded.
   useEffect(() => {
@@ -348,39 +345,7 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
         return [];
       }
 
-      const fetchStreamDetails = async (stream) => {
-        try {
-          const streamId = stream.id || stream.name;
-          return await queryClient.fetchQuery({
-            queryKey: ['stream-details', streamId],
-            queryFn: async () => {
-              const response = await fetch(`/api/streams/${encodeURIComponent(streamId)}`);
-              if (!response.ok) {
-                throw new Error(`Failed to load details for stream ${stream.name}`);
-              }
-              return response.json();
-            },
-            staleTime: 30000
-          });
-        } catch (error) {
-          console.error(`Error loading details for stream ${stream.name}:`, error);
-          return stream;
-        }
-      };
-
-      const detailedStreams = [];
-      if (isWebRTC) {
-        detailedStreams.push(...await Promise.all(sourceStreams.map(fetchStreamDetails)));
-      } else {
-        const batchSize = 3;
-        for (let i = 0; i < sourceStreams.length; i += batchSize) {
-          const batch = sourceStreams.slice(i, i + batchSize);
-          detailedStreams.push(...await Promise.all(batch.map(fetchStreamDetails)));
-        }
-      }
-      console.log(`Loaded detailed streams for ${logLabel} view:`, detailedStreams);
-
-      const filteredStreams = detailedStreams.filter(stream => {
+      const filteredStreams = sourceStreams.filter(stream => {
         if (stream.is_deleted) {
           console.log(`Stream ${stream.name} is soft deleted, filtering out`);
           return false;
@@ -812,7 +777,8 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
             // Render video cells using the active transport.
             //
             // Stagger strategy:
-            //   WebRTC:                 300ms per stream — avoid concurrent offer bursts
+            //   WebRTC:                no delay for small visible grids, then 100ms per extra
+            //                          stream so the first page starts immediately on reload
             //   MSE (go2rtc WebSocket): 200ms per stream — short burst for WS negotiation
             //   HLS via go2rtc:        no stagger — go2rtc is an HLS server built for many
             //                          concurrent clients; staggering 68 streams over 40 s caused
@@ -823,7 +789,7 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
             streamsToShow.map((stream, index) => {
               const VideoCell = isWebRTC ? WebRTCVideoCell : useMSE ? MSEVideoCell : HLSVideoCell;
               const initDelay = isWebRTC
-                ? (index * 300)
+                ? Math.max(0, index - 3) * 100
                 : useMSE
                   ? (index * 200)
                   : go2rtcAvailable

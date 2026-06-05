@@ -135,9 +135,9 @@ describe('Navigation', () => {
     const currentUrl = await navMenu.getCurrentUrl();
     expect(currentUrl).toContain('camera-access.html');
 
-    const pageTitle = await driver.findElement(By.css('.page-header h2'));
+    const pageTitle = await driver.findElement(By.css('#camera-access-page .text-xs.font-semibold.uppercase'));
     const titleText = await pageTitle.getText();
-    expect(titleText).toBe('Camera Access');
+    expect(titleText.toLowerCase()).toBe('camera access');
   });
   
   test('should navigate back to index page from streams page', async () => {

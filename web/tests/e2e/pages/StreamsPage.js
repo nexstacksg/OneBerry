@@ -12,7 +12,7 @@ class StreamsPage {
   get discoverOnvifButton() { return '#discover-onvif-btn'; }
   get streamsTable() { return '#streams-table'; }
   get streamRows() { return '#streams-table tbody tr'; }
-  get streamNameCells() { return '#streams-table tbody tr td:first-child'; }
+  get streamNameCells() { return '#streams-table tbody tr td:nth-child(2)'; }
   get editButtons() { return 'button[title="Edit"]'; }
   get deleteButtons() { return 'button[title="Delete"]'; }
 
@@ -27,7 +27,7 @@ class StreamsPage {
   get testConnectionButton() { return '#stream-test-btn'; }
 
   // Delete modal selectors
-  get deleteModal() { return '.fixed.inset-0.bg-black'; }
+  get deleteModal() { return '[role="dialog"][aria-modal="true"][aria-labelledby="stream-delete-modal-title"]'; }
   get softDisableButton() { return 'button:contains("Disable Stream")'; }
   get hardDeleteButton() { return 'button:contains("Delete Stream")'; }
   get confirmDeleteButton() { return 'button:contains("Yes, Delete Permanently")'; }
@@ -110,7 +110,18 @@ class StreamsPage {
 
     // Set record checkbox
     if (streamData.record !== undefined) {
-      const recordCheckbox = await this.driver.findElement(By.css(this.streamRecordCheckbox));
+      const recordCheckboxes = await this.driver.findElements(By.css(this.streamRecordCheckbox));
+      if (recordCheckboxes.length === 0) {
+        // The recording controls live in a collapsed advanced section. New
+        // streams default to record=true, so no interaction is needed for the
+        // common test case.
+        if (streamData.record === true) {
+          return;
+        }
+        throw new Error('Recording checkbox is not visible; expand Recording Settings before changing it');
+      }
+
+      const recordCheckbox = recordCheckboxes[0];
       const isChecked = await recordCheckbox.isSelected();
 
       if ((streamData.record && !isChecked) || (!streamData.record && isChecked)) {
@@ -142,17 +153,44 @@ class StreamsPage {
    */
   async getStreamNames() {
     const { By } = require('selenium-webdriver');
-    const cells = await this.driver.findElements(By.css(this.streamNameCells));
+    const rows = await this.getDataRows();
     const names = [];
 
-    for (const cell of cells) {
-      const text = await cell.getText();
-      // Extract just the name (remove the status indicator)
-      const name = text.trim();
-      names.push(name);
+    for (const row of rows) {
+      const name = await this.getRowStreamName(row);
+      if (name) {
+        names.push(name);
+      }
     }
 
     return names;
+  }
+
+  async getDataRows() {
+    const { By } = require('selenium-webdriver');
+    const rows = await this.driver.findElements(By.css(this.streamRows));
+    const dataRows = [];
+
+    for (const row of rows) {
+      const editButtons = await row.findElements(By.css('button[title="Edit"]'));
+      const deleteButtons = await row.findElements(By.css('button[title="Delete"]'));
+      if (editButtons.length > 0 || deleteButtons.length > 0) {
+        dataRows.push(row);
+      }
+    }
+
+    return dataRows;
+  }
+
+  async getRowStreamName(row) {
+    const { By } = require('selenium-webdriver');
+    const nameCells = await row.findElements(By.css('td:nth-child(2)'));
+    if (nameCells.length === 0) {
+      return '';
+    }
+
+    const text = await nameCells[0].getText();
+    return text.trim();
   }
 
   /**
@@ -209,15 +247,14 @@ class StreamsPage {
   async _checkStreamExists(streamName) {
     // Get the current list of streams directly from the table
     const { By } = require('selenium-webdriver');
-    const rows = await this.driver.findElements(By.css(this.streamRows));
+    const rows = await this.getDataRows();
     console.log(`Found ${rows.length} stream rows when checking if "${streamName}" exists`);
 
     // Check each row for the stream name
     let exists = false;
     for (let i = 0; i < rows.length; i++) {
       try {
-        const nameCell = await rows[i].findElement(By.css('td:first-child'));
-        const name = await nameCell.getText();
+        const name = await this.getRowStreamName(rows[i]);
         console.log(`Row ${i}: Stream name = "${name}"`);
 
         // Check if this is the stream we're looking for
@@ -241,11 +278,10 @@ class StreamsPage {
    */
   async editStream(streamName) {
     const { By } = require('selenium-webdriver');
-    const rows = await this.driver.findElements(By.css(this.streamRows));
+    const rows = await this.getDataRows();
 
     for (let i = 0; i < rows.length; i++) {
-      const nameCell = await rows[i].findElement(By.css('td:first-child'));
-      const name = await nameCell.getText();
+      const name = await this.getRowStreamName(rows[i]);
 
       if (name.includes(streamName)) {
         const editButton = await rows[i].findElement(By.css('button[title="Edit"]'));
@@ -265,15 +301,14 @@ class StreamsPage {
 
     try {
       // Get all stream rows
-      const rows = await this.driver.findElements(By.css(this.streamRows));
+      const rows = await this.getDataRows();
       console.log(`Found ${rows.length} stream rows`);
 
       let found = false;
 
       // Loop through rows to find the stream
       for (let i = 0; i < rows.length; i++) {
-        const nameCell = await rows[i].findElement(By.css('td:first-child'));
-        const name = await nameCell.getText();
+        const name = await this.getRowStreamName(rows[i]);
         console.log(`Row ${i}: Stream name = "${name}"`);
 
         if (name.includes(streamName)) {
@@ -354,114 +389,47 @@ class StreamsPage {
       fs.writeFileSync(`${dir}/delete-modal-1.png`, screenshot1, 'base64');
       console.log('Screenshot of delete modal saved');
 
-      // Find and click the Delete Stream (permanent) button
-      try {
-        // First, try using XPath to find the button by its text content
-        const hardDeleteButton = await this.driver.findElement(By.xpath("//button[contains(text(), 'Delete Stream')]"));
-        console.log('Found Delete Stream button');
-        await hardDeleteButton.click();
-        console.log('Clicked Delete Stream button');
-      } catch (error) {
-        console.log('Delete Stream button not found with XPath, trying alternative approach...');
-        // Try finding all buttons and check their text
-        const buttons = await this.driver.findElements(By.css('button'));
-        let found = false;
+      const clickDialogButton = async (predicate, description) => {
+        const currentModal = await this.driver.findElement(By.css(this.deleteModal));
+        const buttons = await currentModal.findElements(By.css('button'));
 
         for (const button of buttons) {
-          try {
-            const text = await button.getText();
-            console.log(`Found button with text: "${text}"`);
+          const displayed = await button.isDisplayed().catch(() => false);
+          const enabled = await button.isEnabled().catch(() => false);
+          const text = (await button.getText().catch(() => '')).trim();
+          console.log(`Found modal button with text: "${text}"`);
 
-            if (text.includes('Delete Stream')) {
-              console.log('Found Delete Stream button by text content');
-              await button.click();
-              console.log('Clicked Delete Stream button');
-              found = true;
-              break;
-            }
-          } catch (err) {
-            console.log('Error getting button text:', err.message);
+          if (displayed && enabled && predicate(text.toLowerCase())) {
+            await this.driver.executeScript('arguments[0].click();', button);
+            console.log(`Clicked ${description} button`);
+            return;
           }
         }
 
-        if (!found) {
-          // If still not found, try clicking any button with 'delete' in its text
-          for (const button of buttons) {
-            try {
-              const text = await button.getText();
-              if (text.toLowerCase().includes('delete')) {
-                console.log(`Found button with text containing 'delete': "${text}"`);
-                await button.click();
-                console.log('Clicked button containing "delete"');
-                found = true;
-                break;
-              }
-            } catch (err) {
-              console.log('Error getting button text:', err.message);
-            }
-          }
-        }
+        throw new Error(`Could not find ${description} button`);
+      };
 
-        if (!found) {
-          throw new Error('Could not find Delete Stream button');
-        }
-      }
+      await clickDialogButton(
+        (text) => text === 'delete' || text.includes('delete stream'),
+        'Delete'
+      );
 
       // Wait a moment for the confirmation dialog to appear
-      await this.driver.sleep(1000);
+      await this.driver.wait(async () => {
+        const title = await this.driver.findElement(By.css('#stream-delete-modal-title'));
+        const text = await title.getText();
+        return text.toLowerCase().includes('confirm') || text.toLowerCase().includes('permanent');
+      }, 5000);
 
       // Take a screenshot after clicking Delete Stream
       const screenshot2 = await this.driver.takeScreenshot();
       fs.writeFileSync(`${dir}/after-delete-stream-click.png`, screenshot2, 'base64');
       console.log('Screenshot after Delete Stream click saved');
 
-      // Now find and click the "Yes, Delete Permanently" button
-      try {
-        // First try XPath to find the button by its text content
-        const confirmButton = await this.driver.findElement(By.xpath("//button[contains(text(), 'Yes, Delete Permanently')]"));
-        console.log('Found Yes, Delete Permanently button');
-        await confirmButton.click();
-        console.log('Clicked Yes, Delete Permanently button');
-      } catch (error) {
-        console.log('Yes, Delete Permanently button not found with XPath, trying alternative approach...');
-        // Try finding all buttons and check their text
-        const buttons = await this.driver.findElements(By.css('button'));
-        let found = false;
-
-        for (const button of buttons) {
-          try {
-            const text = await button.getText();
-            console.log(`Found button with text: "${text}"`);
-
-            if (text.includes('Yes, Delete Permanently') ||
-                text.includes('Delete Permanently') ||
-                (text.includes('Yes') && text.includes('Delete'))) {
-              console.log('Found confirmation button by text content');
-              await button.click();
-              console.log('Clicked confirmation button');
-              found = true;
-              break;
-            }
-          } catch (err) {
-            console.log('Error getting button text:', err.message);
-          }
-        }
-
-        if (!found) {
-          // If still not found, try clicking any red button (likely the delete button)
-          const redButtons = await this.driver.findElements(By.css('button.bg-red-600'));
-          if (redButtons.length > 0) {
-            console.log('Found red button (likely delete button)');
-            await redButtons[0].click();
-            console.log('Clicked red button');
-            found = true;
-          }
-        }
-
-        if (!found) {
-          throw new Error('Could not find confirmation button');
-        }
-      }
+      await clickDialogButton(
+        (text) => text.includes('yes') || text.includes('permanently'),
+        'confirmation'
+      );
 
       // Refresh the page to ensure we see the updated list
       console.log('Refreshing page to see updated stream list');
