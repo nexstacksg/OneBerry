@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <ctype.h>
 
 #include "web/api_handlers.h"
@@ -48,6 +49,13 @@ static stream_status_t resolve_effective_stream_status(stream_status_t raw_statu
         return STREAM_STATUS_RUNNING;
     }
     return raw_status;
+}
+
+static bool is_live_warmup_request(const http_request_t *req) {
+    char value[16] = {0};
+    return req &&
+           http_request_get_query_param(req, "warmup", value, sizeof(value)) >= 0 &&
+           (strcmp(value, "1") == 0 || strcasecmp(value, "true") == 0);
 }
 
 static void get_stream_api_credentials(const stream_config_t *config,
@@ -153,6 +161,28 @@ void handle_get_streams(const http_request_t *req, http_response_t *res) {
         log_error("Failed to get stream configurations from database");
         free(db_streams);
         http_response_set_json_error(res, 500, "Failed to get stream configurations");
+        return;
+    }
+
+    if (is_live_warmup_request(req)) {
+        int warmed_count = 0;
+        for (int i = 0; i < count; i++) {
+            if (have_auth_user && auth_user.has_tag_restriction) {
+                if (!db_auth_stream_allowed_for_user(&auth_user, db_streams[i].tags)) {
+                    continue;
+                }
+            }
+
+            if (go2rtc_integration_warm_stream_for_live_view(&db_streams[i])) {
+                warmed_count++;
+            }
+        }
+
+        char response[64];
+        snprintf(response, sizeof(response), "{\"warmed\":%d}", warmed_count);
+        free(db_streams);
+        http_response_set_json(res, 200, response);
+        log_info("Handled GET /api/streams warmup request, warmed=%d", warmed_count);
         return;
     }
 

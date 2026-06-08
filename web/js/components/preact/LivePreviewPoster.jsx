@@ -1,17 +1,5 @@
 import { useEffect, useMemo, useState } from 'preact/hooks';
-
-function buildSnapshotUrl(streamSource) {
-  if (!streamSource) {
-    return '';
-  }
-
-  const params = new URLSearchParams({
-    src: streamSource,
-    cache: '30s',
-  });
-
-  return `/go2rtc/api/frame.jpeg?${params.toString()}`;
-}
+import { buildGo2rtcSnapshotUrl } from '../../utils/live-warmup.js';
 
 export function LivePreviewPoster({
   streamSource,
@@ -21,7 +9,7 @@ export function LivePreviewPoster({
 }) {
   const [shouldLoad, setShouldLoad] = useState(() => enabled && visible && delay <= 0);
   const [loaded, setLoaded] = useState(false);
-  const src = useMemo(() => buildSnapshotUrl(streamSource), [streamSource]);
+  const src = useMemo(() => buildGo2rtcSnapshotUrl(streamSource), [streamSource]);
 
   useEffect(() => {
     setLoaded(false);

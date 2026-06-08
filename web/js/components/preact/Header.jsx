@@ -12,6 +12,7 @@ import { EditUserModal } from './users/EditUserModal.jsx';
 import { getAuthHeaders, isDemoMode, validateSession } from '../../utils/auth-utils.js';
 import { forceNavigation } from '../../utils/navigation-utils.js';
 import { buildBuildingTree, getStreamStatusKind } from '../../utils/building-hierarchy.js';
+import { preloadLiveSnapshots, startLiveWarmup } from '../../utils/live-warmup.js';
 import { useI18n } from '../../i18n.js';
 import LanguageSelector from './common/LanguageSelector.jsx';
 
@@ -196,6 +197,15 @@ export function Header({ version = VERSION }) {
       refetchInterval: 30000,
     }
   );
+
+  useEffect(() => {
+    startLiveWarmup();
+  }, []);
+
+  useEffect(() => {
+    preloadLiveSnapshots(sidebarStreams);
+  }, [sidebarStreams]);
+
   const buildingTree = useMemo(() => buildBuildingTree(
     Array.isArray(sidebarStreams) ? sidebarStreams : [],
     {
