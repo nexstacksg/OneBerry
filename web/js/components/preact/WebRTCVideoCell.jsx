@@ -24,6 +24,7 @@ import { useStreamQuality } from './useStreamQuality.js';
 import { updateStreamRecordingQuality } from '../../utils/stream-quality-utils.js';
 import { captureVideoSnapshot, createPrivacyHandlers } from './video-cell-helpers.js';
 import { PrivacyModeOverlays, StreamStatusBadge } from './VideoCellOverlays.jsx';
+import { LivePreviewPoster } from './LivePreviewPoster.jsx';
 import 'webrtc-adapter';
 import {
   findContainingSegmentIndex,
@@ -1856,6 +1857,12 @@ export function WebRTCVideoCell({
             inset: isFullscreenCell ? 0 : undefined,
             display: isFullscreenCell && fullscreenPlayback ? 'none' : undefined
           }}
+        />
+
+        <LivePreviewPoster
+          streamSource={selectedStreamSource || stream.name}
+          visible={!isPlaying && !fullscreenPlayback}
+          delay={Math.min(initDelay, 1000)}
         />
 
         {isFullscreenCell && fullscreenPlayback && (

@@ -21,6 +21,7 @@ import { useStreamQuality } from './useStreamQuality.js';
 import { updateStreamRecordingQuality } from '../../utils/stream-quality-utils.js';
 import { captureVideoSnapshot, createPrivacyHandlers } from './video-cell-helpers.js';
 import { PrivacyModeOverlays, StreamStatusBadge } from './VideoCellOverlays.jsx';
+import { LivePreviewPoster } from './LivePreviewPoster.jsx';
 
 /**
  * MSEVideoCell component
@@ -542,6 +543,12 @@ export function MSEVideoCell({
         muted
         playsInline
         style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+      />
+
+      <LivePreviewPoster
+        streamSource={selectedStreamSource || stream.name}
+        visible={!isPlaying}
+        delay={Math.min(initDelay, 1000)}
       />
 
       {/* Detection overlay component */}

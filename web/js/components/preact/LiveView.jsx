@@ -33,6 +33,42 @@ function legacyLayoutToColsRows(layout) {
   }
 }
 
+function getLiveInitDelay({ isWebRTC, useMSE, go2rtcAvailable, index, totalStreams }) {
+  if (totalStreams <= 1) {
+    return 0;
+  }
+
+  if (isWebRTC) {
+    const immediateCount = Math.min(4, totalStreams);
+    if (index < immediateCount) {
+      return 0;
+    }
+    return Math.ceil((index - immediateCount + 1) / 4) * 350;
+  }
+
+  if (useMSE) {
+    const immediateCount = Math.min(3, totalStreams);
+    if (index < immediateCount) {
+      return 0;
+    }
+    return Math.ceil((index - immediateCount + 1) / 3) * 300;
+  }
+
+  if (go2rtcAvailable) {
+    const immediateCount = Math.min(6, totalStreams);
+    if (index < immediateCount) {
+      return 0;
+    }
+    return Math.ceil((index - immediateCount + 1) / 6) * 250;
+  }
+
+  const immediateCount = Math.min(2, totalStreams);
+  if (index < immediateCount) {
+    return 0;
+  }
+  return Math.ceil((index - immediateCount + 1) / 2) * 450;
+}
+
 /**
  * Shared live camera grid for HLS, MSE, and WebRTC modes.
  * @returns {JSX.Element} LiveView component
@@ -774,27 +810,18 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
               <a href="streams.html" className="btn-primary">{t('live.configureStreams')}</a>
             </div>
           ) : (
-            // Render video cells using the active transport.
-            //
-            // Stagger strategy:
-            //   WebRTC:                no delay. Visible cameras should negotiate immediately
-            //                          on reload; go2rtc handles concurrent WebRTC consumers.
-            //   MSE (go2rtc WebSocket): 200ms per stream — short burst for WS negotiation
-            //   HLS via go2rtc:        no stagger — go2rtc is an HLS server built for many
-            //                          concurrent clients; staggering 68 streams over 40 s caused
-            //                          the go2rtc health-check cache to expire mid-initialization,
-            //                          producing false-negative availability results under load and
-            //                          triggering a stampede of HLS.js error-recovery re-registrations
-            //   HLS native (FFmpeg):   300ms per stream — avoids N simultaneous ffmpeg spawns
+            // Render video cells using the active transport. The first cameras
+            // connect immediately; the rest start in short waves so large grids
+            // do not stampede go2rtc, browser decoders, or native FFmpeg HLS.
             streamsToShow.map((stream, index) => {
               const VideoCell = isWebRTC ? WebRTCVideoCell : useMSE ? MSEVideoCell : HLSVideoCell;
-              const initDelay = isWebRTC
-                ? 0
-                : useMSE
-                  ? (index * 200)
-                  : go2rtcAvailable
-                    ? 0               // go2rtc HLS: no stagger needed, go2rtc handles concurrency
-                    : (index * 300);  // native FFmpeg HLS: gentle stagger to avoid process-spawn burst
+              const initDelay = getLiveInitDelay({
+                isWebRTC,
+                useMSE,
+                go2rtcAvailable,
+                index,
+                totalStreams: streamsToShow.length,
+              });
               // Global index in orderedStreams for drag-and-drop (pagination offset)
               const globalIndex = currentPage * maxStreams + index;
 
