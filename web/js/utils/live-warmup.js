@@ -1,3 +1,8 @@
+import {
+  getStoredStreamQuality,
+  getStreamQualitySource,
+} from './stream-quality-utils.js';
+
 const WARMUP_THROTTLE_MS = 5000;
 const WARMUP_TIMEOUT_MS = 3000;
 const SNAPSHOT_PRELOAD_THROTTLE_MS = 10000;
@@ -118,7 +123,12 @@ export function preloadLiveSnapshots(streams, { limit = 8, force = false } = {})
     img.decoding = 'async';
     img.onload = resolve;
     img.onerror = resolve;
-    img.src = buildGo2rtcSnapshotUrl(stream.name);
+    // Preload the snapshot for the source the live view will actually display
+    // (the "__low" sub-stream when low quality is selected). This makes the
+    // poster a warm cache hit instead of triggering a cold go2rtc frame grab.
+    const previewSource =
+      getStreamQualitySource(stream, getStoredStreamQuality(stream)) || stream.name;
+    img.src = buildGo2rtcSnapshotUrl(previewSource);
   });
 
   Promise.all(candidates.map(loadSnapshot)).finally(() => {
