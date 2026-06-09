@@ -39,34 +39,34 @@ function getLiveInitDelay({ isWebRTC, useMSE, go2rtcAvailable, index, totalStrea
   }
 
   if (isWebRTC) {
-    const immediateCount = Math.min(4, totalStreams);
+    const immediateCount = Math.min(8, totalStreams);
     if (index < immediateCount) {
       return 0;
     }
-    return Math.ceil((index - immediateCount + 1) / 4) * 350;
+    return Math.ceil((index - immediateCount + 1) / 8) * 100;
   }
 
   if (useMSE) {
-    const immediateCount = Math.min(3, totalStreams);
-    if (index < immediateCount) {
-      return 0;
-    }
-    return Math.ceil((index - immediateCount + 1) / 3) * 300;
-  }
-
-  if (go2rtcAvailable) {
     const immediateCount = Math.min(6, totalStreams);
     if (index < immediateCount) {
       return 0;
     }
-    return Math.ceil((index - immediateCount + 1) / 6) * 250;
+    return Math.ceil((index - immediateCount + 1) / 6) * 100;
   }
 
-  const immediateCount = Math.min(2, totalStreams);
+  if (go2rtcAvailable) {
+    const immediateCount = Math.min(12, totalStreams);
+    if (index < immediateCount) {
+      return 0;
+    }
+    return Math.ceil((index - immediateCount + 1) / 12) * 75;
+  }
+
+  const immediateCount = Math.min(4, totalStreams);
   if (index < immediateCount) {
     return 0;
   }
-  return Math.ceil((index - immediateCount + 1) / 2) * 450;
+  return Math.ceil((index - immediateCount + 1) / 4) * 150;
 }
 
 /**

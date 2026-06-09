@@ -20,41 +20,24 @@ import { initI18n } from '../i18n.js';
  */
 function App() {
     const [isWebRTCDisabled, setIsWebRTCDisabled] = useState(false);
-    const [isLoading, setIsLoading] = useState(true);
 
     useEffect(() => {
-        // Check if WebRTC is disabled in settings
+        // Check WebRTC status in the background — do not block initial render
         async function checkWebRTCStatus() {
             try {
                 const response = await fetch('/api/settings');
-                if (!response.ok) {
-                    console.error('Failed to fetch settings:', response.status, response.statusText);
-                    setIsLoading(false);
-                    return;
-                }
-
+                if (!response.ok) return;
                 const settings = await response.json();
-
                 if (settings.webrtc_disabled || settings.go2rtc_enabled === false) {
-                    console.log('WebRTC is disabled' + (settings.go2rtc_enabled === false ? ' (go2rtc disabled)' : '') + ', using HLS view');
                     setIsWebRTCDisabled(true);
-                } else {
-                    console.log('WebRTC is enabled, using WebRTC view');
-                    setIsWebRTCDisabled(false);
                 }
-            } catch (error) {
-                console.error('Error checking WebRTC status:', error);
-            } finally {
-                setIsLoading(false);
+            } catch {
+                // Ignore; default (WebRTC enabled) is kept
             }
         }
 
         checkWebRTCStatus();
     }, []);
-
-    if (isLoading) {
-        return <div className="loading">Loading...</div>;
-    }
 
     return (
         <>
@@ -68,7 +51,7 @@ function App() {
 
 // Render the App component when the DOM is loaded
 document.addEventListener('DOMContentLoaded', async () => {
-    startLiveWarmup();
+    startLiveWarmup({ force: true });
     await initI18n();
     // Setup session validation (checks every 5 minutes)
     setupSessionValidation();

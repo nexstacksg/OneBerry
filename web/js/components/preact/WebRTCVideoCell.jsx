@@ -38,11 +38,11 @@ import {
 // Configuration for detecting lack of incoming video data.
 // MAX_VIDEO_DATA_CHECKS × VIDEO_DATA_CHECK_INTERVAL_MS defines the total
 // time we will wait for video frames before surfacing an error.
-const MAX_VIDEO_DATA_CHECKS = 6; // 6 checks × 15,000 ms (15s) interval = 90s total
-const VIDEO_DATA_CHECK_INTERVAL_MS = 15000; // 15 seconds between checks
-const MIN_NO_DATA_CHECKS_BEFORE_RETRY = 2;
+const MAX_VIDEO_DATA_CHECKS = 12; // 12 checks × 5,000 ms (5s) interval = 60s total
+const VIDEO_DATA_CHECK_INTERVAL_MS = 5000; // 5 seconds between checks
+const MIN_NO_DATA_CHECKS_BEFORE_RETRY = 1;
 const MAX_NO_DATA_RECONNECT_ATTEMPTS = 3;
-const OFFER_RETRY_DELAYS_MS = [250, 500, 750, 1000, 1500, 2000, 3000, 4000];
+const OFFER_RETRY_DELAYS_MS = [100, 200, 400, 750, 1000, 1500, 2000, 3000];
 const WEBRTC_OFFER_TIMEOUT_MS = 6000;
 const FULLSCREEN_ARROW_SEEK_SECONDS = 10;
 const FULLSCREEN_SEEK_SETTLE_TOLERANCE_SECONDS = 1.5;
@@ -1003,8 +1003,8 @@ export function WebRTCVideoCell({
                 (async () => {
                   try {
                     await refreshStreamRegistration();
-                    // Give go2rtc time to fully re-register the RTSP source
-                    await new Promise(resolve => setTimeout(resolve, 2000));
+                    // Brief pause for go2rtc to re-register the RTSP source
+                    await new Promise(resolve => setTimeout(resolve, 500));
                   } catch (err) {
                     console.error(`Error refreshing stream ${stream.name} during auto-reconnect:`, err);
                   }
@@ -1068,7 +1068,7 @@ export function WebRTCVideoCell({
             if (playRetryTimeout) {
               clearTimeout(playRetryTimeout);
             }
-            playRetryTimeout = setTimeout(attemptPlay, 1000);
+            playRetryTimeout = setTimeout(attemptPlay, 300);
           }
         };
 
@@ -1080,7 +1080,7 @@ export function WebRTCVideoCell({
             if (playRetryTimeout) {
               clearTimeout(playRetryTimeout);
             }
-            playRetryTimeout = setTimeout(attemptPlay, 1000);
+            playRetryTimeout = setTimeout(attemptPlay, 300);
           }
         };
 
@@ -1147,8 +1147,8 @@ export function WebRTCVideoCell({
               });
               if (response.ok) {
                 console.log(`Successfully refreshed go2rtc registration for ${stream.name}, retrying connection...`);
-                // Delay to allow go2rtc to fully process the refresh (longer for slow devices)
-                await new Promise(resolve => setTimeout(resolve, 3000));
+                // Brief pause to allow go2rtc to fully process the refresh
+                await new Promise(resolve => setTimeout(resolve, 800));
                 // Trigger a retry by incrementing retryCount
                 setRetryCount(prev => prev + 1);
                 return;
@@ -1195,7 +1195,7 @@ export function WebRTCVideoCell({
           } else if (peerConnectionRef.current) {
             console.log(`WebRTC ICE connection recovered for stream ${stream.name}, current state: ${peerConnectionRef.current.iceConnectionState}`);
           }
-        }, 5000); // Wait 5 seconds to see if connection recovers
+        }, 2000); // Wait 2 seconds to see if connection recovers
       } else if (pc.iceConnectionState === 'closed') {
         // Stop monitoring when closed
         if (connectionMonitorRef.current) {
@@ -1265,7 +1265,7 @@ export function WebRTCVideoCell({
         setError(t('live.connectionTimeoutCheckNetwork'));
         setIsLoading(false);
       }
-    }, 30000); // 30 second timeout
+    }, 15000); // 15 second timeout
 
     // Create and send offer
     pc.createOffer()
@@ -1862,7 +1862,7 @@ export function WebRTCVideoCell({
         <LivePreviewPoster
           streamSource={selectedStreamSource || stream.name}
           visible={!isPlaying && !fullscreenPlayback}
-          delay={Math.min(initDelay, 1000)}
+          delay={0}
         />
 
         {isFullscreenCell && fullscreenPlayback && (

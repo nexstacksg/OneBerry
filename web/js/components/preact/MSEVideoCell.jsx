@@ -548,7 +548,7 @@ export function MSEVideoCell({
       <LivePreviewPoster
         streamSource={selectedStreamSource || stream.name}
         visible={!isPlaying}
-        delay={Math.min(initDelay, 1000)}
+        delay={0}
       />
 
       {/* Detection overlay component */}
