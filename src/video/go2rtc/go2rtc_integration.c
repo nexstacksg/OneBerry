@@ -36,6 +36,10 @@
 // Tracking for streams using go2rtc
 #define MAX_TRACKED_STREAMS MAX_STREAMS
 
+// Suffix used by go2rtc_stream.c when registering the low-quality secondary
+// stream as a separate go2rtc source (e.g. "cam1" -> "cam1__low").
+#define GO2RTC_SECONDARY_STREAM_SUFFIX "__low"
+
 typedef struct {
     char stream_name[MAX_STREAM_NAME];
     bool using_go2rtc_for_recording;
@@ -465,6 +469,26 @@ static void queue_live_view_preload_if_needed(const stream_config_t *config) {
         }
     } else {
         log_info("Queued live-view warmup preload for stream %s", config->name);
+    }
+
+    // Also warm the low-quality "__low" sub-stream so live view's low-quality
+    // mode (and its snapshot poster) opens instantly instead of paying a cold
+    // RTSP start.  The secondary stream is registered as "<name>__low" whenever
+    // a secondary_url is configured.  We piggyback on the primary's warm-once
+    // decision above so this fires exactly once per stream and consumes no extra
+    // tracking slot.
+    if (config->secondary_url[0] != '\0') {
+        char secondary_id[MAX_STREAM_NAME];
+        int written = snprintf(secondary_id, sizeof(secondary_id), "%s%s",
+                               config->name, GO2RTC_SECONDARY_STREAM_SUFFIX);
+        if (written > 0 && written < (int)sizeof(secondary_id)) {
+            if (!go2rtc_api_preload_stream_async(secondary_id)) {
+                log_warn("Failed to queue live-view warmup preload for low-quality stream %s",
+                         secondary_id);
+            } else {
+                log_info("Queued live-view warmup preload for low-quality stream %s", secondary_id);
+            }
+        }
     }
 }
 
