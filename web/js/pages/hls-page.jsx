@@ -68,7 +68,7 @@ function App() {
 
 // Render the App component when the DOM is loaded
 document.addEventListener('DOMContentLoaded', async () => {
-    startLiveWarmup();
+    startLiveWarmup({ force: true });
     await initI18n();
     // Setup session validation (checks every 5 minutes)
     setupSessionValidation();

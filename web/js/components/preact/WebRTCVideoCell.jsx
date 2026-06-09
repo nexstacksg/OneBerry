@@ -38,9 +38,9 @@ import {
 // Configuration for detecting lack of incoming video data.
 // MAX_VIDEO_DATA_CHECKS × VIDEO_DATA_CHECK_INTERVAL_MS defines the total
 // time we will wait for video frames before surfacing an error.
-const MAX_VIDEO_DATA_CHECKS = 6; // 6 checks × 15,000 ms (15s) interval = 90s total
-const VIDEO_DATA_CHECK_INTERVAL_MS = 15000; // 15 seconds between checks
-const MIN_NO_DATA_CHECKS_BEFORE_RETRY = 2;
+const MAX_VIDEO_DATA_CHECKS = 12; // 12 checks × 5,000 ms (5s) interval = 60s total
+const VIDEO_DATA_CHECK_INTERVAL_MS = 5000; // 5 seconds between checks
+const MIN_NO_DATA_CHECKS_BEFORE_RETRY = 1;
 const MAX_NO_DATA_RECONNECT_ATTEMPTS = 3;
 const OFFER_RETRY_DELAYS_MS = [250, 500, 750, 1000, 1500, 2000, 3000, 4000];
 const WEBRTC_OFFER_TIMEOUT_MS = 6000;

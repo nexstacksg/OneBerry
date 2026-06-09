@@ -1,7 +1,6 @@
-const WARMUP_THROTTLE_MS = 15000;
+const WARMUP_THROTTLE_MS = 5000;
 const WARMUP_TIMEOUT_MS = 3000;
-const SNAPSHOT_PRELOAD_THROTTLE_MS = 45000;
-const SNAPSHOT_PRELOAD_DELAY_MS = 750;
+const SNAPSHOT_PRELOAD_THROTTLE_MS = 10000;
 const WARMUP_STORAGE_KEY = 'oneberry-live-warmup:last';
 const SNAPSHOT_STORAGE_KEY = 'oneberry-live-snapshots:last';
 
@@ -35,18 +34,6 @@ function shouldThrottle(key, throttleMs) {
   return last > 0 && now() - last < throttleMs;
 }
 
-function scheduleIdleTask(callback, timeout = SNAPSHOT_PRELOAD_DELAY_MS) {
-  if (typeof window === 'undefined') {
-    return;
-  }
-
-  if ('requestIdleCallback' in window) {
-    window.requestIdleCallback(callback, { timeout });
-    return;
-  }
-
-  window.setTimeout(callback, timeout);
-}
 
 export function buildGo2rtcSnapshotUrl(streamSource, cache = '30s') {
   if (!streamSource) {
@@ -126,22 +113,15 @@ export function preloadLiveSnapshots(streams, { limit = 8, force = false } = {})
   setStoredTimestamp(SNAPSHOT_STORAGE_KEY, now());
   snapshotPreloadInFlight = true;
 
-  scheduleIdleTask(() => {
-    let index = 0;
-    const loadNext = () => {
-      if (index >= candidates.length) {
-        snapshotPreloadInFlight = false;
-        return;
-      }
+  const loadSnapshot = (stream) => new Promise((resolve) => {
+    const img = new Image();
+    img.decoding = 'async';
+    img.onload = resolve;
+    img.onerror = resolve;
+    img.src = buildGo2rtcSnapshotUrl(stream.name);
+  });
 
-      const stream = candidates[index++];
-      const img = new Image();
-      img.decoding = 'async';
-      img.onload = loadNext;
-      img.onerror = loadNext;
-      img.src = buildGo2rtcSnapshotUrl(stream.name);
-    };
-
-    loadNext();
+  Promise.all(candidates.map(loadSnapshot)).finally(() => {
+    snapshotPreloadInFlight = false;
   });
 }
