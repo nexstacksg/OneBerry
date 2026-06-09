@@ -42,7 +42,10 @@ const MAX_VIDEO_DATA_CHECKS = 12; // 12 checks × 5,000 ms (5s) interval = 60s t
 const VIDEO_DATA_CHECK_INTERVAL_MS = 5000; // 5 seconds between checks
 const MIN_NO_DATA_CHECKS_BEFORE_RETRY = 1;
 const MAX_NO_DATA_RECONNECT_ATTEMPTS = 3;
+const MAX_OFFER_FAILURE_RECONNECT_ATTEMPTS = 2;
 const OFFER_RETRY_DELAYS_MS = [100, 200, 400, 750, 1000, 1500, 2000, 3000];
+const OFFER_RETRY_JITTER_MS = 250;
+const OFFER_FAILURE_REFRESH_DELAY_MS = 1200;
 const WEBRTC_OFFER_TIMEOUT_MS = 6000;
 const FULLSCREEN_ARROW_SEEK_SECONDS = 10;
 const FULLSCREEN_SEEK_SETTLE_TOLERANCE_SECONDS = 1.5;
@@ -117,6 +120,10 @@ function clamp(value, min, max) {
   const safeMax = Number.isFinite(max) ? max : value;
 
   return Math.min(Math.max(value, safeMin), safeMax);
+}
+
+function getJitteredOfferRetryDelay(baseDelay) {
+  return baseDelay + Math.floor(Math.random() * OFFER_RETRY_JITTER_MS);
 }
 
 function getPreviewFrameIndexForTimelineSample(segment, sampleTimestamp) {
@@ -1294,6 +1301,11 @@ export function WebRTCVideoCell({
         ];
         const shouldRetryOfferStatus = (status) =>
           status === 404 || status === 500 || status === 502 || status === 503 || status === 504;
+        const createOfferError = (message, retryable = false) => {
+          const offerError = new Error(message);
+          offerError.retryableOfferFailure = retryable;
+          return offerError;
+        };
 
         const sendOfferWithRetry = async (attempt, baseUrl = go2rtcBaseUrl, triedConfiguredFallback = false) => {
           let response;
@@ -1320,11 +1332,12 @@ export function WebRTCVideoCell({
               }
             }
             if (attempt < maxOfferRetries) {
-              const delay = getOfferRetryDelay(attempt);
+              const delay = getJitteredOfferRetryDelay(getOfferRetryDelay(attempt));
               console.warn(`go2rtc offer request failed for stream ${stream.name} (attempt ${attempt + 1}/${maxOfferRetries + 1}), retrying in ${delay}ms...`, fetchError);
               await new Promise(resolve => setTimeout(resolve, delay));
               return sendOfferWithRetry(attempt + 1, baseUrl, triedConfiguredFallback);
             }
+            fetchError.retryableOfferFailure = true;
             throw fetchError;
           } finally {
             clearTimeout(offerTimeout);
@@ -1347,7 +1360,7 @@ export function WebRTCVideoCell({
             }
 
             if (shouldRetryOfferStatus(response.status) && attempt < maxOfferRetries) {
-              const delay = getOfferRetryDelay(attempt);
+              const delay = getJitteredOfferRetryDelay(getOfferRetryDelay(attempt));
               console.warn(`go2rtc returned ${response.status} for stream ${stream.name} (attempt ${attempt + 1}/${maxOfferRetries + 1}), retrying in ${delay}ms...`);
               await new Promise(resolve => setTimeout(resolve, delay));
               return sendOfferWithRetry(attempt + 1, baseUrl, triedConfiguredFallback);
@@ -1361,7 +1374,10 @@ export function WebRTCVideoCell({
             if (isSourceUnreachable) {
               throw new Error(t('live.cannotConnectToSource'));
             }
-            throw new Error(`Failed to send offer: ${response.status} ${response.statusText}`);
+            throw createOfferError(
+              `Failed to send offer: ${response.status} ${response.statusText}`,
+              shouldRetryOfferStatus(response.status)
+            );
           }
           return bodyText;
         };
@@ -1390,8 +1406,30 @@ export function WebRTCVideoCell({
       })
       .catch(error => {
         console.error(`Error setting up WebRTC for stream ${stream.name}:`, error);
-        setError(error.message || t('live.failedToEstablishWebrtcConnection'));
         clearTimeout(connectionTimeout);
+        if (
+          error?.retryableOfferFailure &&
+          reconnectAttemptsRef.current < MAX_OFFER_FAILURE_RECONNECT_ATTEMPTS
+        ) {
+          reconnectAttemptsRef.current++;
+          console.log(
+            `Refreshing stream ${stream.name} after WebRTC offer failure ` +
+            `(attempt ${reconnectAttemptsRef.current}/${MAX_OFFER_FAILURE_RECONNECT_ATTEMPTS})`
+          );
+          (async () => {
+            try {
+              await refreshStreamRegistration();
+              await new Promise(resolve => setTimeout(resolve, OFFER_FAILURE_REFRESH_DELAY_MS));
+            } catch (refreshError) {
+              console.error(`Error refreshing stream ${stream.name} after offer failure:`, refreshError);
+            }
+            setRetryCount(prev => prev + 1);
+          })();
+          return;
+        }
+
+        setError(error.message || t('live.failedToEstablishWebrtcConnection'));
+        setIsLoading(false);
       });
 
     // Set up connection quality monitoring

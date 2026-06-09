@@ -39,11 +39,7 @@ function getLiveInitDelay({ isWebRTC, useMSE, go2rtcAvailable, index, totalStrea
   }
 
   if (isWebRTC) {
-    const immediateCount = Math.min(8, totalStreams);
-    if (index < immediateCount) {
-      return 0;
-    }
-    return Math.ceil((index - immediateCount + 1) / 8) * 100;
+    return index * 350;
   }
 
   if (useMSE) {
