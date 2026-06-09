@@ -652,7 +652,7 @@ export function HLSVideoCell({
         streamSource={selectedStreamSource || stream.name}
         visible={!isPlaying}
         enabled={hlsMode === 'go2rtc'}
-        delay={Math.min(initDelay, 1000)}
+        delay={0}
       />
 
       {/* Detection overlay component */}
