@@ -46,7 +46,7 @@ const MAX_OFFER_FAILURE_RECONNECT_ATTEMPTS = 2;
 const OFFER_RETRY_DELAYS_MS = [100, 200, 400, 750, 1000, 1500, 2000, 3000];
 const OFFER_RETRY_JITTER_MS = 250;
 const OFFER_FAILURE_REFRESH_DELAY_MS = 1200;
-const WEBRTC_OFFER_TIMEOUT_MS = 6000;
+const WEBRTC_OFFER_TIMEOUT_MS = 15000;
 const FULLSCREEN_ARROW_SEEK_SECONDS = 10;
 const FULLSCREEN_SEEK_SETTLE_TOLERANCE_SECONDS = 1.5;
 const DEFAULT_ICE_SERVERS = [{ urls: 'stun:stun.l.google.com:19302' }];
@@ -1324,18 +1324,18 @@ export function WebRTCVideoCell({
               signal: offerAbortController.signal,
             });
           } catch (fetchError) {
-            if (!triedConfiguredFallback && baseUrl === getSameOriginGo2rtcBaseUrl()) {
-              const configuredBaseUrl = await getConfiguredGo2rtcBaseUrlCached();
-              if (configuredBaseUrl !== baseUrl) {
-                console.warn(`go2rtc proxy request failed for ${stream.name}; retrying configured URL ${configuredBaseUrl}`, fetchError);
-                return sendOfferWithRetry(attempt, configuredBaseUrl, true);
-              }
-            }
             if (attempt < maxOfferRetries) {
               const delay = getJitteredOfferRetryDelay(getOfferRetryDelay(attempt));
               console.warn(`go2rtc offer request failed for stream ${stream.name} (attempt ${attempt + 1}/${maxOfferRetries + 1}), retrying in ${delay}ms...`, fetchError);
               await new Promise(resolve => setTimeout(resolve, delay));
               return sendOfferWithRetry(attempt + 1, baseUrl, triedConfiguredFallback);
+            }
+            if (!triedConfiguredFallback && baseUrl === getSameOriginGo2rtcBaseUrl()) {
+              const configuredBaseUrl = await getConfiguredGo2rtcBaseUrlCached();
+              if (configuredBaseUrl !== baseUrl) {
+                console.warn(`go2rtc proxy request failed for ${stream.name} after retries; retrying configured URL ${configuredBaseUrl}`, fetchError);
+                return sendOfferWithRetry(0, configuredBaseUrl, true);
+              }
             }
             fetchError.retryableOfferFailure = true;
             throw fetchError;
@@ -1346,6 +1346,12 @@ export function WebRTCVideoCell({
           const bodyText = await response.text().catch(() => '');
 
           if (!response.ok) {
+            if (shouldRetryOfferStatus(response.status) && attempt < maxOfferRetries) {
+              const delay = getJitteredOfferRetryDelay(getOfferRetryDelay(attempt));
+              console.warn(`go2rtc returned ${response.status} for stream ${stream.name} (attempt ${attempt + 1}/${maxOfferRetries + 1}), retrying in ${delay}ms...`);
+              await new Promise(resolve => setTimeout(resolve, delay));
+              return sendOfferWithRetry(attempt + 1, baseUrl, triedConfiguredFallback);
+            }
             if (
               !triedConfiguredFallback &&
               response.status >= 400 &&
@@ -1354,16 +1360,9 @@ export function WebRTCVideoCell({
             ) {
               const configuredBaseUrl = await getConfiguredGo2rtcBaseUrlCached();
               if (configuredBaseUrl !== baseUrl) {
-                console.warn(`go2rtc proxy returned ${response.status} for ${stream.name}; retrying configured URL ${configuredBaseUrl}`);
-                return sendOfferWithRetry(attempt, configuredBaseUrl, true);
+                console.warn(`go2rtc proxy returned ${response.status} for ${stream.name} after retries; retrying configured URL ${configuredBaseUrl}`);
+                return sendOfferWithRetry(0, configuredBaseUrl, true);
               }
-            }
-
-            if (shouldRetryOfferStatus(response.status) && attempt < maxOfferRetries) {
-              const delay = getJitteredOfferRetryDelay(getOfferRetryDelay(attempt));
-              console.warn(`go2rtc returned ${response.status} for stream ${stream.name} (attempt ${attempt + 1}/${maxOfferRetries + 1}), retrying in ${delay}ms...`);
-              await new Promise(resolve => setTimeout(resolve, delay));
-              return sendOfferWithRetry(attempt + 1, baseUrl, triedConfiguredFallback);
             }
             console.error(`go2rtc /api/webrtc error for stream ${stream.name}: status=${response.status}, body="${bodyText}"`);
             // Check whether the go2rtc error body indicates the camera source is
