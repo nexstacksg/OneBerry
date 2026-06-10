@@ -119,9 +119,27 @@ static void prepare_go2rtc_source_url(const char *stream_url,
     strncpy(out_url, stream_url, out_url_size - 1);
     out_url[out_url_size - 1] = '\0';
 
-    // Inject credentials into URL if provided and not already embedded.
+    // Inject or normalize credentials before handing the source to go2rtc.
+    // Raw reserved characters in embedded credentials (notably '@' in camera
+    // passwords) can make RTSP URL parsing ambiguous once go2rtc opens the
+    // producer. Re-applying extracted credentials lets url_utils percent-encode
+    // them consistently.
     char credentialed_url[URL_BUFFER_SIZE];
-    if (url_apply_credentials(out_url, username, password,
+    char embedded_username[128] = {0};
+    char embedded_password[128] = {0};
+    const char *effective_username = username;
+    const char *effective_password = password;
+
+    if ((!effective_username || effective_username[0] == '\0') &&
+        url_extract_credentials(out_url,
+                                embedded_username, sizeof(embedded_username),
+                                embedded_password, sizeof(embedded_password)) == 0 &&
+        embedded_username[0] != '\0') {
+        effective_username = embedded_username;
+        effective_password = embedded_password;
+    }
+
+    if (url_apply_credentials(out_url, effective_username, effective_password,
                               credentialed_url, sizeof(credentialed_url)) == 0) {
         if (strcmp(credentialed_url, out_url) != 0) {
             strncpy(out_url, credentialed_url, out_url_size - 1);

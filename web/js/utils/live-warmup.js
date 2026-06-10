@@ -5,7 +5,8 @@ import {
 
 const WARMUP_THROTTLE_MS = 5000;
 const WARMUP_TIMEOUT_MS = 3000;
-const SNAPSHOT_PRELOAD_THROTTLE_MS = 10000;
+const SNAPSHOT_PRELOAD_THROTTLE_MS = 30000;
+const SNAPSHOT_PRELOAD_GAP_MS = 750;
 const WARMUP_STORAGE_KEY = 'oneberry-live-warmup:last';
 const SNAPSHOT_STORAGE_KEY = 'oneberry-live-snapshots:last';
 
@@ -91,7 +92,7 @@ export function startLiveWarmup({ force = false } = {}) {
   return warmupInFlight;
 }
 
-export function preloadLiveSnapshots(streams, { limit = 8, force = false } = {}) {
+export function preloadLiveSnapshots(streams, { limit = 2, force = false } = {}) {
   if (snapshotPreloadInFlight || !Array.isArray(streams) || streams.length === 0) {
     return;
   }
@@ -131,7 +132,14 @@ export function preloadLiveSnapshots(streams, { limit = 8, force = false } = {})
     img.src = buildGo2rtcSnapshotUrl(previewSource);
   });
 
-  Promise.all(candidates.map(loadSnapshot)).finally(() => {
+  const loadSequentially = async () => {
+    for (const stream of candidates) {
+      await loadSnapshot(stream);
+      await new Promise(resolve => setTimeout(resolve, SNAPSHOT_PRELOAD_GAP_MS));
+    }
+  };
+
+  loadSequentially().finally(() => {
     snapshotPreloadInFlight = false;
   });
 }
