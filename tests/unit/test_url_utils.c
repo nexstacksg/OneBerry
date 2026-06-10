@@ -18,6 +18,12 @@ void test_url_apply_credentials_replaces_existing_credentials(void) {
     TEST_ASSERT_EQUAL_STRING("rtsp://new%40user:p%3ass@camera/live", url);
 }
 
+void test_url_apply_credentials_encodes_reserved_password_chars(void) {
+    char url[256];
+    TEST_ASSERT_EQUAL_INT(0, url_apply_credentials("rtsp://camera/live", "user", "U$er@1234", url, sizeof(url)));
+    TEST_ASSERT_EQUAL_STRING("rtsp://user:U%24er%401234@camera/live", url);
+}
+
 void test_url_apply_credentials_preserves_fragment_suffix(void) {
     char url[256];
     TEST_ASSERT_EQUAL_INT(0, url_apply_credentials("rtsp://camera/live#transport=tcp#timeout=30", "alice", "secret", url, sizeof(url)));
@@ -105,6 +111,7 @@ int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_url_apply_credentials_injects_credentials);
     RUN_TEST(test_url_apply_credentials_replaces_existing_credentials);
+    RUN_TEST(test_url_apply_credentials_encodes_reserved_password_chars);
     RUN_TEST(test_url_apply_credentials_preserves_fragment_suffix);
     RUN_TEST(test_url_strip_credentials_preserves_suffix);
     RUN_TEST(test_url_extract_credentials_decodes_values);

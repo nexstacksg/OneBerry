@@ -165,24 +165,9 @@ void handle_get_streams(const http_request_t *req, http_response_t *res) {
     }
 
     if (is_live_warmup_request(req)) {
-        int warmed_count = 0;
-        for (int i = 0; i < count; i++) {
-            if (have_auth_user && auth_user.has_tag_restriction) {
-                if (!db_auth_stream_allowed_for_user(&auth_user, db_streams[i].tags)) {
-                    continue;
-                }
-            }
-
-            if (go2rtc_integration_warm_stream_for_live_view(&db_streams[i])) {
-                warmed_count++;
-            }
-        }
-
-        char response[64];
-        snprintf(response, sizeof(response), "{\"warmed\":%d}", warmed_count);
         free(db_streams);
-        http_response_set_json(res, 200, response);
-        log_info("Handled GET /api/streams warmup request, warmed=%d", warmed_count);
+        http_response_set_json(res, 200, "{\"warmed\":0}");
+        log_info("Handled GET /api/streams warmup request as no-op to avoid camera connection stampede");
         return;
     }
 
@@ -204,10 +189,6 @@ void handle_get_streams(const http_request_t *req, http_response_t *res) {
                           db_streams[i].name, auth_user.username);
                 continue;
             }
-        }
-
-        if (db_streams[i].enabled && db_streams[i].streaming_enabled && !db_streams[i].privacy_mode) {
-            go2rtc_integration_warm_stream_for_live_view(&db_streams[i]);
         }
 
         cJSON *stream_obj = cJSON_CreateObject();

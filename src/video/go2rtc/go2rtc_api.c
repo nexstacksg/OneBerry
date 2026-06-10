@@ -31,55 +31,16 @@ static bool g_initialized = false;
 #define URL_BUFFER_SIZE   1024
 #define GO2RTC_QUERY_URL_BUFFER (URL_BUFFER_SIZE * 3)
 
-static void decode_url_once_for_query(const char *src, char *dst, size_t dst_size) {
-    if (!src || !dst || dst_size == 0) {
-        if (dst && dst_size > 0) dst[0] = '\0';
-        return;
-    }
-
-    size_t src_len = strlen(src);
-    size_t i, j = 0;
-
-    for (i = 0; i < src_len && j < dst_size - 1; i++) {
-        if (src[i] == '%' && i + 2 < src_len) {
-            unsigned int value;
-            char hex[3];
-            hex[0] = src[i + 1];
-            hex[1] = src[i + 2];
-            hex[2] = '\0';
-            if (sscanf(hex, "%2x", &value) == 1) {
-                dst[j++] = (char)value;
-                i += 2;
-            } else {
-                dst[j++] = src[i];
-            }
-        } else if (src[i] == '+') {
-            dst[j++] = ' ';
-        } else {
-            dst[j++] = src[i];
-        }
-    }
-
-    dst[j] = '\0';
-}
-
 static void normalize_query_component(const char *input, char *output, size_t output_size) {
     if (!input || !output || output_size == 0) {
         if (output && output_size > 0) output[0] = '\0';
         return;
     }
 
-    char decoded1[GO2RTC_QUERY_URL_BUFFER];
-    char decoded2[GO2RTC_QUERY_URL_BUFFER];
-    char working[GO2RTC_QUERY_URL_BUFFER];
-
-    strncpy(working, input, GO2RTC_QUERY_URL_BUFFER - 1);
-    working[GO2RTC_QUERY_URL_BUFFER - 1] = '\0';
-
-    decode_url_once_for_query(working, decoded1, GO2RTC_QUERY_URL_BUFFER);
-    decode_url_once_for_query(decoded1, decoded2, GO2RTC_QUERY_URL_BUFFER);
-
-    simple_url_escape(decoded2, output, output_size);
+    // Preserve any percent-encoded bytes that are part of the source URL
+    // itself. The HTTP query layer will decode once before go2rtc sees the
+    // src value, so "%40" in RTSP credentials must be sent as "%2540" here.
+    simple_url_escape(input, output, output_size);
 }
 
 bool go2rtc_api_init(const char *api_host, int api_port) {
