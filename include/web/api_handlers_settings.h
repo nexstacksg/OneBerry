@@ -23,4 +23,14 @@ void handle_get_locations(const http_request_t *request, http_response_t *respon
  */
 void handle_put_locations(const http_request_t *request, http_response_t *response);
 
+/**
+ * Handle GET request for Live View sidebar layouts
+ */
+void handle_get_live_layouts(const http_request_t *request, http_response_t *response);
+
+/**
+ * Handle PUT request for Live View sidebar layouts
+ */
+void handle_put_live_layouts(const http_request_t *request, http_response_t *response);
+
 #endif /* API_HANDLERS_SETTINGS_H */

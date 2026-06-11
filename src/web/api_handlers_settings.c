@@ -61,6 +61,11 @@ static bool is_safe_storage_path(const char *path) {
 #define LOCATION_CATALOG_SETTING_KEY "location_catalog"
 #define LOCATION_CATALOG_MAX_BYTES 65536
 #define LOCATION_NAME_MAX_LEN 96
+#define LIVE_LAYOUTS_SETTING_KEY "live_view_layouts"
+#define LIVE_LAYOUTS_MAX_BYTES 131072
+#define LIVE_LAYOUT_NAME_MAX_LEN 96
+#define LIVE_LAYOUT_ID_MAX_LEN 96
+#define LIVE_LAYOUT_CAMERA_MAX_LEN 255
 
 static void trim_location_value(const char *src, char *dst, size_t dst_size) {
     if (!dst || dst_size == 0) return;
@@ -213,6 +218,139 @@ static cJSON *normalize_location_catalog_json(cJSON *input, char *error, size_t 
     return normalized;
 }
 
+static bool is_valid_layout_id(const char *value) {
+    if (!value || value[0] == '\0' || strlen(value) > LIVE_LAYOUT_ID_MAX_LEN) return false;
+    for (const char *c = value; *c != '\0'; c++) {
+        if (!isalnum((unsigned char)*c) && *c != '-' && *c != '_') return false;
+    }
+    return true;
+}
+
+static bool is_valid_layout_name(const char *value) {
+    if (!value || value[0] == '\0') return false;
+    if (strlen(value) > LIVE_LAYOUT_NAME_MAX_LEN) return false;
+    return true;
+}
+
+static bool is_valid_layout_camera_name(const char *value) {
+    if (!value || value[0] == '\0') return false;
+    return strlen(value) <= LIVE_LAYOUT_CAMERA_MAX_LEN;
+}
+
+static cJSON *normalize_live_layouts_json(cJSON *input, char *error, size_t error_size) {
+    if (!input || !cJSON_IsObject(input)) {
+        snprintf(error, error_size, "Live layouts must be a JSON object");
+        return NULL;
+    }
+
+    cJSON *input_layouts = cJSON_GetObjectItem(input, "layouts");
+    if (input_layouts && !cJSON_IsArray(input_layouts)) {
+        snprintf(error, error_size, "layouts must be an array");
+        return NULL;
+    }
+
+    cJSON *normalized = cJSON_CreateObject();
+    cJSON *layouts = cJSON_CreateArray();
+    if (!normalized || !layouts) {
+        cJSON_Delete(normalized);
+        cJSON_Delete(layouts);
+        snprintf(error, error_size, "Out of memory");
+        return NULL;
+    }
+    cJSON_AddItemToObject(normalized, "layouts", layouts);
+
+    if (!input_layouts) {
+        return normalized;
+    }
+
+    cJSON *input_layout = NULL;
+    cJSON_ArrayForEach(input_layout, input_layouts) {
+        if (!cJSON_IsObject(input_layout)) {
+            cJSON_Delete(normalized);
+            snprintf(error, error_size, "Each layout must be an object");
+            return NULL;
+        }
+
+        cJSON *id_json = cJSON_GetObjectItem(input_layout, "id");
+        cJSON *name_json = cJSON_GetObjectItem(input_layout, "name");
+        if (!cJSON_IsString(id_json) || !id_json->valuestring ||
+            !cJSON_IsString(name_json) || !name_json->valuestring) {
+            cJSON_Delete(normalized);
+            snprintf(error, error_size, "Each layout requires id and name");
+            return NULL;
+        }
+
+        char layout_id[LIVE_LAYOUT_ID_MAX_LEN + 1];
+        char layout_name[LIVE_LAYOUT_NAME_MAX_LEN + 1];
+        trim_location_value(id_json->valuestring, layout_id, sizeof(layout_id));
+        trim_location_value(name_json->valuestring, layout_name, sizeof(layout_name));
+        if (!is_valid_layout_id(layout_id)) {
+            cJSON_Delete(normalized);
+            snprintf(error, error_size, "Layout ids may only contain letters, numbers, dashes, and underscores");
+            return NULL;
+        }
+        if (!is_valid_layout_name(layout_name)) {
+            cJSON_Delete(normalized);
+            snprintf(error, error_size, "Layout names must be 1-%d characters", LIVE_LAYOUT_NAME_MAX_LEN);
+            return NULL;
+        }
+
+        cJSON *layout = cJSON_CreateObject();
+        cJSON *cameras = cJSON_CreateArray();
+        if (!layout || !cameras) {
+            cJSON_Delete(layout);
+            cJSON_Delete(cameras);
+            cJSON_Delete(normalized);
+            snprintf(error, error_size, "Out of memory");
+            return NULL;
+        }
+        cJSON_AddStringToObject(layout, "id", layout_id);
+        cJSON_AddStringToObject(layout, "name", layout_name);
+        cJSON_AddItemToObject(layout, "cameras", cameras);
+
+        cJSON *input_cameras = cJSON_GetObjectItem(input_layout, "cameras");
+        if (input_cameras && !cJSON_IsArray(input_cameras)) {
+            cJSON_Delete(layout);
+            cJSON_Delete(normalized);
+            snprintf(error, error_size, "layout cameras must be an array");
+            return NULL;
+        }
+
+        cJSON *camera_json = NULL;
+        cJSON_ArrayForEach(camera_json, input_cameras) {
+            if (!cJSON_IsString(camera_json) || !camera_json->valuestring) {
+                cJSON_Delete(layout);
+                cJSON_Delete(normalized);
+                snprintf(error, error_size, "Camera names must be strings");
+                return NULL;
+            }
+
+            char camera_name[LIVE_LAYOUT_CAMERA_MAX_LEN + 1];
+            trim_location_value(camera_json->valuestring, camera_name, sizeof(camera_name));
+            if (!is_valid_layout_camera_name(camera_name)) {
+                cJSON_Delete(layout);
+                cJSON_Delete(normalized);
+                snprintf(error, error_size, "Camera names must be 1-%d characters", LIVE_LAYOUT_CAMERA_MAX_LEN);
+                return NULL;
+            }
+            if (!string_array_contains(cameras, camera_name)) {
+                cJSON *camera_item = cJSON_CreateString(camera_name);
+                if (!camera_item) {
+                    cJSON_Delete(layout);
+                    cJSON_Delete(normalized);
+                    snprintf(error, error_size, "Out of memory");
+                    return NULL;
+                }
+                cJSON_AddItemToArray(cameras, camera_item);
+            }
+        }
+
+        cJSON_AddItemToArray(layouts, layout);
+    }
+
+    return normalized;
+}
+
 void handle_get_locations(const http_request_t *req, http_response_t *res) {
     log_info("Handling GET /api/locations request");
 
@@ -296,6 +434,97 @@ void handle_put_locations(const http_request_t *req, http_response_t *res) {
     if (db_set_system_setting(LOCATION_CATALOG_SETTING_KEY, json) != 0) {
         free(json);
         http_response_set_json_error(res, 500, "Failed to save location catalog");
+        return;
+    }
+
+    http_response_set_json(res, 200, json);
+    free(json);
+}
+
+void handle_get_live_layouts(const http_request_t *req, http_response_t *res) {
+    log_info("Handling GET /api/live-layouts request");
+
+    if (g_config.web_auth_enabled) {
+        user_t user;
+        if (!httpd_check_viewer_access(req, &user)) {
+            http_response_set_json_error(res, 401, "Unauthorized");
+            return;
+        }
+    }
+
+    char layouts_json[LIVE_LAYOUTS_MAX_BYTES] = {0};
+    if (db_get_system_setting(LIVE_LAYOUTS_SETTING_KEY, layouts_json, sizeof(layouts_json)) != 0 ||
+        layouts_json[0] == '\0') {
+        http_response_set_json(res, 200, "{\"layouts\":[]}");
+        return;
+    }
+
+    cJSON *parsed = cJSON_Parse(layouts_json);
+    if (!parsed) {
+        log_warn("Stored live layouts JSON is invalid; returning empty layouts");
+        http_response_set_json(res, 200, "{\"layouts\":[]}");
+        return;
+    }
+
+    char error[256] = {0};
+    cJSON *normalized = normalize_live_layouts_json(parsed, error, sizeof(error));
+    cJSON_Delete(parsed);
+    if (!normalized) {
+        log_warn("Stored live layouts are invalid: %s; returning empty layouts",
+                 error[0] ? error : "unknown error");
+        http_response_set_json(res, 200, "{\"layouts\":[]}");
+        return;
+    }
+
+    char *json = cJSON_PrintUnformatted(normalized);
+    cJSON_Delete(normalized);
+    if (!json) {
+        http_response_set_json_error(res, 500, "Failed to serialize live layouts");
+        return;
+    }
+
+    http_response_set_json(res, 200, json);
+    free(json);
+}
+
+void handle_put_live_layouts(const http_request_t *req, http_response_t *res) {
+    log_info("Handling PUT /api/live-layouts request");
+
+    if (!httpd_check_admin_privileges(req, res)) {
+        return;
+    }
+
+    cJSON *body = httpd_parse_json_body(req);
+    if (!body) {
+        http_response_set_json_error(res, 400, "Invalid JSON body");
+        return;
+    }
+
+    char error[256] = {0};
+    cJSON *normalized = normalize_live_layouts_json(body, error, sizeof(error));
+    cJSON_Delete(body);
+
+    if (!normalized) {
+        http_response_set_json_error(res, 400, error[0] ? error : "Invalid live layouts");
+        return;
+    }
+
+    char *json = cJSON_PrintUnformatted(normalized);
+    cJSON_Delete(normalized);
+    if (!json) {
+        http_response_set_json_error(res, 500, "Failed to serialize live layouts");
+        return;
+    }
+
+    if (strlen(json) >= LIVE_LAYOUTS_MAX_BYTES) {
+        free(json);
+        http_response_set_json_error(res, 400, "Live layouts payload is too large");
+        return;
+    }
+
+    if (db_set_system_setting(LIVE_LAYOUTS_SETTING_KEY, json) != 0) {
+        free(json);
+        http_response_set_json_error(res, 500, "Failed to save live layouts");
         return;
     }
 
