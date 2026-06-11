@@ -1889,7 +1889,7 @@ export function WebRTCVideoCell({
           style={{
             width: '100%',
             height: '100%',
-            objectFit: 'contain',
+            objectFit: isFullscreenCell ? 'contain' : 'cover',
             position: 'absolute',
             inset: isFullscreenCell ? 0 : undefined,
             display: isFullscreenCell && fullscreenPlayback ? 'none' : undefined

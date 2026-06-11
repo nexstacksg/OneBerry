@@ -9,7 +9,6 @@ import { LiveView } from '../components/preact/LiveView.jsx';
 import { WebRTCView } from '../components/preact/WebRTCView.jsx';
 import { QueryClientProvider, queryClient, prefetchQuery } from '../query-client.js';
 import { Header } from "../components/preact/Header.jsx";
-import { Footer } from "../components/preact/Footer.jsx";
 import { ToastContainer } from "../components/preact/ToastContainer.jsx";
 import { setupSessionValidation } from '../utils/auth-utils.js';
 import { getSettings } from '../utils/settings-utils.js';
@@ -114,7 +113,6 @@ document.addEventListener('DOMContentLoaded', async () => {
                 <Header />
                 <ToastContainer />
                 <App />
-                <Footer />
             </QueryClientProvider>,
             container
         );

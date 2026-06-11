@@ -47,7 +47,7 @@ export function LivePreviewPoster({
         inset: 0,
         width: '100%',
         height: '100%',
-        objectFit: 'contain',
+        objectFit: 'cover',
         backgroundColor: '#000',
         opacity: loaded ? 1 : 0,
         transition: 'opacity 160ms ease',

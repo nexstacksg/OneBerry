@@ -16,9 +16,19 @@
     box-shadow: none;
     background: transparent;
     padding: 0;
+    margin-bottom: 0;
+    min-height: calc(100dvh - 3rem);
+    display: flex;
+    flex-direction: column;
+}
+
+#live-page > .flex {
+    flex: 1 1 auto;
+    min-height: 0;
 }
 
 #live-page .live-toolbar {
+    display: none;
     gap: 0.75rem;
     padding: 0.75rem 0.875rem;
     border: 1px solid hsl(var(--border) / 0.82);
@@ -88,14 +98,161 @@
 .video-container {
     display: grid;
     gap: 0.75rem;
-    height: calc(100vh - 210px);
-    min-height: 420px;
-    transition: all 0.3s ease;
+    flex: 1 1 auto;
+    height: calc(100dvh - 3rem);
+    min-height: 0;
+    transition: grid-template-columns 260ms ease, grid-template-rows 260ms ease, height 260ms ease;
     width: 100%;
     padding: 0;
     /* Column/row counts are injected as CSS custom properties by the component */
     grid-template-columns: repeat(var(--grid-cols, 2), 1fr);
     grid-template-rows: repeat(var(--grid-rows, 2), 1fr);
+}
+
+.live-workspace-empty {
+    min-height: 100%;
+}
+
+.live-empty-state {
+    position: relative;
+    display: flex;
+    min-height: 100%;
+    height: 100%;
+    width: 100%;
+    overflow: hidden;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 1.25rem;
+    padding: clamp(2rem, 5vw, 4rem);
+    border: 1px solid hsl(var(--border) / 0.72);
+    border-radius: 0.5rem;
+    background:
+        linear-gradient(135deg, hsl(var(--card)) 0%, hsl(var(--muted) / 0.38) 48%, hsl(var(--background)) 100%),
+        hsl(var(--card));
+    color: hsl(var(--card-foreground));
+    text-align: center;
+    box-shadow: inset 0 1px 0 hsl(var(--background) / 0.9), 0 18px 50px -42px hsl(var(--foreground) / 0.5);
+}
+
+.live-empty-state::before {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    content: "";
+    background-image:
+        linear-gradient(hsl(var(--border) / 0.32) 1px, transparent 1px),
+        linear-gradient(90deg, hsl(var(--border) / 0.32) 1px, transparent 1px);
+    background-size: 56px 56px;
+    -webkit-mask-image: radial-gradient(circle at center, black 0%, transparent 72%);
+    mask-image: radial-gradient(circle at center, black 0%, transparent 72%);
+    opacity: 0.34;
+}
+
+.live-empty-visual,
+.live-empty-content,
+.live-empty-action,
+.live-empty-secondary {
+    position: relative;
+    z-index: 1;
+}
+
+.live-empty-visual {
+    display: grid;
+    place-items: center;
+    width: min(19rem, 70vw);
+    aspect-ratio: 16 / 10;
+}
+
+.live-empty-camera-wall {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.55rem;
+    padding: 0.7rem;
+    border: 1px solid hsl(var(--border) / 0.76);
+    border-radius: 0.5rem;
+    background: hsl(var(--background) / 0.78);
+    box-shadow: 0 20px 44px -34px hsl(var(--foreground) / 0.6);
+}
+
+.live-empty-camera-wall span {
+    position: relative;
+    overflow: hidden;
+    border: 1px solid hsl(var(--border) / 0.58);
+    border-radius: 0.375rem;
+    background:
+        linear-gradient(145deg, hsl(var(--foreground) / 0.08), hsl(var(--foreground) / 0.015)),
+        hsl(var(--muted) / 0.7);
+}
+
+.live-empty-camera-wall span::after {
+    position: absolute;
+    right: 0.65rem;
+    bottom: 0.55rem;
+    width: 0.55rem;
+    height: 0.55rem;
+    border-radius: 999px;
+    background: hsl(var(--primary) / 0.58);
+    content: "";
+}
+
+.live-empty-lens {
+    display: grid;
+    place-items: center;
+    width: 4.75rem;
+    height: 4.75rem;
+    border: 1px solid hsl(var(--primary) / 0.24);
+    border-radius: 999px;
+    background: hsl(var(--background) / 0.94);
+    color: hsl(var(--primary));
+    box-shadow: 0 16px 34px -24px hsl(var(--foreground) / 0.7);
+}
+
+.live-empty-lens svg {
+    width: 2.35rem;
+    height: 2.35rem;
+}
+
+.live-empty-content {
+    max-width: 34rem;
+}
+
+.live-empty-eyebrow {
+    margin: 0 0 0.45rem;
+    color: hsl(var(--primary));
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0;
+    text-transform: uppercase;
+}
+
+.live-empty-content h3 {
+    margin: 0;
+    font-size: clamp(1.35rem, 2vw, 1.85rem);
+    line-height: 1.2;
+    font-weight: 750;
+}
+
+.live-empty-content p {
+    margin: 0.75rem 0 0;
+    color: hsl(var(--muted-foreground));
+    font-size: 0.98rem;
+    line-height: 1.65;
+}
+
+.live-empty-action {
+    min-width: 10rem;
+    justify-content: center;
+}
+
+.live-empty-secondary {
+    max-width: 30rem;
+    margin: -0.35rem 0 0;
+    color: hsl(var(--muted-foreground));
+    font-size: 0.83rem;
+    line-height: 1.55;
 }
 
 .video-container.is-partial-grid {
@@ -111,6 +268,105 @@
     aspect-ratio: 16 / 9;
 }
 
+.video-container.is-workspace-grid {
+    align-items: stretch;
+}
+
+.video-container.is-workspace-grid > div {
+    min-width: 0;
+}
+
+.live-workspace-tile {
+    min-width: 0;
+    opacity: 1;
+    transform: scale(1);
+    transition: opacity 180ms ease, transform 180ms ease;
+}
+
+@starting-style {
+    .live-workspace-tile,
+    .live-workspace-slot {
+        opacity: 0;
+        transform: scale(0.975);
+    }
+}
+
+.live-workspace-tile.is-removing {
+    opacity: 0;
+    transform: scale(0.965);
+    pointer-events: none;
+}
+
+.live-workspace-slot {
+    display: flex;
+    min-height: 100%;
+    overflow: hidden;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.55rem;
+    border: 1px dashed hsl(var(--border) / 0.78);
+    border-radius: 0.375rem;
+    background:
+        linear-gradient(145deg, hsl(var(--muted) / 0.34), hsl(var(--background) / 0.72)),
+        hsl(var(--card) / 0.78);
+    color: hsl(var(--muted-foreground));
+    opacity: 0.82;
+    transition: opacity 180ms ease, transform 180ms ease, border-color 180ms ease, background-color 180ms ease;
+}
+
+.live-workspace-slot svg {
+    width: 2rem;
+    height: 2rem;
+    opacity: 0.52;
+}
+
+.live-workspace-slot span {
+    max-width: 90%;
+    overflow: hidden;
+    font-size: 0.78rem;
+    font-weight: 650;
+    line-height: 1.25;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.video-container.is-workspace-grid:hover .live-workspace-slot {
+    border-color: hsl(var(--primary) / 0.38);
+    background: hsl(var(--primary) / 0.055);
+}
+
+.live-workspace-tile-close {
+    position: absolute;
+    top: 0.55rem;
+    right: 0.55rem;
+    z-index: 35;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.85rem;
+    height: 1.85rem;
+    border: 1px solid hsl(var(--border) / 0.55);
+    border-radius: 0.45rem;
+    background: hsl(var(--background) / 0.82);
+    color: hsl(var(--muted-foreground));
+    box-shadow: 0 10px 24px -18px hsl(var(--foreground) / 0.7);
+    cursor: pointer;
+    transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease, transform 160ms ease;
+}
+
+.live-workspace-tile-close:hover {
+    border-color: hsl(var(--danger) / 0.45);
+    background: hsl(var(--danger) / 0.14);
+    color: hsl(var(--danger));
+    transform: translateY(-1px);
+}
+
+.live-workspace-tile-close svg {
+    width: 0.9rem;
+    height: 0.9rem;
+}
+
 /* Tablet (769px – 1199px): cap at 2 columns so cells stay watchable */
 @media (min-width: 769px) and (max-width: 1199px) {
     .video-container {
@@ -122,12 +378,25 @@
 
 /* Mobile: single column, natural height per cell */
 @media (max-width: 768px) {
+    #live-page.page {
+        min-height: calc(100dvh - 1.5rem);
+    }
+
     .video-container {
         grid-template-columns: 1fr;
         grid-template-rows: auto;
         grid-auto-rows: auto;
-        height: auto;
-        min-height: auto;
+        height: calc(100dvh - 1.5rem);
+        min-height: 0;
+    }
+
+    .live-empty-state {
+        min-height: 100%;
+        padding: 1.5rem;
+    }
+
+    .live-empty-visual {
+        width: min(16rem, 82vw);
     }
 }
 
@@ -400,8 +669,8 @@
 
 @media (max-width: 768px) {
     .video-container {
-        height: auto;
-        min-height: auto;
+        height: calc(100dvh - 1.5rem);
+        min-height: 0;
     }
 
     .video-cell {

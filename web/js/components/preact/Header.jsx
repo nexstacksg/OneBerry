@@ -748,14 +748,22 @@ export function Header({ version = VERSION }) {
   }, [isAdmin, liveLayouts, saveLiveLayouts]);
 
   const handleCameraDragStart = useCallback((event, cameraName) => {
-    if (!isAdmin) {
-      event.preventDefault();
-      return;
-    }
     event.dataTransfer.effectAllowed = 'copy';
     event.dataTransfer.setData('text/plain', cameraName);
     event.dataTransfer.setData('application/x-oneberry-camera', cameraName);
-  }, [isAdmin]);
+  }, []);
+
+  const handleSourceCameraClick = useCallback((event, cameraHref, cameraName) => {
+    if (activeNav !== 'nav-live' || typeof window === 'undefined') {
+      forceNavigation(cameraHref, event);
+      return;
+    }
+
+    event.preventDefault();
+    window.dispatchEvent(new CustomEvent('oneberry:add-live-camera', {
+      detail: { cameraName },
+    }));
+  }, [activeNav]);
 
   const renderCameraList = () => {
     if (sidebarCameraList.length === 0) {
@@ -779,9 +787,9 @@ export function Header({ version = VERSION }) {
                 className={`sidebar-camera-link ${cameraActive ? 'is-active' : ''}`}
                 title={`${stream.name} - ${t(`sidebar.status.${statusKind}`)}`}
                 aria-current={cameraActive ? 'page' : undefined}
-                draggable={isAdmin}
+                draggable={true}
                 onDragStart={(event) => handleCameraDragStart(event, stream.name)}
-                onClick={(event) => forceNavigation(cameraHref, event)}
+                onClick={(event) => handleSourceCameraClick(event, cameraHref, stream.name)}
               >
                 <span className={`sidebar-camera-status is-${statusKind}`} aria-hidden="true"></span>
                 <TreeIcon type="camera" />
