@@ -3,7 +3,7 @@
  * Preact component for the HLS live view page
  */
 
-import { useState, useEffect, useMemo } from 'preact/hooks';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'preact/hooks';
 import { showStatusMessage } from './ToastContainer.jsx';
 import { useFullscreenManager, FullscreenManager, useFullscreenGridNav } from './FullscreenManager.jsx';
 import { useQuery } from '../../query-client.js';
@@ -65,6 +65,55 @@ function getLiveInitDelay({ isWebRTC, useMSE, go2rtcAvailable, index, totalStrea
   return Math.ceil((index - immediateCount + 1) / 4) * 150;
 }
 
+function createWorkspaceTile(cameraId) {
+  return {
+    instanceId: `tile-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+    cameraId,
+  };
+}
+
+function LiveEmptyState({ t, title, message, actionHref, actionLabel, actionOnClick, secondaryText }) {
+  return (
+    <div className="live-empty-state col-span-full row-span-full">
+      <div className="live-empty-visual" aria-hidden="true">
+        <div className="live-empty-camera-wall">
+          <span></span>
+          <span></span>
+          <span></span>
+          <span></span>
+        </div>
+        <div className="live-empty-lens">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M15 10l4.55-2.28A1 1 0 0 1 21 8.62v6.76a1 1 0 0 1-1.45.9L15 14" />
+            <rect x="3" y="6" width="12" height="12" rx="2.2" strokeWidth="1.8" />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M7 10h3" />
+          </svg>
+        </div>
+      </div>
+
+      <div className="live-empty-content">
+        <p className="live-empty-eyebrow">{t('live.liveView')}</p>
+        <h3>{title}</h3>
+        <p>{message}</p>
+      </div>
+
+      {actionOnClick && actionLabel ? (
+        <button type="button" className="btn-primary live-empty-action" onClick={actionOnClick}>
+          {actionLabel}
+        </button>
+      ) : actionHref && actionLabel && (
+        <a href={actionHref} className="btn-primary live-empty-action">
+          {actionLabel}
+        </a>
+      )}
+
+      {secondaryText && (
+        <p className="live-empty-secondary">{secondaryText}</p>
+      )}
+    </div>
+  );
+}
+
 /**
  * Shared live camera grid for HLS, MSE, and WebRTC modes.
  * @returns {JSX.Element} LiveView component
@@ -82,6 +131,12 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
 
   // State for streams and layout
   const [streams, setStreams] = useState([]);
+  const [workspaceTiles, setWorkspaceTiles] = useState([]);
+  const [workspaceStarted, setWorkspaceStarted] = useState(false);
+  const [workspaceAutoGrid, setWorkspaceAutoGrid] = useState(true);
+  const [urlStreamHydrated, setUrlStreamHydrated] = useState(false);
+  const [removingTileIds, setRemovingTileIds] = useState(new Set());
+  const removeTimeoutsRef = useRef(new Map());
 
   // Tag filter: '' means "All"
   const [tagFilter, setTagFilter] = useState(() => {
@@ -286,6 +341,12 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
             if (streamParam && filteredStreams.some(stream => stream.name === streamParam)) {
               // If the stream from URL exists in the loaded streams, use it
               setSelectedStream(streamParam);
+              if (!urlStreamHydrated) {
+                setWorkspaceTiles([createWorkspaceTile(streamParam)]);
+                setWorkspaceStarted(true);
+                setWorkspaceAutoGrid(true);
+                setUrlStreamHydrated(true);
+              }
             } else if (!selectedStream || !filteredStreams.some(stream => stream.name === selectedStream)) {
               // Otherwise use the first stream if selectedStream is not set or invalid
               setSelectedStream(filteredStreams[0].name);
@@ -402,6 +463,87 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
     }
   };
 
+  const streamByName = useMemo(() => (
+    new Map(streams.map((stream) => [stream.name, stream]))
+  ), [streams]);
+
+  const addWorkspaceTile = useCallback((cameraName) => {
+    const cameraId = String(cameraName || '').trim();
+    if (!cameraId) return;
+
+    if (!streamByName.has(cameraId)) {
+      showStatusMessage(`Camera "${cameraId}" is not available in Live View`, 'error', 5000);
+      return;
+    }
+
+    setWorkspaceStarted(true);
+    setWorkspaceTiles((previousTiles) => {
+      if (previousTiles.length >= MAX_GRID_CELLS) {
+        showStatusMessage(`Workspace is limited to ${MAX_GRID_CELLS} camera tiles`, 'error', 5000);
+        return previousTiles;
+      }
+
+      return [...previousTiles, createWorkspaceTile(cameraId)];
+    });
+    setCurrentPage(0);
+    setSelectedStream(cameraId);
+  }, [streamByName]);
+
+  const removeWorkspaceTile = useCallback((instanceId) => {
+    if (!instanceId || removeTimeoutsRef.current.has(instanceId)) return;
+
+    setRemovingTileIds((previousIds) => {
+      const nextIds = new Set(previousIds);
+      nextIds.add(instanceId);
+      return nextIds;
+    });
+
+    const timeoutId = window.setTimeout(() => {
+      setWorkspaceTiles((previousTiles) => previousTiles.filter((tile) => tile.instanceId !== instanceId));
+      setRemovingTileIds((previousIds) => {
+        const nextIds = new Set(previousIds);
+        nextIds.delete(instanceId);
+        return nextIds;
+      });
+      removeTimeoutsRef.current.delete(instanceId);
+    }, 190);
+
+    removeTimeoutsRef.current.set(instanceId, timeoutId);
+  }, []);
+
+  useEffect(() => () => {
+    removeTimeoutsRef.current.forEach((timeoutId) => window.clearTimeout(timeoutId));
+    removeTimeoutsRef.current.clear();
+  }, []);
+
+  useEffect(() => {
+    const handleAddCamera = (event) => {
+      addWorkspaceTile(event.detail?.cameraName);
+    };
+
+    window.addEventListener('oneberry:add-live-camera', handleAddCamera);
+    return () => window.removeEventListener('oneberry:add-live-camera', handleAddCamera);
+  }, [addWorkspaceTile]);
+
+  useEffect(() => {
+    if (!workspaceAutoGrid || workspaceTiles.length === 0) return;
+
+    const targetCells = Math.min(MAX_GRID_CELLS, Math.max(4, workspaceTiles.length + 1));
+    const [optCols, optRows] = computeOptimalGrid(targetCells);
+    setCols(optCols);
+    setRows(optRows);
+  }, [workspaceAutoGrid, workspaceTiles.length]);
+
+  useEffect(() => {
+    if (!workspaceStarted || workspaceTiles.length <= 2 || rows > 1 || cols <= 3) return;
+
+    const targetCells = Math.min(MAX_GRID_CELLS, Math.max(4, workspaceTiles.length + 1));
+    const [optCols, optRows] = computeOptimalGrid(targetCells);
+    setCols(optCols);
+    setRows(optRows);
+    setWorkspaceAutoGrid(true);
+  }, [cols, rows, workspaceStarted, workspaceTiles.length]);
+
   const buildingTree = useMemo(() => buildBuildingTree(
     streams,
     {
@@ -439,6 +581,15 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
 
   // Ensure current page is valid when orderedStreams or layout changes
   useEffect(() => {
+    if (workspaceTiles.length > 0) {
+      const totalPages = Math.ceil(workspaceTiles.length / maxStreams);
+
+      if (currentPage >= totalPages) {
+        setCurrentPage(Math.max(0, totalPages - 1));
+      }
+      return;
+    }
+
     if (orderedStreams.length === 0) return;
 
     const totalPages = Math.ceil(orderedStreams.length / maxStreams);
@@ -446,7 +597,7 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
     if (currentPage >= totalPages) {
       setCurrentPage(Math.max(0, totalPages - 1));
     }
-  }, [orderedStreams.length, maxStreams, currentPage]);
+  }, [workspaceTiles.length, orderedStreams.length, maxStreams, currentPage]);
 
   /**
    * Toggle fullscreen mode for a specific stream
@@ -491,8 +642,42 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
     }
   };
 
+  const workspaceStreamsToShow = useMemo(() => {
+    if (workspaceStarted) {
+      if (workspaceTiles.length === 0) {
+        return [];
+      }
+
+      const totalPages = Math.ceil(workspaceTiles.length / maxStreams);
+
+      if (currentPage >= totalPages && totalPages > 0) {
+        return [];
+      }
+
+      const startIdx = currentPage * maxStreams;
+      const endIdx = Math.min(startIdx + maxStreams, workspaceTiles.length);
+      return workspaceTiles
+        .slice(startIdx, endIdx)
+        .map((tile) => {
+          const stream = streamByName.get(tile.cameraId);
+          return stream ? { stream, tileInstanceId: tile.instanceId } : null;
+        })
+        .filter(Boolean);
+    }
+
+    return [];
+  }, [workspaceStarted, workspaceTiles, streamByName, currentPage, maxStreams]);
+
   // Memoize the streams to show to prevent unnecessary re-renders
   const streamsToShow = useMemo(() => {
+    if (workspaceStarted) {
+      const result = workspaceStreamsToShow.map((item) => item.stream);
+
+      console.log(`[${logLabel}View] workspace streamsToShow computed: ${result.length} tiles`, workspaceStreamsToShow.map(item => `${item.stream.name}:${item.tileInstanceId}`));
+      console.log(`[${logLabel}View] cols=${cols}, rows=${rows}, currentPage=${currentPage}, totalTiles=${workspaceTiles.length}`);
+      return result;
+    }
+
     // Filter streams based on layout and selected stream
     let result;
     if (isSingleStream && selectedStream) {
@@ -515,12 +700,20 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
     console.log(`[${logLabel}View] streamsToShow computed: ${result.length} streams`, result.map(s => s.name));
     console.log(`[${logLabel}View] cols=${cols}, rows=${rows}, currentPage=${currentPage}, totalStreams=${orderedStreams.length}`);
     return result;
-  }, [orderedStreams, isSingleStream, selectedStream, currentPage, maxStreams, cols, rows]);
+  }, [workspaceStarted, workspaceStreamsToShow, workspaceTiles.length, orderedStreams, isSingleStream, selectedStream, currentPage, maxStreams, cols, rows, logLabel]);
 
   // Arrow-key navigation between streams while one is in native fullscreen.
   useFullscreenGridNav(streamsToShow, cols, rows);
 
-  const gridHasEmptySlots = !isLoadingStreams
+  const isWorkspaceMode = workspaceStarted;
+  const workspaceTotalPages = Math.ceil(workspaceTiles.length / maxStreams);
+  const orderedTotalPages = Math.ceil(orderedStreams.length / maxStreams);
+  const workspaceEmptySlotCount = isWorkspaceMode && workspaceTiles.length > 0
+    ? Math.max(0, maxStreams - streamsToShow.length)
+    : 0;
+
+  const gridHasEmptySlots = !isWorkspaceMode
+    && !isLoadingStreams
     && !isLoading
     && !streamsError
     && streams.length > 0
@@ -647,12 +840,12 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
             <GridPicker
               cols={cols}
               rows={rows}
-              onSelect={(c, r) => { setCols(c); setRows(r); setCurrentPage(0); setAutoGrid(false); }}
-              maxCells={orderedStreams.length}
+              onSelect={(c, r) => { setCols(c); setRows(r); setCurrentPage(0); setAutoGrid(false); setWorkspaceAutoGrid(false); }}
+              maxCells={isWorkspaceMode ? workspaceTiles.length : orderedStreams.length}
             />
           </div>
 
-          {isSingleStream && (
+          {!isWorkspaceMode && isSingleStream && (
             <div className="flex items-center gap-1.5">
               <label htmlFor="stream-selector" className="text-sm whitespace-nowrap">{isWebRTC ? t('live.stream') : t('nav.streams')}:</label>
               <select
@@ -715,7 +908,7 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
             </svg>
           </button>
 
-          {orderedStreams.length > 1 && (
+          {!isWorkspaceMode && orderedStreams.length > 1 && (
             <button
               className={`p-2 rounded-full focus:outline-none focus:ring-2 focus:ring-primary ${reorderMode ? 'bg-primary text-primary-foreground hover:bg-primary/90' : 'bg-secondary hover:bg-secondary/80 text-secondary-foreground'}`}
               onClick={toggleReorderMode}
@@ -764,8 +957,24 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
       <div className="flex flex-col space-y-4 h-full">
         <div
           id="video-grid"
-          className={`video-container ${gridHasEmptySlots ? 'is-partial-grid' : 'is-filled-grid'}`}
+          className={`video-container ${isWorkspaceMode ? 'is-workspace-grid' : gridHasEmptySlots ? 'is-partial-grid' : 'is-filled-grid'}`}
           style={{ '--grid-cols': cols, '--grid-rows': rows }}
+          onDragOver={(event) => {
+            if (reorderMode) return;
+            const types = Array.from(event.dataTransfer.types || []);
+            if (!types.includes('application/x-oneberry-camera')) return;
+            event.preventDefault();
+            event.dataTransfer.dropEffect = 'copy';
+          }}
+          onDrop={(event) => {
+            if (reorderMode) return;
+            const types = Array.from(event.dataTransfer.types || []);
+            if (!types.includes('application/x-oneberry-camera')) return;
+            const cameraName = event.dataTransfer.getData('application/x-oneberry-camera') || event.dataTransfer.getData('text/plain');
+            if (!cameraName) return;
+            event.preventDefault();
+            addWorkspaceTile(cameraName);
+          }}
         >
           {isLoadingStreams ? (
               <div className="flex justify-center items-center col-span-full row-span-full h-64 w-full" style={{ pointerEvents: 'none', zIndex: 1 }}>
@@ -791,77 +1000,124 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
               </div>
             </div>
           ) : (streamsError) ? (
-            <div className="placeholder flex flex-col justify-center items-center col-span-full row-span-full bg-card text-card-foreground rounded-lg shadow-md text-center p-8">
-              <p className="mb-6 text-muted-foreground text-lg">{t('live.errorLoadingStreams', { message: streamsError.message })}</p>
-              <button
-                onClick={() => window.location.reload()}
-                className="btn-primary"
-              >
-                {t('common.retry')}
-              </button>
-            </div>
+            <LiveEmptyState
+              t={t}
+              title={t('live.unableToLoadCameraViews')}
+              message={t('live.errorLoadingStreams', { message: streamsError.message })}
+              actionOnClick={() => window.location.reload()}
+              actionLabel={t('common.retry')}
+            />
           ) : streams.length === 0 ? (
-            <div className="placeholder flex flex-col justify-center items-center col-span-full row-span-full bg-card text-card-foreground rounded-lg shadow-md text-center p-8">
-              <p className="mb-6 text-muted-foreground text-lg">{t('live.noStreamsConfigured')}</p>
-              <a href="streams.html" className="btn-primary">{t('live.configureStreams')}</a>
-            </div>
+            <LiveEmptyState
+              t={t}
+              title={t('live.noCameraViewsTitle')}
+              message={t('live.noCameraViewsMessage')}
+              actionHref="streams.html"
+              actionLabel={t('live.configureStreams')}
+              secondaryText={t('live.noCameraViewsSecondary')}
+            />
+          ) : isWorkspaceMode && workspaceTiles.length === 0 ? (
+            <LiveEmptyState
+              t={t}
+              title={t('live.emptyWorkspaceTitle')}
+              message={t('live.emptyWorkspaceMessage')}
+              actionHref="streams.html"
+              actionLabel={t('live.manageCameras')}
+              secondaryText={t('live.emptyWorkspaceSecondary')}
+            />
+          ) : streamsToShow.length === 0 ? (
+            <LiveEmptyState
+              t={t}
+              title={t('live.noVisibleCameraViewsTitle')}
+              message={t('live.noVisibleCameraViewsMessage')}
+              secondaryText={t('live.noVisibleCameraViewsSecondary')}
+            />
           ) : (
-            // Render video cells using the active transport. The first cameras
-            // connect immediately; the rest start in short waves so large grids
-            // do not stampede go2rtc, browser decoders, or native FFmpeg HLS.
-            streamsToShow.map((stream, index) => {
-              const VideoCell = isWebRTC ? WebRTCVideoCell : useMSE ? MSEVideoCell : HLSVideoCell;
-              const initDelay = getLiveInitDelay({
-                isWebRTC,
-                useMSE,
-                go2rtcAvailable,
-                index,
-                totalStreams: streamsToShow.length,
-              });
-              // Global index in orderedStreams for drag-and-drop (pagination offset)
-              const globalIndex = currentPage * maxStreams + index;
+            <>
+              {streamsToShow.map((stream, index) => {
+                const tileInstanceId = isWorkspaceMode ? workspaceStreamsToShow[index]?.tileInstanceId : '';
+                const VideoCell = isWebRTC ? WebRTCVideoCell : useMSE ? MSEVideoCell : HLSVideoCell;
+                const initDelay = isWorkspaceMode
+                  ? 0
+                  : getLiveInitDelay({
+                    isWebRTC,
+                    useMSE,
+                    go2rtcAvailable,
+                    index,
+                    totalStreams: streamsToShow.length,
+                  });
+                // Global index in orderedStreams for drag-and-drop (pagination offset)
+                const globalIndex = currentPage * maxStreams + index;
 
-              return (
-                <div
-                  key={stream.name}
-                  style={{ position: 'relative' }}
-                  draggable={reorderMode}
-                  onDragStart={reorderMode ? () => handleDragStart(globalIndex) : undefined}
-                  onDragOver={reorderMode ? (e) => handleDragOver(e, globalIndex) : undefined}
-                  onDrop={reorderMode ? handleDrop : undefined}
-                  onDragEnd={reorderMode ? handleDragEnd : undefined}
-                >
-                  {reorderMode && (
-                    <div
-                      style={{
-                        position: 'absolute', top: 0, left: 0, right: 0, zIndex: 20,
-                        background: 'rgba(0,0,0,0.55)', color: '#fff',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        padding: '6px 8px', cursor: 'grab', fontSize: '13px', gap: '6px',
-                        userSelect: 'none',
-                      }}
-                    >
-                      {/* Drag handle bars icon */}
-                      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
-                           fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/>
-                      </svg>
-                      {t('live.dragToReorder')}
-                    </div>
-                  )}
-                  <VideoCell
-                    stream={stream}
-                    onToggleFullscreen={toggleStreamFullscreen}
-                    streamId={stream.name}
-                    initDelay={initDelay}
-                    showLabels={showLabels}
-                    showControls={showControls}
-                    globalShowDetections={showDetections}
-                    isPageFullscreen={isFullscreen}
-                  />
-                </div>
-              );
-            })
+                return (
+                  <div
+                    key={tileInstanceId || stream.name}
+                    className={`live-workspace-tile ${removingTileIds.has(tileInstanceId) ? 'is-removing' : ''}`}
+                    style={{ position: 'relative' }}
+                    draggable={!isWorkspaceMode && reorderMode}
+                    onDragStart={!isWorkspaceMode && reorderMode ? () => handleDragStart(globalIndex) : undefined}
+                    onDragOver={!isWorkspaceMode && reorderMode ? (e) => handleDragOver(e, globalIndex) : undefined}
+                    onDrop={!isWorkspaceMode && reorderMode ? handleDrop : undefined}
+                    onDragEnd={!isWorkspaceMode && reorderMode ? handleDragEnd : undefined}
+                  >
+                    {!isWorkspaceMode && reorderMode && (
+                      <div
+                        style={{
+                          position: 'absolute', top: 0, left: 0, right: 0, zIndex: 20,
+                          background: 'rgba(0,0,0,0.55)', color: '#fff',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          padding: '6px 8px', cursor: 'grab', fontSize: '13px', gap: '6px',
+                          userSelect: 'none',
+                        }}
+                      >
+                        {/* Drag handle bars icon */}
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
+                             fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/>
+                        </svg>
+                        {t('live.dragToReorder')}
+                      </div>
+                    )}
+                    {isWorkspaceMode && tileInstanceId && (
+                      <button
+                        type="button"
+                        className="live-workspace-tile-close"
+                        aria-label={`Remove ${stream.name} tile`}
+                        title={`Remove ${stream.name}`}
+                        onClick={() => removeWorkspaceTile(tileInstanceId)}
+                      >
+                        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" aria-hidden="true">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4l8 8M12 4l-8 8" />
+                        </svg>
+                      </button>
+                    )}
+                    <VideoCell
+                      stream={stream}
+                      onToggleFullscreen={toggleStreamFullscreen}
+                      streamId={stream.name}
+                      initDelay={initDelay}
+                      showLabels={showLabels}
+                      showControls={showControls}
+                      globalShowDetections={showDetections}
+                      isPageFullscreen={isFullscreen}
+                    />
+                  </div>
+                );
+              })}
+            {Array.from({ length: workspaceEmptySlotCount }, (_, index) => (
+              <div
+                key={`workspace-empty-slot-${currentPage}-${index}`}
+                className="live-workspace-slot"
+                aria-hidden="true"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M15 10l4.55-2.28A1 1 0 0 1 21 8.62v6.76a1 1 0 0 1-1.45.9L15 14" />
+                  <rect x="3" y="6" width="12" height="12" rx="2.2" strokeWidth="1.8" />
+                </svg>
+                <span>{t('live.dropCameraHere')}</span>
+              </div>
+            ))}
+            </>
           )}
         </div>
 
@@ -874,7 +1130,29 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
           />
         )}
 
-        {!isSingleStream && orderedStreams.length > maxStreams ? (
+        {isWorkspaceMode && workspaceTiles.length > maxStreams ? (
+          <div className="pagination-controls flex justify-center items-center space-x-4 mt-4">
+            <button
+              className="btn-primary focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-50 disabled:cursor-not-allowed"
+              onClick={() => setCurrentPage(Math.max(0, currentPage - 1))}
+              disabled={currentPage === 0}
+            >
+              {t('common.previous')}
+            </button>
+
+            <span className="text-foreground">
+              {t('live.pageOf', { current: currentPage + 1, total: workspaceTotalPages })}
+            </span>
+
+            <button
+              className="btn-primary focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-50 disabled:cursor-not-allowed"
+              onClick={() => setCurrentPage(Math.min(workspaceTotalPages - 1, currentPage + 1))}
+              disabled={currentPage >= workspaceTotalPages - 1}
+            >
+              {t('common.next')}
+            </button>
+          </div>
+        ) : !isWorkspaceMode && !isSingleStream && orderedStreams.length > maxStreams ? (
           <div className="pagination-controls flex justify-center items-center space-x-4 mt-4">
             <button
               className="btn-primary focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-50 disabled:cursor-not-allowed"
@@ -888,17 +1166,16 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
             </button>
 
             <span className="text-foreground">
-              {t('live.pageOf', { current: currentPage + 1, total: Math.ceil(orderedStreams.length / maxStreams) })}
+              {t('live.pageOf', { current: currentPage + 1, total: orderedTotalPages })}
             </span>
 
             <button
               className="btn-primary focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-50 disabled:cursor-not-allowed"
               onClick={() => {
                 console.log('Changing to next page');
-                const totalPages = Math.ceil(orderedStreams.length / maxStreams);
-                setCurrentPage(Math.min(totalPages - 1, currentPage + 1));
+                setCurrentPage(Math.min(orderedTotalPages - 1, currentPage + 1));
               }}
-              disabled={currentPage >= Math.ceil(orderedStreams.length / maxStreams) - 1}
+              disabled={currentPage >= orderedTotalPages - 1}
             >
               {t('common.next')}
             </button>

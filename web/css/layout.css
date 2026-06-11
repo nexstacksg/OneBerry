@@ -230,6 +230,16 @@ body > .container {
     gap: 0.25rem;
 }
 
+.sidebar-live-camera-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+}
+
+.sidebar-live-camera-list .sidebar-camera-link {
+    margin-left: 0;
+}
+
 .sidebar-building-row,
 .sidebar-area-row {
     display: flex;
@@ -390,6 +400,242 @@ body > .container {
     font-weight: 800;
 }
 
+.sidebar-section-heading {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.375rem;
+    margin-top: 0.9rem;
+    padding-right: 0.125rem;
+}
+
+.sidebar-section-heading .sidebar-section-label {
+    margin: 0;
+}
+
+.sidebar-layouts-section,
+.sidebar-layout-tree,
+.sidebar-layout-camera-tree {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.sidebar-layouts-section {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    position: relative;
+    z-index: 1002;
+}
+
+.sidebar-layout-tree {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.sidebar-layout-node {
+    border-radius: 0.45rem;
+    transition: background-color 160ms ease, box-shadow 160ms ease;
+}
+
+.sidebar-layout-node.is-drop-target {
+    background: hsl(var(--primary) / 0.08);
+    box-shadow: inset 0 0 0 1px hsl(var(--primary) / 0.28);
+}
+
+.sidebar-layout-row,
+.sidebar-layout-camera-node {
+    display: flex;
+    align-items: center;
+    gap: 0.2rem;
+    min-width: 0;
+}
+
+.sidebar-layout-row {
+    min-height: 1.9rem;
+}
+
+.sidebar-layout-title {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 1.8rem;
+    padding: 0.3rem 0.4rem;
+    border-radius: 0.45rem;
+    color: hsl(var(--muted-foreground));
+    font-size: 0.8rem;
+    font-weight: 650;
+    transition: background-color 160ms ease, color 160ms ease;
+}
+
+.sidebar-layout-title:hover {
+    background: hsl(var(--muted));
+    color: hsl(var(--foreground));
+}
+
+.sidebar-layout-menu-wrap {
+    position: relative;
+    flex: 0 0 auto;
+    line-height: 0;
+}
+
+.sidebar-kebab-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.55rem;
+    height: 1.55rem;
+    border: 1px solid transparent;
+    border-radius: 0.4rem;
+    background: transparent;
+    color: hsl(var(--muted-foreground));
+    cursor: pointer;
+    transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease;
+}
+
+.sidebar-kebab-button:hover,
+.sidebar-kebab-button[aria-expanded="true"] {
+    background: hsl(var(--foreground) / 0.06);
+    border-color: hsl(var(--border) / 0.75);
+    color: hsl(var(--foreground));
+}
+
+.sidebar-kebab-button svg {
+    width: 0.8rem;
+    height: 0.8rem;
+}
+
+.sidebar-layout-menu {
+    position: absolute;
+    right: 0;
+    top: calc(100% + 0.35rem);
+    z-index: 1100;
+    min-width: 9.25rem;
+    padding: 0.3rem;
+    border: 1px solid hsl(var(--border) / 0.9);
+    border-radius: 0.55rem;
+    background: hsl(var(--popover));
+    box-shadow: 0 18px 38px -20px hsl(var(--foreground) / 0.55), 0 4px 12px hsl(var(--foreground) / 0.08);
+    line-height: 1.2;
+}
+
+.sidebar-layout-menu button {
+    width: 100%;
+    min-height: 2.05rem;
+    border: 0;
+    border-radius: 0.4rem;
+    background: transparent;
+    color: hsl(var(--foreground));
+    cursor: pointer;
+    font-size: 0.78rem;
+    font-weight: 600;
+    text-align: left;
+    padding: 0.4rem 0.6rem;
+    transition: background-color 140ms ease, color 140ms ease;
+}
+
+.sidebar-layout-menu button:hover {
+    background: hsl(var(--foreground) / 0.06);
+}
+
+.sidebar-layout-title .sidebar-tree-count {
+    background: hsl(var(--foreground) / 0.06);
+    color: hsl(var(--muted-foreground));
+    box-shadow: inset 0 0 0 1px hsl(var(--border) / 0.55);
+}
+
+.sidebar-layout-inline-form,
+.sidebar-layout-rename-form {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    min-width: 0;
+}
+
+.sidebar-layout-inline-form {
+    padding: 0.1rem 0;
+}
+
+.sidebar-layout-rename-form {
+    flex: 1 1 auto;
+}
+
+.sidebar-layout-inline-form input,
+.sidebar-layout-rename-form input {
+    min-width: 0;
+    width: 100%;
+    height: 1.9rem;
+    border: 1px solid hsl(var(--border));
+    border-radius: 0.4rem;
+    background: hsl(var(--background));
+    color: hsl(var(--foreground));
+    font-size: 0.78rem;
+    padding: 0.25rem 0.45rem;
+}
+
+.sidebar-layout-inline-form button {
+    flex: 0 0 auto;
+    height: 1.9rem;
+    border: 0;
+    border-radius: 0.4rem;
+    background: hsl(var(--primary));
+    color: hsl(var(--primary-foreground));
+    cursor: pointer;
+    font-size: 0.72rem;
+    font-weight: 800;
+    padding: 0 0.55rem;
+}
+
+.sidebar-layout-inline-form button:disabled {
+    cursor: not-allowed;
+    opacity: 0.55;
+}
+
+.sidebar-layout-camera-tree {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    padding-bottom: 0.2rem;
+}
+
+.sidebar-layout-camera-node {
+    margin-left: 2.75rem;
+}
+
+.sidebar-layout-camera-link {
+    flex: 1 1 auto;
+    margin-left: 0;
+}
+
+.sidebar-layout-camera-remove {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.45rem;
+    height: 1.45rem;
+    border: 0;
+    border-radius: 0.35rem;
+    background: transparent;
+    color: hsl(var(--muted-foreground));
+    cursor: pointer;
+    flex: 0 0 auto;
+}
+
+.sidebar-layout-camera-remove:hover {
+    background: hsl(var(--danger) / 0.12);
+    color: hsl(var(--danger));
+}
+
+.sidebar-layout-camera-remove svg {
+    width: 0.8rem;
+    height: 0.8rem;
+}
+
 .sidebar-building-empty {
     padding: 0.5rem 0.625rem;
     color: hsl(var(--muted-foreground));
@@ -533,6 +779,8 @@ body > .container {
     .dashboard-sidebar.is-collapsed .sidebar-section-label,
     .dashboard-sidebar.is-collapsed .sidebar-nav-label,
     .dashboard-sidebar.is-collapsed .sidebar-building-tree,
+    .dashboard-sidebar.is-collapsed .sidebar-live-camera-list,
+    .dashboard-sidebar.is-collapsed .sidebar-layouts-section,
     .dashboard-sidebar.is-collapsed .sidebar-building-empty,
     .dashboard-sidebar.is-collapsed .sidebar-account-tools {
         display: none;

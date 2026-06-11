@@ -534,7 +534,7 @@ export function HLSVideoCell({
         videoRef.current.load();
       }
     };
-  }, [stream, retryCount, initDelay, hlsMode, t, selectedStreamSource]);
+  }, [stream?.name, retryCount, hlsMode, selectedStreamSource]);
 
   // Auto-retry when stream status transitions back to 'Running' while the
   // error overlay is visible (e.g. camera came back online after an outage).
@@ -645,7 +645,7 @@ export function HLSVideoCell({
         autoPlay
         muted
         playsInline
-        style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+        style={{ width: '100%', height: '100%', objectFit: isPageFullscreen ? 'contain' : 'cover' }}
       />
 
       <LivePreviewPoster

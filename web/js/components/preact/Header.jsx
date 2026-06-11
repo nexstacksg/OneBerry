@@ -5,13 +5,13 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'preact/hooks';
 import {VERSION} from '../../version.js';
-import { fetchJSON, useQuery } from '../../query-client.js';
+import { fetchJSON, queryClient, useQuery } from '../../query-client.js';
 import { getSettings } from '../../utils/settings-utils.js';
 import { showStatusMessage } from './ToastContainer.jsx';
 import { EditUserModal } from './users/EditUserModal.jsx';
 import { getAuthHeaders, isDemoMode, validateSession } from '../../utils/auth-utils.js';
 import { forceNavigation } from '../../utils/navigation-utils.js';
-import { buildBuildingTree, getStreamStatusKind } from '../../utils/building-hierarchy.js';
+import { getStreamStatusKind } from '../../utils/building-hierarchy.js';
 import { preloadLiveSnapshots, startLiveWarmup } from '../../utils/live-warmup.js';
 import { useI18n } from '../../i18n.js';
 import LanguageSelector from './common/LanguageSelector.jsx';
@@ -109,8 +109,7 @@ const getStoredSidebarState = () => {
   }
 };
 
-const BUILDING_TREE_STORAGE_KEY = 'oneberry.dashboardBuildings';
-const AREA_TREE_STORAGE_KEY = 'oneberry.dashboardAreas';
+const LAYOUT_TREE_STORAGE_KEY = 'oneberry.dashboardLayouts';
 
 const getStoredExpandedTree = (storageKey) => {
   try {
@@ -122,6 +121,25 @@ const getStoredExpandedTree = (storageKey) => {
     return {};
   }
 };
+
+const normalizeLiveLayouts = (data = {}) => ({
+  layouts: Array.isArray(data.layouts)
+    ? data.layouts
+      .filter((layout) => layout && layout.id && layout.name)
+      .map((layout) => ({
+        id: String(layout.id),
+        name: String(layout.name).trim(),
+        cameras: Array.from(new Set(
+          (Array.isArray(layout.cameras) ? layout.cameras : [])
+            .map((camera) => String(camera || '').trim())
+            .filter(Boolean)
+        )),
+      }))
+      .filter((layout) => layout.name)
+    : [],
+});
+
+const createLayoutId = () => `layout-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
 const makeLiveHref = (params = {}) => {
   const search = new URLSearchParams();
@@ -166,8 +184,14 @@ export function Header({ version = VERSION }) {
   const [userRole, _setUserRole] = useState(localStorage.getItem('userrole') || null); // null = still loading
   const [sidebarState, setSidebarState] = useState(getStoredSidebarState);
   const [isDraggingSidebar, setIsDraggingSidebar] = useState(false);
-  const [expandedBuildings, setExpandedBuildings] = useState(() => getStoredExpandedTree(BUILDING_TREE_STORAGE_KEY));
-  const [expandedAreas, setExpandedAreas] = useState(() => getStoredExpandedTree(AREA_TREE_STORAGE_KEY));
+  const [expandedLayouts, setExpandedLayouts] = useState(() => getStoredExpandedTree(LAYOUT_TREE_STORAGE_KEY));
+  const [liveLayouts, setLiveLayouts] = useState({ layouts: [] });
+  const [openMenu, setOpenMenu] = useState(null);
+  const [creatingLayout, setCreatingLayout] = useState(false);
+  const [newLayoutName, setNewLayoutName] = useState('');
+  const [renamingLayoutId, setRenamingLayoutId] = useState('');
+  const [renameLayoutName, setRenameLayoutName] = useState('');
+  const [dragOverLayoutId, setDragOverLayoutId] = useState('');
   const [locationSearch, setLocationSearch] = useState(() => (typeof window !== 'undefined' ? window.location.search : ''));
   const { t } = useI18n();
   const sidebarCollapsed = sidebarState.collapsed;
@@ -184,9 +208,9 @@ export function Header({ version = VERSION }) {
       refetchInterval: 30000,
     }
   );
-  const { data: locationCatalog = { buildings: [] } } = useQuery(
-    ['locations'],
-    '/api/locations',
+  const { data: liveLayoutsData = { layouts: [] } } = useQuery(
+    ['live-layouts'],
+    '/api/live-layouts',
     {
       headers: getAuthHeaders(),
       timeout: 10000,
@@ -206,14 +230,15 @@ export function Header({ version = VERSION }) {
     preloadLiveSnapshots(sidebarStreams);
   }, [sidebarStreams]);
 
-  const buildingTree = useMemo(() => buildBuildingTree(
-    Array.isArray(sidebarStreams) ? sidebarStreams : [],
-    {
-      unassignedBuilding: t('sidebar.unassignedBuilding'),
-      generalArea: t('sidebar.generalArea'),
-    },
-    locationCatalog
-  ), [locationCatalog, sidebarStreams, t]);
+  const sidebarCameraList = useMemo(() => (
+    Array.isArray(sidebarStreams)
+      ? sidebarStreams
+        .filter((stream) => stream && !stream.is_deleted)
+        .slice()
+        .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')))
+      : []
+  ), [sidebarStreams]);
+  const streamByName = useMemo(() => new Map(sidebarCameraList.map((stream) => [stream.name, stream])), [sidebarCameraList]);
   const liveSelection = useMemo(() => {
     if (activeNav !== 'nav-live' || typeof window === 'undefined') {
       return { tag: '', stream: '' };
@@ -366,30 +391,25 @@ export function Header({ version = VERSION }) {
   }, [isDraggingSidebar, sidebarCollapsed, sidebarState.width]);
 
   useEffect(() => {
-    try {
-      localStorage.setItem(BUILDING_TREE_STORAGE_KEY, JSON.stringify(expandedBuildings));
-    } catch (error) {
-      // Ignore storage failures.
-    }
-  }, [expandedBuildings]);
+    setLiveLayouts(normalizeLiveLayouts(liveLayoutsData));
+  }, [liveLayoutsData]);
 
   useEffect(() => {
     try {
-      localStorage.setItem(AREA_TREE_STORAGE_KEY, JSON.stringify(expandedAreas));
+      localStorage.setItem(LAYOUT_TREE_STORAGE_KEY, JSON.stringify(expandedLayouts));
     } catch (error) {
       // Ignore storage failures.
     }
-  }, [expandedAreas]);
+  }, [expandedLayouts]);
 
-  const toggleBuildingNode = useCallback((nodeKey) => {
-    setExpandedBuildings((prevState) => ({
-      ...prevState,
-      [nodeKey]: prevState[nodeKey] === false,
-    }));
+  useEffect(() => {
+    const closeMenus = () => setOpenMenu(null);
+    window.addEventListener('click', closeMenus);
+    return () => window.removeEventListener('click', closeMenus);
   }, []);
 
-  const toggleAreaNode = useCallback((nodeKey) => {
-    setExpandedAreas((prevState) => ({
+  const toggleLayoutNode = useCallback((nodeKey) => {
+    setExpandedLayouts((prevState) => ({
       ...prevState,
       [nodeKey]: prevState[nodeKey] === false,
     }));
@@ -608,130 +628,362 @@ export function Header({ version = VERSION }) {
     }, mobile);
   };
 
-  const getTreeStatusTitle = (node, fallbackName) => {
-    const online = node.onlineCount || 0;
-    const warning = node.warningCount || 0;
-    const offline = node.offlineCount || 0;
-    const parts = [
-      t('sidebar.runningCount', { count: online }),
-      warning > 0 ? t('sidebar.attentionCount', { count: warning }) : null,
-      offline > 0 ? t('sidebar.offlineCount', { count: offline }) : null,
-    ].filter(Boolean);
-    return `${fallbackName} (${parts.join(', ')})`;
-  };
+  const saveLiveLayouts = useCallback(async (nextLayouts, previousLayouts = liveLayouts) => {
+    const normalized = normalizeLiveLayouts(nextLayouts);
+    setLiveLayouts(normalized);
+    queryClient.setQueryData(['live-layouts'], normalized);
 
-  const renderBuildingTree = () => {
-    if (buildingTree.length === 0) {
+    try {
+      const saved = await fetchJSON('/api/live-layouts', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          ...getAuthHeaders(),
+        },
+        body: JSON.stringify(normalized),
+        timeout: 10000,
+        retries: 1,
+        retryDelay: 1000,
+      });
+      const savedLayouts = normalizeLiveLayouts(saved);
+      setLiveLayouts(savedLayouts);
+      queryClient.setQueryData(['live-layouts'], savedLayouts);
+    } catch (error) {
+      const rollback = normalizeLiveLayouts(previousLayouts);
+      setLiveLayouts(rollback);
+      queryClient.setQueryData(['live-layouts'], rollback);
+      showStatusMessage(error.message || 'Failed to save layouts', 'error', 8000);
+    }
+  }, [liveLayouts]);
+
+  const handleCreateLayout = useCallback(async (event) => {
+    if (event) event.preventDefault();
+    const name = newLayoutName.trim();
+    if (!name || !isAdmin) return;
+
+    const previous = liveLayouts;
+    const next = {
+      layouts: [
+        ...liveLayouts.layouts,
+        {
+          id: createLayoutId(),
+          name,
+          cameras: [],
+        },
+      ],
+    };
+    setCreatingLayout(false);
+    setNewLayoutName('');
+    await saveLiveLayouts(next, previous);
+  }, [isAdmin, liveLayouts, newLayoutName, saveLiveLayouts]);
+
+  const startRenameLayout = useCallback((layout) => {
+    if (!isAdmin) return;
+    setRenamingLayoutId(layout.id);
+    setRenameLayoutName(layout.name);
+    setOpenMenu(null);
+  }, [isAdmin]);
+
+  const handleRenameLayout = useCallback(async (event) => {
+    if (event) event.preventDefault();
+    const name = renameLayoutName.trim();
+    if (!name || !renamingLayoutId || !isAdmin) return;
+
+    const previous = liveLayouts;
+    const next = {
+      layouts: liveLayouts.layouts.map((layout) => (
+        layout.id === renamingLayoutId ? { ...layout, name } : layout
+      )),
+    };
+    setRenamingLayoutId('');
+    setRenameLayoutName('');
+    await saveLiveLayouts(next, previous);
+  }, [isAdmin, liveLayouts, renameLayoutName, renamingLayoutId, saveLiveLayouts]);
+
+  const deleteLayout = useCallback(async (layoutId) => {
+    if (!isAdmin) return;
+    const previous = liveLayouts;
+    const next = {
+      layouts: liveLayouts.layouts.filter((layout) => layout.id !== layoutId),
+    };
+    setOpenMenu(null);
+    await saveLiveLayouts(next, previous);
+  }, [isAdmin, liveLayouts, saveLiveLayouts]);
+
+  const addCameraToLayout = useCallback(async (layoutId, cameraName) => {
+    const camera = String(cameraName || '').trim();
+    if (!camera || !isAdmin) return;
+
+    let changed = false;
+    const previous = liveLayouts;
+    const next = {
+      layouts: liveLayouts.layouts.map((layout) => {
+        if (layout.id !== layoutId || layout.cameras.includes(camera)) {
+          return layout;
+        }
+        changed = true;
+        return {
+          ...layout,
+          cameras: [...layout.cameras, camera],
+        };
+      }),
+    };
+
+    if (changed) {
+      await saveLiveLayouts(next, previous);
+    }
+  }, [isAdmin, liveLayouts, saveLiveLayouts]);
+
+  const removeCameraFromLayout = useCallback(async (layoutId, cameraName) => {
+    if (!isAdmin) return;
+    const previous = liveLayouts;
+    const next = {
+      layouts: liveLayouts.layouts.map((layout) => (
+        layout.id === layoutId
+          ? { ...layout, cameras: layout.cameras.filter((camera) => camera !== cameraName) }
+          : layout
+      )),
+    };
+    await saveLiveLayouts(next, previous);
+  }, [isAdmin, liveLayouts, saveLiveLayouts]);
+
+  const handleCameraDragStart = useCallback((event, cameraName) => {
+    event.dataTransfer.effectAllowed = 'copy';
+    event.dataTransfer.setData('text/plain', cameraName);
+    event.dataTransfer.setData('application/x-oneberry-camera', cameraName);
+  }, []);
+
+  const handleSourceCameraClick = useCallback((event, cameraHref, cameraName) => {
+    if (activeNav !== 'nav-live' || typeof window === 'undefined') {
+      forceNavigation(cameraHref, event);
+      return;
+    }
+
+    event.preventDefault();
+    window.dispatchEvent(new CustomEvent('oneberry:add-live-camera', {
+      detail: { cameraName },
+    }));
+  }, [activeNav]);
+
+  const renderCameraList = () => {
+    if (sidebarCameraList.length === 0) {
       return (
         <div className="sidebar-building-empty">
-          {t('sidebar.noBuildings')}
+          No cameras
         </div>
       );
     }
 
     return (
-      <ul className="sidebar-building-tree">
-        {buildingTree.map((building) => {
-          const expanded = expandedBuildings[building.key] !== false;
-          const buildingHref = building.tag ? makeLiveHref({ tag: building.tag }) : makeLiveHref();
-          const buildingActive = activeNav === 'nav-live' && Boolean(building.tag) && !liveSelection.stream && liveSelection.tag === building.tag;
-
+      <ul className="sidebar-camera-tree sidebar-live-camera-list">
+        {sidebarCameraList.map((stream) => {
+          const cameraHref = makeLiveHref({ cols: 1, rows: 1, stream: stream.name });
+          const statusKind = getStreamStatusKind(stream);
+          const cameraActive = activeNav === 'nav-live' && liveSelection.stream === stream.name;
           return (
-            <li key={building.key} className={`sidebar-building-node ${buildingActive ? 'is-active' : ''}`}>
-              <div className="sidebar-building-row">
-                <button
-                  type="button"
-                  className="sidebar-tree-toggle"
-                  onClick={() => toggleBuildingNode(building.key)}
-                  aria-label={expanded ? t('sidebar.collapseBuilding') : t('sidebar.expandBuilding')}
-                  aria-expanded={expanded}
-                >
-                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d={expanded ? 'M4 6l4 4 4-4' : 'M6 4l4 4-4 4'} />
-                  </svg>
-                </button>
-                <a
-                  href={buildingHref}
-                  className={`sidebar-building-link ${buildingActive ? 'is-active' : ''}`}
-                  title={getTreeStatusTitle(building, building.name)}
-                  aria-current={buildingActive ? 'page' : undefined}
-                  onClick={(event) => forceNavigation(buildingHref, event)}
-                >
-                  <TreeIcon type="building" />
-                  <span className="sidebar-tree-label">{building.name}</span>
-                  <span className="sidebar-tree-count">{building.cameraCount}</span>
-                </a>
-              </div>
-
-              {expanded && (
-                <ul className="sidebar-area-tree">
-                  {building.areas.map((area) => {
-                    const areaHref = area.tag ? makeLiveHref({ tag: area.tag }) : buildingHref;
-                    const areaNodeKey = `${building.key}:${area.key}`;
-                    const areaExpanded = expandedAreas[areaNodeKey] !== false;
-                    const areaActive = activeNav === 'nav-live' && Boolean(area.tag) && !liveSelection.stream && liveSelection.tag === area.tag;
-
-                    return (
-                      <li key={area.key} className={`sidebar-area-node ${areaActive ? 'is-active' : ''}`}>
-                        <div className="sidebar-area-row">
-                          <button
-                            type="button"
-                            className="sidebar-tree-toggle sidebar-area-toggle"
-                            onClick={() => toggleAreaNode(areaNodeKey)}
-                            aria-label={areaExpanded ? t('sidebar.collapseArea') : t('sidebar.expandArea')}
-                            aria-expanded={areaExpanded}
-                          >
-                            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d={areaExpanded ? 'M4 6l4 4 4-4' : 'M6 4l4 4-4 4'} />
-                            </svg>
-                          </button>
-                          <a
-                            href={areaHref}
-                            className={`sidebar-area-link ${areaActive ? 'is-active' : ''}`}
-                            title={getTreeStatusTitle(area, area.name)}
-                            aria-current={areaActive ? 'page' : undefined}
-                            onClick={(event) => forceNavigation(areaHref, event)}
-                          >
-                            <TreeIcon type="area" />
-                            <span className="sidebar-tree-label">{area.name}</span>
-                            <span className="sidebar-tree-count">{area.cameras.length}</span>
-                          </a>
-                        </div>
-                        {areaExpanded && (
-                          <ul className="sidebar-camera-tree">
-                            {area.cameras.map((stream) => {
-                              const cameraHref = makeLiveHref({ cols: 1, rows: 1, stream: stream.name });
-                              const statusKind = getStreamStatusKind(stream);
-                              const cameraActive = activeNav === 'nav-live' && liveSelection.stream === stream.name;
-                              return (
-                                <li key={stream.name} className={`sidebar-camera-node ${cameraActive ? 'is-active' : ''}`}>
-                                  <a
-                                    href={cameraHref}
-                                    className={`sidebar-camera-link ${cameraActive ? 'is-active' : ''}`}
-                                    title={`${stream.name} - ${t(`sidebar.status.${statusKind}`)}`}
-                                    aria-current={cameraActive ? 'page' : undefined}
-                                    onClick={(event) => forceNavigation(cameraHref, event)}
-                                  >
-                                    <span className={`sidebar-camera-status is-${statusKind}`} aria-hidden="true"></span>
-                                    <TreeIcon type="camera" />
-                                    <span className="sidebar-camera-name">{stream.name}</span>
-                                  </a>
-                                </li>
-                              );
-                            })}
-                          </ul>
-                        )}
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
+            <li key={stream.name} className={`sidebar-camera-node ${cameraActive ? 'is-active' : ''}`}>
+              <a
+                href={cameraHref}
+                className={`sidebar-camera-link ${cameraActive ? 'is-active' : ''}`}
+                title={`${stream.name} - ${t(`sidebar.status.${statusKind}`)}`}
+                aria-current={cameraActive ? 'page' : undefined}
+                draggable={true}
+                onDragStart={(event) => handleCameraDragStart(event, stream.name)}
+                onClick={(event) => handleSourceCameraClick(event, cameraHref, stream.name)}
+              >
+                <span className={`sidebar-camera-status is-${statusKind}`} aria-hidden="true"></span>
+                <TreeIcon type="camera" />
+                <span className="sidebar-camera-name">{stream.name}</span>
+              </a>
             </li>
           );
         })}
       </ul>
     );
   };
+
+  const renderLayoutMenu = (layout) => {
+    if (!isAdmin) return null;
+
+    return (
+      <div className="sidebar-layout-menu-wrap" onClick={(event) => event.stopPropagation()}>
+        <button
+          type="button"
+          className="sidebar-kebab-button"
+          aria-label={layout ? `Open ${layout.name} layout menu` : 'Open layouts menu'}
+          aria-expanded={openMenu === (layout ? `layout:${layout.id}` : 'layouts')}
+          onClick={(event) => {
+            event.stopPropagation();
+            setOpenMenu((current) => {
+              const key = layout ? `layout:${layout.id}` : 'layouts';
+              return current === key ? null : key;
+            });
+          }}
+        >
+          <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+            <circle cx="8" cy="3.25" r="1.2" />
+            <circle cx="8" cy="8" r="1.2" />
+            <circle cx="8" cy="12.75" r="1.2" />
+          </svg>
+        </button>
+        {openMenu === (layout ? `layout:${layout.id}` : 'layouts') && (
+          <div className="sidebar-layout-menu" role="menu">
+            {layout ? (
+              <>
+                <button type="button" role="menuitem" onClick={() => startRenameLayout(layout)}>Rename</button>
+                <button type="button" role="menuitem" onClick={() => deleteLayout(layout.id)}>Delete</button>
+              </>
+            ) : (
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setCreatingLayout(true);
+                  setOpenMenu(null);
+                }}
+              >
+                Create Layout
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderLayouts = () => (
+    <div className="sidebar-layouts-section">
+      <div className="sidebar-section-heading">
+        <span className="sidebar-section-label">Layouts</span>
+        {renderLayoutMenu(null)}
+      </div>
+      {creatingLayout && (
+        <form className="sidebar-layout-inline-form" onSubmit={handleCreateLayout}>
+          <input
+            type="text"
+            value={newLayoutName}
+            autoFocus
+            maxLength="96"
+            placeholder="Layout name"
+            onInput={(event) => setNewLayoutName(event.currentTarget.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') {
+                setCreatingLayout(false);
+                setNewLayoutName('');
+              }
+            }}
+          />
+          <button type="submit" disabled={!newLayoutName.trim()}>Save</button>
+        </form>
+      )}
+      {liveLayouts.layouts.length === 0 && !creatingLayout ? (
+        <div className="sidebar-building-empty">No layouts</div>
+      ) : (
+        <ul className="sidebar-layout-tree">
+          {liveLayouts.layouts.map((layout) => {
+            const expanded = expandedLayouts[layout.id] !== false;
+            const isDropTarget = dragOverLayoutId === layout.id;
+
+            return (
+              <li
+                key={layout.id}
+                className={`sidebar-layout-node ${isDropTarget ? 'is-drop-target' : ''}`}
+                onDragOver={(event) => {
+                  if (!isAdmin) return;
+                  event.preventDefault();
+                  event.dataTransfer.dropEffect = 'copy';
+                  setDragOverLayoutId(layout.id);
+                }}
+                onDragLeave={() => setDragOverLayoutId('')}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  const cameraName = event.dataTransfer.getData('application/x-oneberry-camera') || event.dataTransfer.getData('text/plain');
+                  setDragOverLayoutId('');
+                  addCameraToLayout(layout.id, cameraName);
+                }}
+              >
+                <div className="sidebar-layout-row">
+                  <button
+                    type="button"
+                    className="sidebar-tree-toggle"
+                    onClick={() => toggleLayoutNode(layout.id)}
+                    aria-label={expanded ? `Collapse ${layout.name}` : `Expand ${layout.name}`}
+                    aria-expanded={expanded}
+                  >
+                    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d={expanded ? 'M4 6l4 4 4-4' : 'M6 4l4 4-4 4'} />
+                    </svg>
+                  </button>
+                  {renamingLayoutId === layout.id ? (
+                    <form className="sidebar-layout-rename-form" onSubmit={handleRenameLayout}>
+                      <input
+                        type="text"
+                        value={renameLayoutName}
+                        autoFocus
+                        maxLength="96"
+                        onInput={(event) => setRenameLayoutName(event.currentTarget.value)}
+                        onBlur={handleRenameLayout}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Escape') {
+                            setRenamingLayoutId('');
+                            setRenameLayoutName('');
+                          }
+                        }}
+                      />
+                    </form>
+                  ) : (
+                    <div className="sidebar-layout-title" title={layout.name}>
+                      <TreeIcon type="area" />
+                      <span className="sidebar-tree-label">{layout.name}</span>
+                      <span className="sidebar-tree-count">{layout.cameras.length}</span>
+                    </div>
+                  )}
+                  {renderLayoutMenu(layout)}
+                </div>
+                {expanded && (
+                  <ul className="sidebar-layout-camera-tree">
+                    {layout.cameras.map((cameraName) => {
+                      const stream = streamByName.get(cameraName);
+                      const statusKind = stream ? getStreamStatusKind(stream) : 'offline';
+                      const cameraHref = makeLiveHref({ cols: 1, rows: 1, stream: cameraName });
+                      const cameraActive = activeNav === 'nav-live' && liveSelection.stream === cameraName;
+                      return (
+                        <li key={cameraName} className={`sidebar-layout-camera-node ${cameraActive ? 'is-active' : ''}`}>
+                          <a
+                            href={cameraHref}
+                            className={`sidebar-camera-link sidebar-layout-camera-link ${cameraActive ? 'is-active' : ''}`}
+                            title={`${cameraName}${stream ? ` - ${t(`sidebar.status.${statusKind}`)}` : ''}`}
+                            aria-current={cameraActive ? 'page' : undefined}
+                            onClick={(event) => forceNavigation(cameraHref, event)}
+                          >
+                            <span className={`sidebar-camera-status is-${statusKind}`} aria-hidden="true"></span>
+                            <TreeIcon type="camera" />
+                            <span className="sidebar-camera-name">{cameraName}</span>
+                          </a>
+                          {isAdmin && (
+                            <button
+                              type="button"
+                              className="sidebar-layout-camera-remove"
+                              aria-label={`Remove ${cameraName} from ${layout.name}`}
+                              onClick={() => removeCameraFromLayout(layout.id, cameraName)}
+                            >
+                              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" aria-hidden="true">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4l8 8M12 4l-8 8" />
+                              </svg>
+                            </button>
+                          )}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
 
   return (
       <>
@@ -773,7 +1025,8 @@ export function Header({ version = VERSION }) {
         <div className="sidebar-content">
           <nav className="sidebar-main-nav" aria-label="Primary navigation">
             <div className="sidebar-section-label">{t('nav.live')}</div>
-            {renderBuildingTree()}
+            {renderCameraList()}
+            {renderLayouts()}
 
             <div className="sidebar-section-label">Workspace</div>
             <ul>
