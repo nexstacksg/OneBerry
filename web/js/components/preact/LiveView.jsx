@@ -642,8 +642,7 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
     }
   };
 
-  // Memoize the streams to show to prevent unnecessary re-renders
-  const streamsToShow = useMemo(() => {
+  const workspaceStreamsToShow = useMemo(() => {
     if (workspaceStarted) {
       if (workspaceTiles.length === 0) {
         return [];
@@ -657,15 +656,24 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
 
       const startIdx = currentPage * maxStreams;
       const endIdx = Math.min(startIdx + maxStreams, workspaceTiles.length);
-      const result = workspaceTiles
+      return workspaceTiles
         .slice(startIdx, endIdx)
         .map((tile) => {
           const stream = streamByName.get(tile.cameraId);
-          return stream ? { ...stream, __tileInstanceId: tile.instanceId } : null;
+          return stream ? { stream, tileInstanceId: tile.instanceId } : null;
         })
         .filter(Boolean);
+    }
 
-      console.log(`[${logLabel}View] workspace streamsToShow computed: ${result.length} tiles`, result.map(s => `${s.name}:${s.__tileInstanceId}`));
+    return [];
+  }, [workspaceStarted, workspaceTiles, streamByName, currentPage, maxStreams]);
+
+  // Memoize the streams to show to prevent unnecessary re-renders
+  const streamsToShow = useMemo(() => {
+    if (workspaceStarted) {
+      const result = workspaceStreamsToShow.map((item) => item.stream);
+
+      console.log(`[${logLabel}View] workspace streamsToShow computed: ${result.length} tiles`, workspaceStreamsToShow.map(item => `${item.stream.name}:${item.tileInstanceId}`));
       console.log(`[${logLabel}View] cols=${cols}, rows=${rows}, currentPage=${currentPage}, totalTiles=${workspaceTiles.length}`);
       return result;
     }
@@ -692,7 +700,7 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
     console.log(`[${logLabel}View] streamsToShow computed: ${result.length} streams`, result.map(s => s.name));
     console.log(`[${logLabel}View] cols=${cols}, rows=${rows}, currentPage=${currentPage}, totalStreams=${orderedStreams.length}`);
     return result;
-  }, [workspaceStarted, workspaceTiles, streamByName, orderedStreams, isSingleStream, selectedStream, currentPage, maxStreams, cols, rows, logLabel]);
+  }, [workspaceStarted, workspaceStreamsToShow, workspaceTiles.length, orderedStreams, isSingleStream, selectedStream, currentPage, maxStreams, cols, rows, logLabel]);
 
   // Arrow-key navigation between streams while one is in native fullscreen.
   useFullscreenGridNav(streamsToShow, cols, rows);
@@ -1027,21 +1035,24 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
           ) : (
             <>
               {streamsToShow.map((stream, index) => {
+                const tileInstanceId = isWorkspaceMode ? workspaceStreamsToShow[index]?.tileInstanceId : '';
                 const VideoCell = isWebRTC ? WebRTCVideoCell : useMSE ? MSEVideoCell : HLSVideoCell;
-                const initDelay = getLiveInitDelay({
-                  isWebRTC,
-                  useMSE,
-                  go2rtcAvailable,
-                  index,
-                  totalStreams: streamsToShow.length,
-                });
+                const initDelay = isWorkspaceMode
+                  ? 0
+                  : getLiveInitDelay({
+                    isWebRTC,
+                    useMSE,
+                    go2rtcAvailable,
+                    index,
+                    totalStreams: streamsToShow.length,
+                  });
                 // Global index in orderedStreams for drag-and-drop (pagination offset)
                 const globalIndex = currentPage * maxStreams + index;
 
                 return (
                   <div
-                    key={stream.__tileInstanceId || stream.name}
-                    className={`live-workspace-tile ${removingTileIds.has(stream.__tileInstanceId) ? 'is-removing' : ''}`}
+                    key={tileInstanceId || stream.name}
+                    className={`live-workspace-tile ${removingTileIds.has(tileInstanceId) ? 'is-removing' : ''}`}
                     style={{ position: 'relative' }}
                     draggable={!isWorkspaceMode && reorderMode}
                     onDragStart={!isWorkspaceMode && reorderMode ? () => handleDragStart(globalIndex) : undefined}
@@ -1067,13 +1078,13 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
                         {t('live.dragToReorder')}
                       </div>
                     )}
-                    {isWorkspaceMode && stream.__tileInstanceId && (
+                    {isWorkspaceMode && tileInstanceId && (
                       <button
                         type="button"
                         className="live-workspace-tile-close"
                         aria-label={`Remove ${stream.name} tile`}
                         title={`Remove ${stream.name}`}
-                        onClick={() => removeWorkspaceTile(stream.__tileInstanceId)}
+                        onClick={() => removeWorkspaceTile(tileInstanceId)}
                       >
                         <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" aria-hidden="true">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4l8 8M12 4l-8 8" />

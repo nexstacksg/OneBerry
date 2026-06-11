@@ -1592,7 +1592,7 @@ export function WebRTCVideoCell({
     };
 
     return cleanupWebRTCResources;
-  }, [stream, retryCount, t, selectedStreamSource]);
+  }, [stream?.name, retryCount, selectedStreamSource]);
 
   /**
    * Refresh the stream's go2rtc registration
