@@ -9,7 +9,10 @@
     "build:maps": "BUILD_SOURCEMAPS=true vite build",
     "preview": "vite preview",
     "test": "TZ=America/New_York jest --config=jest.config.cjs",
-    "test:e2e": "TZ=America/New_York jest tests/e2e --config=jest.config.cjs --runInBand"
+    "test:e2e": "TZ=America/New_York jest tests/e2e --config=jest.config.cjs --runInBand",
+    "generate:version": "node ../scripts/extract_version.js",
+    "prebuild": "npm run generate:version",
+    "prebuild:maps": "npm run generate:version"
   },
   "author": "",
   "license": "ISC",
