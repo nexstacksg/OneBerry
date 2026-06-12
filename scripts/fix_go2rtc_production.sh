@@ -5,7 +5,11 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSTALL_DIR="/usr/local/bin"
 CONFIG_DIR="/etc/lightnvr/go2rtc"
+LIGHTNVR_CONFIG="/etc/lightnvr/lightnvr.ini"
 GO2RTC_BASE_PATH="/go2rtc"
+GO2RTC_API_PORT=1984
+GO2RTC_RTSP_PORT=8554
+GO2RTC_WEBRTC_PORT=8555
 VERSION="latest"
 LIGHTNVR_SERVICE="lightnvr"
 CHECK_ONLY=false
@@ -29,7 +33,12 @@ Usage: scripts/fix_go2rtc_production.sh [options]
 Options:
   -d, --install-dir DIR    install go2rtc binary here (default: /usr/local/bin)
   -c, --config-dir DIR     go2rtc config directory (default: /etc/lightnvr/go2rtc)
+      --lightnvr-config FILE
+                            lightnvr.ini path (default: /etc/lightnvr/lightnvr.ini)
       --base-path PATH     base_path configured in go2rtc.yaml (default: /go2rtc)
+      --api-port PORT      go2rtc API port (default: 1984)
+      --rtsp-port PORT     go2rtc RTSP port (default: 8554)
+      --webrtc-port PORT   go2rtc WebRTC listen port (default: 8555)
   -w, --wait-seconds SEC   how long to wait for go2rtc API on startup (default: 20)
   -v, --version VERSION    go2rtc release version to install (default: latest)
   -s, --service NAME       lightnvr service name (default: lightnvr)
@@ -51,8 +60,24 @@ while [[ $# -gt 0 ]]; do
             CONFIG_DIR="$2"
             shift 2
             ;;
+        --lightnvr-config)
+            LIGHTNVR_CONFIG="$2"
+            shift 2
+            ;;
         --base-path)
             GO2RTC_BASE_PATH="$2"
+            shift 2
+            ;;
+        --api-port)
+            GO2RTC_API_PORT="$2"
+            shift 2
+            ;;
+        --rtsp-port)
+            GO2RTC_RTSP_PORT="$2"
+            shift 2
+            ;;
+        --webrtc-port)
+            GO2RTC_WEBRTC_PORT="$2"
             shift 2
             ;;
         -v|--version)
@@ -173,6 +198,94 @@ normalize_base_path() {
 
 GO2RTC_BASE_PATH="$(normalize_base_path "$GO2RTC_BASE_PATH")"
 
+set_ini_key() {
+    local file="$1"
+    local section="$2"
+    local key="$3"
+    local value="$4"
+    local tmp
+    tmp="$(mktemp)"
+    awk -v section="$section" -v key="$key" -v value="$value" '
+        BEGIN { in_section = 0; section_seen = 0; key_set = 0 }
+        $0 ~ "^[[:space:]]*\\[" section "\\][[:space:]]*$" {
+            in_section = 1
+            section_seen = 1
+            print
+            next
+        }
+        in_section && $0 ~ "^[[:space:]]*\\[" {
+            if (!key_set) {
+                print key " = " value
+                key_set = 1
+            }
+            in_section = 0
+        }
+        in_section && $0 ~ "^[[:space:];#]*" key "[[:space:]]*=" {
+            if (!key_set) {
+                print key " = " value
+                key_set = 1
+            }
+            next
+        }
+        { print }
+        END {
+            if (!section_seen) {
+                print ""
+                print "[" section "]"
+                print key " = " value
+            } else if (in_section && !key_set) {
+                print key " = " value
+            }
+        }
+    ' "$file" > "$tmp"
+    cat "$tmp" > "$file"
+    rm -f "$tmp"
+}
+
+set_yaml_section_key() {
+    local file="$1"
+    local section="$2"
+    local key="$3"
+    local value="$4"
+    local tmp
+    tmp="$(mktemp)"
+    awk -v section="$section" -v key="$key" -v value="$value" '
+        BEGIN { in_section = 0; section_seen = 0; key_set = 0 }
+        $0 ~ "^" section ":[[:space:]]*$" {
+            in_section = 1
+            section_seen = 1
+            print
+            next
+        }
+        in_section && $0 ~ "^[^[:space:]#][^:]*:[[:space:]]*$" {
+            if (!key_set) {
+                print "  " key ": " value
+                key_set = 1
+            }
+            in_section = 0
+        }
+        in_section && $0 ~ "^[[:space:]]*" key ":[[:space:]]*" {
+            if (!key_set) {
+                print "  " key ": " value
+                key_set = 1
+            }
+            next
+        }
+        { print }
+        END {
+            if (!section_seen) {
+                print ""
+                print section ":"
+                print "  " key ": " value
+            } else if (in_section && !key_set) {
+                print "  " key ": " value
+            }
+        }
+    ' "$file" > "$tmp"
+    cat "$tmp" > "$file"
+    rm -f "$tmp"
+}
+
 if [[ ! -f "$CONFIG_DIR/go2rtc.yaml" ]]; then
     log_error "go2rtc config is missing at $CONFIG_DIR/go2rtc.yaml"
     if ! "$SCRIPT_DIR/install_go2rtc.sh" -d "$INSTALL_DIR" -c "$CONFIG_DIR" > /dev/null; then
@@ -180,6 +293,25 @@ if [[ ! -f "$CONFIG_DIR/go2rtc.yaml" ]]; then
         exit 1
     fi
     log_info "Created default go2rtc config at $CONFIG_DIR/go2rtc.yaml"
+fi
+
+if [[ "$CHECK_ONLY" != "true" ]]; then
+    if [[ -f "$LIGHTNVR_CONFIG" ]]; then
+        log_info "Ensuring LightNVR config uses web port 8080 and go2rtc API port ${GO2RTC_API_PORT}..."
+        set_ini_key "$LIGHTNVR_CONFIG" "web" "port" "8080"
+        set_ini_key "$LIGHTNVR_CONFIG" "go2rtc" "api_port" "$GO2RTC_API_PORT"
+        set_ini_key "$LIGHTNVR_CONFIG" "go2rtc" "rtsp_port" "$GO2RTC_RTSP_PORT"
+        set_ini_key "$LIGHTNVR_CONFIG" "go2rtc" "webrtc_listen_port" "$GO2RTC_WEBRTC_PORT"
+    else
+        log_error "LightNVR config not found at $LIGHTNVR_CONFIG. Set --lightnvr-config if your install uses a different path."
+        exit 1
+    fi
+
+    log_info "Ensuring go2rtc config listens on API ${GO2RTC_API_PORT}, RTSP ${GO2RTC_RTSP_PORT}, WebRTC ${GO2RTC_WEBRTC_PORT}..."
+    set_yaml_section_key "$CONFIG_DIR/go2rtc.yaml" "api" "listen" ":${GO2RTC_API_PORT}"
+    set_yaml_section_key "$CONFIG_DIR/go2rtc.yaml" "api" "base_path" "${GO2RTC_BASE_PATH:-/go2rtc}"
+    set_yaml_section_key "$CONFIG_DIR/go2rtc.yaml" "rtsp" "listen" "\":${GO2RTC_RTSP_PORT}\""
+    set_yaml_section_key "$CONFIG_DIR/go2rtc.yaml" "webrtc" "listen" "\":${GO2RTC_WEBRTC_PORT}\""
 fi
 
 if [[ "$RESTART_SERVICE" == "true" ]]; then
@@ -200,7 +332,7 @@ fi
 wait_for_go2rtc_ready() {
     local attempt=0
     local attempts_max="$WAIT_FOR_GO2RTC_SECONDS"
-    local port=1984
+    local port="$GO2RTC_API_PORT"
     local base_path="$GO2RTC_BASE_PATH"
     while [[ $attempt -lt "$attempts_max" ]]; do
         if ss -ltn 2>/dev/null | awk '{print $4}' | grep -qE "(^|[:.])${port}$"; then
@@ -219,15 +351,15 @@ wait_for_go2rtc_ready() {
 
 if wait_for_go2rtc_ready; then
     if [[ -n "$GO2RTC_BASE_PATH" ]]; then
-        log_info "go2rtc API is reachable: http://127.0.0.1:1984${GO2RTC_BASE_PATH}/api/streams"
+        log_info "go2rtc API is reachable: http://127.0.0.1:${GO2RTC_API_PORT}${GO2RTC_BASE_PATH}/api/streams"
     else
-        log_info "go2rtc API is reachable: http://127.0.0.1:1984/api/streams"
+        log_info "go2rtc API is reachable: http://127.0.0.1:${GO2RTC_API_PORT}/api/streams"
     fi
     log_info "Verification complete. Next: access http://<server-ip>:8080 for LightNVR and use WebRTC/HLS features."
     exit 0
 fi
 
-log_error "go2rtc is not yet reachable on port 1984 (base_path='${GO2RTC_BASE_PATH:-/go2rtc}')."
+log_error "go2rtc is not yet reachable on port ${GO2RTC_API_PORT} (base_path='${GO2RTC_BASE_PATH:-/go2rtc}')."
 log_error "Waited up to ${WAIT_FOR_GO2RTC_SECONDS}s."
 log_info "Checking recent lightnvr startup logs..."
 journalctl -u "$LIGHTNVR_SERVICE" -n 200 --no-pager || true

@@ -298,8 +298,13 @@ if [ "$INSTALL_GO2RTC" -eq 1 ]; then
 api:
   listen: :1984
   origin: "*"
+  base_path: /go2rtc
+
+rtsp:
+  listen: :8554
 
 webrtc:
+  listen: :8555
   ice_servers:
     - urls: [stun:stun.l.google.com:19302]
 
