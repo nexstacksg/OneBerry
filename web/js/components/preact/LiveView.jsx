@@ -528,7 +528,10 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
   useEffect(() => {
     if (!workspaceAutoGrid || workspaceTiles.length === 0) return;
 
-    const targetCells = Math.min(MAX_GRID_CELLS, Math.max(4, workspaceTiles.length + 1));
+    const targetCells = Math.min(
+      MAX_GRID_CELLS,
+      workspaceTiles.length <= 2 ? workspaceTiles.length : workspaceTiles.length + 1
+    );
     const [optCols, optRows] = computeOptimalGrid(targetCells);
     setCols(optCols);
     setRows(optRows);
@@ -708,6 +711,7 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
   const isWorkspaceMode = workspaceStarted;
   const workspaceTotalPages = Math.ceil(workspaceTiles.length / maxStreams);
   const orderedTotalPages = Math.ceil(orderedStreams.length / maxStreams);
+  const visibleWorkspaceTileCount = isWorkspaceMode ? streamsToShow.length : 0;
   const workspaceEmptySlotCount = isWorkspaceMode && workspaceTiles.length > 0
     ? Math.max(0, maxStreams - streamsToShow.length)
     : 0;
@@ -957,7 +961,7 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
       <div className="flex flex-col space-y-4 h-full">
         <div
           id="video-grid"
-          className={`video-container ${isWorkspaceMode ? 'is-workspace-grid' : gridHasEmptySlots ? 'is-partial-grid' : 'is-filled-grid'}`}
+          className={`video-container ${isWorkspaceMode ? 'is-workspace-grid' : gridHasEmptySlots ? 'is-partial-grid' : 'is-filled-grid'} ${visibleWorkspaceTileCount === 1 ? 'is-single-camera' : ''}`}
           style={{ '--grid-cols': cols, '--grid-rows': rows }}
           onDragOver={(event) => {
             if (reorderMode) return;

@@ -109,6 +109,14 @@
     grid-template-rows: repeat(var(--grid-rows, 2), 1fr);
 }
 
+.video-container.is-workspace-grid {
+    padding: 0.75rem;
+    border-radius: 0.625rem;
+    background:
+        linear-gradient(180deg, hsl(var(--muted) / 0.34), hsl(var(--background) / 0.88)),
+        hsl(var(--background));
+}
+
 .live-workspace-empty {
     min-height: 100%;
 }
@@ -268,16 +276,28 @@
     aspect-ratio: 16 / 9;
 }
 
-.video-container.is-workspace-grid {
-    align-items: stretch;
-}
-
 .video-container.is-workspace-grid > div {
     min-width: 0;
 }
 
+.video-container.is-workspace-grid.is-single-camera {
+    gap: 0;
+    padding: 0.75rem;
+}
+
+.video-container.is-workspace-grid.is-single-camera .live-workspace-tile {
+    min-height: 0;
+}
+
+.video-container.is-workspace-grid.is-single-camera .video-cell {
+    border-color: hsl(var(--border) / 0.38);
+    border-radius: 0.5rem;
+    box-shadow: 0 18px 44px -28px rgba(0, 0, 0, 0.95);
+}
+
 .live-workspace-tile {
     min-width: 0;
+    min-height: 0;
     opacity: 1;
     transform: scale(1);
     transition: opacity 180ms ease, transform 180ms ease;
@@ -305,13 +325,13 @@
     align-items: center;
     justify-content: center;
     gap: 0.55rem;
-    border: 1px dashed hsl(var(--border) / 0.78);
-    border-radius: 0.375rem;
+    border: 1px dashed hsl(var(--border) / 0.64);
+    border-radius: 0.5rem;
     background:
-        linear-gradient(145deg, hsl(var(--muted) / 0.34), hsl(var(--background) / 0.72)),
-        hsl(var(--card) / 0.78);
+        linear-gradient(145deg, hsl(var(--card) / 0.7), hsl(var(--muted) / 0.2)),
+        hsl(var(--card) / 0.62);
     color: hsl(var(--muted-foreground));
-    opacity: 0.82;
+    opacity: 0.68;
     transition: opacity 180ms ease, transform 180ms ease, border-color 180ms ease, background-color 180ms ease;
 }
 
@@ -334,6 +354,7 @@
 .video-container.is-workspace-grid:hover .live-workspace-slot {
     border-color: hsl(var(--primary) / 0.38);
     background: hsl(var(--primary) / 0.055);
+    opacity: 0.9;
 }
 
 .live-workspace-tile-close {
