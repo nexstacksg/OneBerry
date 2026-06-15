@@ -66,6 +66,8 @@ static bool is_safe_storage_path(const char *path) {
 #define LIVE_LAYOUT_NAME_MAX_LEN 96
 #define LIVE_LAYOUT_ID_MAX_LEN 96
 #define LIVE_LAYOUT_CAMERA_MAX_LEN 255
+#define LIVE_LAYOUT_TILE_MAX_LEN 96
+#define LIVE_LAYOUT_GRID_MAX_SIDE 9
 
 static void trim_location_value(const char *src, char *dst, size_t dst_size) {
     if (!dst || dst_size == 0) return;
@@ -237,6 +239,59 @@ static bool is_valid_layout_camera_name(const char *value) {
     return strlen(value) <= LIVE_LAYOUT_CAMERA_MAX_LEN;
 }
 
+static int clamp_layout_int(cJSON *item, int fallback, int min_value, int max_value) {
+    if (!cJSON_IsNumber(item)) return fallback;
+    int value = item->valueint;
+    if (value < min_value) return min_value;
+    if (value > max_value) return max_value;
+    return value;
+}
+
+static bool is_valid_layout_tile_id(const char *value) {
+    if (!value || value[0] == '\0' || strlen(value) > LIVE_LAYOUT_TILE_MAX_LEN) return false;
+    for (const char *c = value; *c != '\0'; c++) {
+        if (!isalnum((unsigned char)*c) && *c != '-' && *c != '_') return false;
+    }
+    return true;
+}
+
+static bool add_normalized_layout_tile(cJSON *tiles, cJSON *cameras, const char *tile_id,
+                                       const char *camera_name, int x, int y, int w, int h,
+                                       char *error, size_t error_size) {
+    if (!is_valid_layout_tile_id(tile_id)) {
+        snprintf(error, error_size, "Layout tile ids may only contain letters, numbers, dashes, and underscores");
+        return false;
+    }
+    if (!is_valid_layout_camera_name(camera_name)) {
+        snprintf(error, error_size, "Camera names must be 1-%d characters", LIVE_LAYOUT_CAMERA_MAX_LEN);
+        return false;
+    }
+
+    cJSON *tile = cJSON_CreateObject();
+    if (!tile) {
+        snprintf(error, error_size, "Out of memory");
+        return false;
+    }
+
+    cJSON_AddStringToObject(tile, "id", tile_id);
+    cJSON_AddStringToObject(tile, "camera", camera_name);
+    cJSON_AddNumberToObject(tile, "x", x);
+    cJSON_AddNumberToObject(tile, "y", y);
+    cJSON_AddNumberToObject(tile, "w", w);
+    cJSON_AddNumberToObject(tile, "h", h);
+
+    cJSON *camera_item = cJSON_CreateString(camera_name);
+    if (!camera_item) {
+        cJSON_Delete(tile);
+        snprintf(error, error_size, "Out of memory");
+        return false;
+    }
+
+    cJSON_AddItemToArray(tiles, tile);
+    cJSON_AddItemToArray(cameras, camera_item);
+    return true;
+}
+
 static cJSON *normalize_live_layouts_json(cJSON *input, char *error, size_t error_size) {
     if (!input || !cJSON_IsObject(input)) {
         snprintf(error, error_size, "Live layouts must be a JSON object");
@@ -295,10 +350,15 @@ static cJSON *normalize_live_layouts_json(cJSON *input, char *error, size_t erro
             return NULL;
         }
 
+        int cols = clamp_layout_int(cJSON_GetObjectItem(input_layout, "cols"), 0, 0, LIVE_LAYOUT_GRID_MAX_SIDE);
+        int rows = clamp_layout_int(cJSON_GetObjectItem(input_layout, "rows"), 0, 0, LIVE_LAYOUT_GRID_MAX_SIDE);
+
         cJSON *layout = cJSON_CreateObject();
+        cJSON *tiles = cJSON_CreateArray();
         cJSON *cameras = cJSON_CreateArray();
-        if (!layout || !cameras) {
+        if (!layout || !tiles || !cameras) {
             cJSON_Delete(layout);
+            cJSON_Delete(tiles);
             cJSON_Delete(cameras);
             cJSON_Delete(normalized);
             snprintf(error, error_size, "Out of memory");
@@ -306,7 +366,67 @@ static cJSON *normalize_live_layouts_json(cJSON *input, char *error, size_t erro
         }
         cJSON_AddStringToObject(layout, "id", layout_id);
         cJSON_AddStringToObject(layout, "name", layout_name);
+        if (cols > 0) cJSON_AddNumberToObject(layout, "cols", cols);
+        if (rows > 0) cJSON_AddNumberToObject(layout, "rows", rows);
+        cJSON_AddItemToObject(layout, "tiles", tiles);
         cJSON_AddItemToObject(layout, "cameras", cameras);
+
+        cJSON *input_tiles = cJSON_GetObjectItem(input_layout, "tiles");
+        if (input_tiles && !cJSON_IsArray(input_tiles)) {
+            cJSON_Delete(layout);
+            cJSON_Delete(normalized);
+            snprintf(error, error_size, "layout tiles must be an array");
+            return NULL;
+        }
+
+        if (input_tiles) {
+            cJSON *tile_json = NULL;
+            int tile_index = 0;
+            cJSON_ArrayForEach(tile_json, input_tiles) {
+                if (!cJSON_IsObject(tile_json)) {
+                    cJSON_Delete(layout);
+                    cJSON_Delete(normalized);
+                    snprintf(error, error_size, "Layout tiles must be objects");
+                    return NULL;
+                }
+
+                cJSON *tile_id_json = cJSON_GetObjectItem(tile_json, "id");
+                cJSON *camera_json = cJSON_GetObjectItem(tile_json, "camera");
+                if (!camera_json) camera_json = cJSON_GetObjectItem(tile_json, "cameraName");
+                if (!cJSON_IsString(camera_json) || !camera_json->valuestring) {
+                    cJSON_Delete(layout);
+                    cJSON_Delete(normalized);
+                    snprintf(error, error_size, "Layout tiles require a camera");
+                    return NULL;
+                }
+
+                char tile_id[LIVE_LAYOUT_TILE_MAX_LEN + 1];
+                char camera_name[LIVE_LAYOUT_CAMERA_MAX_LEN + 1];
+                if (cJSON_IsString(tile_id_json) && tile_id_json->valuestring) {
+                    trim_location_value(tile_id_json->valuestring, tile_id, sizeof(tile_id));
+                } else {
+                    snprintf(tile_id, sizeof(tile_id), "tile-%d", tile_index + 1);
+                }
+                trim_location_value(camera_json->valuestring, camera_name, sizeof(camera_name));
+
+                int fallback_x = cols > 0 ? tile_index % cols : tile_index;
+                int fallback_y = cols > 0 ? tile_index / cols : 0;
+                int x = clamp_layout_int(cJSON_GetObjectItem(tile_json, "x"), fallback_x, 0, LIVE_LAYOUT_GRID_MAX_SIDE - 1);
+                int y = clamp_layout_int(cJSON_GetObjectItem(tile_json, "y"), fallback_y, 0, LIVE_LAYOUT_GRID_MAX_SIDE - 1);
+                int w = clamp_layout_int(cJSON_GetObjectItem(tile_json, "w"), 1, 1, LIVE_LAYOUT_GRID_MAX_SIDE);
+                int h = clamp_layout_int(cJSON_GetObjectItem(tile_json, "h"), 1, 1, LIVE_LAYOUT_GRID_MAX_SIDE);
+
+                if (!add_normalized_layout_tile(tiles, cameras, tile_id, camera_name, x, y, w, h, error, error_size)) {
+                    cJSON_Delete(layout);
+                    cJSON_Delete(normalized);
+                    return NULL;
+                }
+                tile_index++;
+            }
+
+            cJSON_AddItemToArray(layouts, layout);
+            continue;
+        }
 
         cJSON *input_cameras = cJSON_GetObjectItem(input_layout, "cameras");
         if (input_cameras && !cJSON_IsArray(input_cameras)) {
@@ -317,6 +437,7 @@ static cJSON *normalize_live_layouts_json(cJSON *input, char *error, size_t erro
         }
 
         cJSON *camera_json = NULL;
+        int camera_index = 0;
         cJSON_ArrayForEach(camera_json, input_cameras) {
             if (!cJSON_IsString(camera_json) || !camera_json->valuestring) {
                 cJSON_Delete(layout);
@@ -333,16 +454,17 @@ static cJSON *normalize_live_layouts_json(cJSON *input, char *error, size_t erro
                 snprintf(error, error_size, "Camera names must be 1-%d characters", LIVE_LAYOUT_CAMERA_MAX_LEN);
                 return NULL;
             }
-            if (!string_array_contains(cameras, camera_name)) {
-                cJSON *camera_item = cJSON_CreateString(camera_name);
-                if (!camera_item) {
-                    cJSON_Delete(layout);
-                    cJSON_Delete(normalized);
-                    snprintf(error, error_size, "Out of memory");
-                    return NULL;
-                }
-                cJSON_AddItemToArray(cameras, camera_item);
+
+            char tile_id[LIVE_LAYOUT_TILE_MAX_LEN + 1];
+            snprintf(tile_id, sizeof(tile_id), "tile-%d", camera_index + 1);
+            int fallback_x = cols > 0 ? camera_index % cols : camera_index;
+            int fallback_y = cols > 0 ? camera_index / cols : 0;
+            if (!add_normalized_layout_tile(tiles, cameras, tile_id, camera_name, fallback_x, fallback_y, 1, 1, error, error_size)) {
+                cJSON_Delete(layout);
+                cJSON_Delete(normalized);
+                return NULL;
             }
+            camera_index++;
         }
 
         cJSON_AddItemToArray(layouts, layout);

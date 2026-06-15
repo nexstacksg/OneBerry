@@ -7,6 +7,7 @@ import { useState, useEffect, useMemo, useCallback, useRef } from 'preact/hooks'
 import { showStatusMessage } from './ToastContainer.jsx';
 import { useFullscreenManager, FullscreenManager, useFullscreenGridNav } from './FullscreenManager.jsx';
 import { useQuery } from '../../query-client.js';
+import { fetchJSON, queryClient } from '../../query-client.js';
 import { SnapshotManager, useSnapshotManager } from './SnapshotManager.jsx';
 import { HLSVideoCell } from './HLSVideoCell.jsx';
 import { MSEVideoCell } from './MSEVideoCell.jsx';
@@ -16,6 +17,7 @@ import { isGo2rtcEnabled } from '../../utils/settings-utils.js';
 import { useCameraOrder } from './useCameraOrder.js';
 import { GridPicker, computeOptimalGrid, MAX_GRID_CELLS } from './GridPicker.jsx';
 import { buildBuildingTree } from '../../utils/building-hierarchy.js';
+import { getAuthHeaders } from '../../utils/auth-utils.js';
 import { useI18n } from '../../i18n.js';
 
 /**
@@ -65,11 +67,82 @@ function getLiveInitDelay({ isWebRTC, useMSE, go2rtcAvailable, index, totalStrea
   return Math.ceil((index - immediateCount + 1) / 4) * 150;
 }
 
-function createWorkspaceTile(cameraId) {
+function createWorkspaceTile(cameraId, tile = {}) {
   return {
-    instanceId: `tile-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+    instanceId: tile.id || `tile-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
     cameraId,
+    x: Number.isFinite(Number(tile.x)) ? Math.max(0, Math.floor(Number(tile.x))) : 0,
+    y: Number.isFinite(Number(tile.y)) ? Math.max(0, Math.floor(Number(tile.y))) : 0,
+    w: Number.isFinite(Number(tile.w)) ? Math.max(1, Math.floor(Number(tile.w))) : 1,
+    h: Number.isFinite(Number(tile.h)) ? Math.max(1, Math.floor(Number(tile.h))) : 1,
   };
+}
+
+function normalizeLiveLayouts(data = {}) {
+  return {
+    layouts: Array.isArray(data.layouts)
+      ? data.layouts
+        .filter((layout) => layout && layout.id && layout.name)
+        .map((layout) => {
+          const sourceTiles = Array.isArray(layout.tiles)
+            ? layout.tiles
+            : (Array.isArray(layout.cameras) ? layout.cameras : []).map((camera, index) => ({
+              id: `tile-${index + 1}`,
+              camera,
+              x: index,
+              y: 0,
+              w: 1,
+              h: 1,
+            }));
+          const tiles = sourceTiles
+            .map((tile, index) => {
+              const camera = String(tile?.camera || tile?.cameraName || '').trim();
+              if (!camera) return null;
+              return {
+                id: String(tile?.id || `tile-${index + 1}`).trim() || `tile-${index + 1}`,
+                camera,
+                x: Number.isFinite(Number(tile?.x)) ? Math.max(0, Math.floor(Number(tile.x))) : index,
+                y: Number.isFinite(Number(tile?.y)) ? Math.max(0, Math.floor(Number(tile.y))) : 0,
+                w: Number.isFinite(Number(tile?.w)) ? Math.max(1, Math.floor(Number(tile.w))) : 1,
+                h: Number.isFinite(Number(tile?.h)) ? Math.max(1, Math.floor(Number(tile.h))) : 1,
+              };
+            })
+            .filter(Boolean);
+
+          return {
+            id: String(layout.id),
+            name: String(layout.name).trim(),
+            cols: Number.isFinite(Number(layout.cols)) ? Math.max(1, Math.floor(Number(layout.cols))) : undefined,
+            rows: Number.isFinite(Number(layout.rows)) ? Math.max(1, Math.floor(Number(layout.rows))) : undefined,
+            tiles,
+            cameras: tiles.map((tile) => tile.camera),
+          };
+        })
+        .filter((layout) => layout.name)
+      : [],
+  };
+}
+
+function serializeWorkspaceTiles(workspaceTiles, cols) {
+  return workspaceTiles.map((tile, index) => ({
+    id: tile.instanceId,
+    camera: tile.cameraId,
+    x: Number.isFinite(Number(tile.x)) ? tile.x : (cols > 0 ? index % cols : index),
+    y: Number.isFinite(Number(tile.y)) ? tile.y : (cols > 0 ? Math.floor(index / cols) : 0),
+    w: Number.isFinite(Number(tile.w)) ? tile.w : 1,
+    h: Number.isFinite(Number(tile.h)) ? tile.h : 1,
+  }));
+}
+
+function reflowWorkspaceTiles(workspaceTiles, cols) {
+  const safeCols = Math.max(1, cols || 1);
+  return workspaceTiles.map((tile, index) => ({
+    ...tile,
+    x: index % safeCols,
+    y: Math.floor(index / safeCols),
+    w: tile.w || 1,
+    h: tile.h || 1,
+  }));
 }
 
 function LiveEmptyState({ t, title, message, actionHref, actionLabel, actionOnClick, secondaryText }) {
@@ -134,6 +207,13 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
   const [workspaceTiles, setWorkspaceTiles] = useState([]);
   const [workspaceStarted, setWorkspaceStarted] = useState(false);
   const [workspaceAutoGrid, setWorkspaceAutoGrid] = useState(true);
+  const [activeLayoutId] = useState(() => {
+    const p = new URLSearchParams(window.location.search);
+    return p.get('layout') || '';
+  });
+  const [hydratedLayoutId, setHydratedLayoutId] = useState('');
+  const lastSavedLayoutPayloadRef = useRef('');
+  const saveLayoutTimeoutRef = useRef(null);
   const [urlStreamHydrated, setUrlStreamHydrated] = useState(false);
   const [removingTileIds, setRemovingTileIds] = useState(new Set());
   const removeTimeoutsRef = useRef(new Map());
@@ -310,6 +390,22 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
     }
   );
 
+  const {
+    data: liveLayoutsData = { layouts: [] }
+  } = useQuery(
+    ['live-layouts'],
+    '/api/live-layouts',
+    {
+      headers: getAuthHeaders(),
+      timeout: 10000,
+      retries: 1,
+      retryDelay: 1000
+    },
+    {
+      refetchInterval: 30000
+    }
+  );
+
   // Update loading state based on streams query status
   useEffect(() => {
     setIsLoading(isLoadingStreams);
@@ -338,7 +434,7 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
             const urlParams = new URLSearchParams(window.location.search);
             const streamParam = urlParams.get('stream');
 
-            if (streamParam && filteredStreams.some(stream => stream.name === streamParam)) {
+            if (!activeLayoutId && streamParam && filteredStreams.some(stream => stream.name === streamParam)) {
               // If the stream from URL exists in the loaded streams, use it
               setSelectedStream(streamParam);
               if (!urlStreamHydrated) {
@@ -365,7 +461,7 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
     // Note: We intentionally only re-run when streamsData changes
     // selectedStream is read but we don't want to trigger refetch when it changes
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [streamsData, autoGrid]);
+  }, [streamsData, autoGrid, activeLayoutId]);
 
   // Sync layout/page/stream to URL — only meaningful once streams are loaded.
   useEffect(() => {
@@ -387,9 +483,15 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
     }
     url.searchParams.delete('layout'); // remove legacy param
 
-    // Stream selection (single-stream mode only)
-    if (isSingleStream && selectedStream) url.searchParams.set('stream', selectedStream);
-    else url.searchParams.delete('stream');
+    if (activeLayoutId) {
+      url.searchParams.set('layout', activeLayoutId);
+      url.searchParams.delete('stream');
+    } else {
+      url.searchParams.delete('layout');
+      // Stream selection (single-stream mode only)
+      if (isSingleStream && selectedStream) url.searchParams.set('stream', selectedStream);
+      else url.searchParams.delete('stream');
+    }
 
     window.history.replaceState({}, '', url);
 
@@ -402,9 +504,9 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
     localStorage.removeItem(`lightnvr-${storagePrefix}-cols`);
     localStorage.removeItem(`lightnvr-${storagePrefix}-rows`);
     localStorage.removeItem(`lightnvr-${storagePrefix}-layout`);
-    if (isSingleStream && selectedStream) sessionStorage.setItem(`${storagePrefix}_selected_stream`, selectedStream);
+    if (!activeLayoutId && isSingleStream && selectedStream) sessionStorage.setItem(`${storagePrefix}_selected_stream`, selectedStream);
     else sessionStorage.removeItem(`${storagePrefix}_selected_stream`);
-  }, [currentPage, cols, rows, isSingleStream, selectedStream, streams.length]);
+  }, [activeLayoutId, currentPage, cols, rows, isSingleStream, selectedStream, streams.length]);
 
   // Sync UI preference controls (group, labels, controls) to URL and localStorage.
   // Runs independently of streams-loaded state so the URL is always accurate.
@@ -466,6 +568,50 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
   const streamByName = useMemo(() => (
     new Map(streams.map((stream) => [stream.name, stream]))
   ), [streams]);
+  const liveLayouts = useMemo(() => normalizeLiveLayouts(liveLayoutsData), [liveLayoutsData]);
+  const activeLayout = useMemo(() => (
+    activeLayoutId
+      ? liveLayouts.layouts.find((layout) => layout.id === activeLayoutId) || null
+      : null
+  ), [activeLayoutId, liveLayouts]);
+
+  useEffect(() => {
+    if (!activeLayoutId || !activeLayout || streams.length === 0 || hydratedLayoutId === activeLayoutId) return;
+
+    const tiles = activeLayout.tiles
+      .filter((tile) => streamByName.has(tile.camera))
+      .map((tile, index) => createWorkspaceTile(tile.camera, {
+        ...tile,
+        id: tile.id || `tile-${index + 1}`,
+      }));
+
+    setWorkspaceTiles(tiles);
+    setWorkspaceStarted(true);
+    setWorkspaceAutoGrid(!activeLayout.cols || !activeLayout.rows);
+    setCurrentPage(0);
+
+    if (activeLayout.cols && activeLayout.rows) {
+      setCols(activeLayout.cols);
+      setRows(activeLayout.rows);
+    } else {
+      const targetCells = Math.min(
+        MAX_GRID_CELLS,
+        tiles.length <= 2 ? Math.max(1, tiles.length) : tiles.length + 1
+      );
+      const [optCols, optRows] = computeOptimalGrid(targetCells);
+      setCols(optCols);
+      setRows(optRows);
+    }
+
+    const serializedTiles = serializeWorkspaceTiles(tiles, activeLayout.cols || cols);
+    lastSavedLayoutPayloadRef.current = JSON.stringify({
+      id: activeLayout.id,
+      cols: activeLayout.cols,
+      rows: activeLayout.rows,
+      tiles: serializedTiles,
+    });
+    setHydratedLayoutId(activeLayoutId);
+  }, [activeLayout, activeLayoutId, cols, hydratedLayoutId, streamByName, streams.length]);
 
   const addWorkspaceTile = useCallback((cameraName) => {
     const cameraId = String(cameraName || '').trim();
@@ -483,11 +629,17 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
         return previousTiles;
       }
 
-      return [...previousTiles, createWorkspaceTile(cameraId)];
+      const index = previousTiles.length;
+      return [...previousTiles, createWorkspaceTile(cameraId, {
+        x: cols > 0 ? index % cols : index,
+        y: cols > 0 ? Math.floor(index / cols) : 0,
+        w: 1,
+        h: 1,
+      })];
     });
     setCurrentPage(0);
     setSelectedStream(cameraId);
-  }, [streamByName]);
+  }, [cols, streamByName]);
 
   const removeWorkspaceTile = useCallback((instanceId) => {
     if (!instanceId || removeTimeoutsRef.current.has(instanceId)) return;
@@ -499,7 +651,10 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
     });
 
     const timeoutId = window.setTimeout(() => {
-      setWorkspaceTiles((previousTiles) => previousTiles.filter((tile) => tile.instanceId !== instanceId));
+      setWorkspaceTiles((previousTiles) => reflowWorkspaceTiles(
+        previousTiles.filter((tile) => tile.instanceId !== instanceId),
+        cols
+      ));
       setRemovingTileIds((previousIds) => {
         const nextIds = new Set(previousIds);
         nextIds.delete(instanceId);
@@ -509,12 +664,76 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
     }, 190);
 
     removeTimeoutsRef.current.set(instanceId, timeoutId);
-  }, []);
+  }, [cols]);
 
   useEffect(() => () => {
     removeTimeoutsRef.current.forEach((timeoutId) => window.clearTimeout(timeoutId));
     removeTimeoutsRef.current.clear();
+    if (saveLayoutTimeoutRef.current) {
+      window.clearTimeout(saveLayoutTimeoutRef.current);
+      saveLayoutTimeoutRef.current = null;
+    }
   }, []);
+
+  useEffect(() => {
+    if (!activeLayoutId || !activeLayout || !workspaceStarted || hydratedLayoutId !== activeLayoutId) return;
+    if (localStorage.getItem('userrole') === 'viewer') return;
+
+    const tiles = serializeWorkspaceTiles(workspaceTiles, cols);
+    const payloadKey = JSON.stringify({
+      id: activeLayoutId,
+      cols,
+      rows,
+      tiles,
+    });
+
+    if (payloadKey === lastSavedLayoutPayloadRef.current) return;
+
+    if (saveLayoutTimeoutRef.current) {
+      window.clearTimeout(saveLayoutTimeoutRef.current);
+    }
+
+    saveLayoutTimeoutRef.current = window.setTimeout(async () => {
+      const previousLayouts = liveLayouts;
+      const nextLayouts = {
+        layouts: liveLayouts.layouts.map((layout) => (
+          layout.id === activeLayoutId
+            ? {
+              ...layout,
+              cols,
+              rows,
+              tiles,
+              cameras: tiles.map((tile) => tile.camera),
+            }
+            : layout
+        )),
+      };
+
+      try {
+        lastSavedLayoutPayloadRef.current = payloadKey;
+        queryClient.setQueryData(['live-layouts'], nextLayouts);
+        const saved = await fetchJSON('/api/live-layouts', {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            ...getAuthHeaders(),
+          },
+          body: JSON.stringify(nextLayouts),
+          timeout: 10000,
+          retries: 1,
+          retryDelay: 1000,
+        });
+        const normalized = normalizeLiveLayouts(saved);
+        queryClient.setQueryData(['live-layouts'], normalized);
+      } catch (error) {
+        queryClient.setQueryData(['live-layouts'], previousLayouts);
+        lastSavedLayoutPayloadRef.current = '';
+        showStatusMessage(error.message || 'Failed to save layout', 'error', 8000);
+      } finally {
+        saveLayoutTimeoutRef.current = null;
+      }
+    }, 450);
+  }, [activeLayout, activeLayoutId, cols, hydratedLayoutId, liveLayouts, rows, workspaceStarted, workspaceTiles]);
 
   useEffect(() => {
     const handleAddCamera = (event) => {
@@ -535,6 +754,7 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
     const [optCols, optRows] = computeOptimalGrid(targetCells);
     setCols(optCols);
     setRows(optRows);
+    setWorkspaceTiles((previousTiles) => reflowWorkspaceTiles(previousTiles, optCols));
   }, [workspaceAutoGrid, workspaceTiles.length]);
 
   useEffect(() => {
@@ -544,6 +764,7 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
     const [optCols, optRows] = computeOptimalGrid(targetCells);
     setCols(optCols);
     setRows(optRows);
+    setWorkspaceTiles((previousTiles) => reflowWorkspaceTiles(previousTiles, optCols));
     setWorkspaceAutoGrid(true);
   }, [cols, rows, workspaceStarted, workspaceTiles.length]);
 
@@ -663,7 +884,7 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
         .slice(startIdx, endIdx)
         .map((tile) => {
           const stream = streamByName.get(tile.cameraId);
-          return stream ? { stream, tileInstanceId: tile.instanceId } : null;
+          return stream ? { stream, tile, tileInstanceId: tile.instanceId } : null;
         })
         .filter(Boolean);
     }
@@ -844,7 +1065,14 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
             <GridPicker
               cols={cols}
               rows={rows}
-              onSelect={(c, r) => { setCols(c); setRows(r); setCurrentPage(0); setAutoGrid(false); setWorkspaceAutoGrid(false); }}
+              onSelect={(c, r) => {
+                setCols(c);
+                setRows(r);
+                setWorkspaceTiles((previousTiles) => reflowWorkspaceTiles(previousTiles, c));
+                setCurrentPage(0);
+                setAutoGrid(false);
+                setWorkspaceAutoGrid(false);
+              }}
               maxCells={isWorkspaceMode ? workspaceTiles.length : orderedStreams.length}
             />
           </div>
@@ -1040,6 +1268,7 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
             <>
               {streamsToShow.map((stream, index) => {
                 const tileInstanceId = isWorkspaceMode ? workspaceStreamsToShow[index]?.tileInstanceId : '';
+                const workspaceTile = isWorkspaceMode ? workspaceStreamsToShow[index]?.tile : null;
                 const VideoCell = isWebRTC ? WebRTCVideoCell : useMSE ? MSEVideoCell : HLSVideoCell;
                 const initDelay = isWorkspaceMode
                   ? 0
@@ -1057,7 +1286,13 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
                   <div
                     key={tileInstanceId || stream.name}
                     className={`live-workspace-tile ${removingTileIds.has(tileInstanceId) ? 'is-removing' : ''}`}
-                    style={{ position: 'relative' }}
+                    style={{
+                      position: 'relative',
+                      ...(isWorkspaceMode && workspaceTile ? {
+                        gridColumn: `${Math.min(cols, workspaceTile.x + 1)} / span ${Math.min(cols, workspaceTile.w || 1)}`,
+                        gridRow: `${Math.min(rows, workspaceTile.y + 1)} / span ${Math.min(rows, workspaceTile.h || 1)}`,
+                      } : {}),
+                    }}
                     draggable={!isWorkspaceMode && reorderMode}
                     onDragStart={!isWorkspaceMode && reorderMode ? () => handleDragStart(globalIndex) : undefined}
                     onDragOver={!isWorkspaceMode && reorderMode ? (e) => handleDragOver(e, globalIndex) : undefined}

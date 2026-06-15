@@ -126,20 +126,55 @@ const normalizeLiveLayouts = (data = {}) => ({
   layouts: Array.isArray(data.layouts)
     ? data.layouts
       .filter((layout) => layout && layout.id && layout.name)
-      .map((layout) => ({
-        id: String(layout.id),
-        name: String(layout.name).trim(),
-        cameras: Array.from(new Set(
-          (Array.isArray(layout.cameras) ? layout.cameras : [])
-            .map((camera) => String(camera || '').trim())
-            .filter(Boolean)
-        )),
-      }))
+      .map((layout) => {
+        const legacyCameras = Array.isArray(layout.cameras) ? layout.cameras : [];
+        const sourceTiles = Array.isArray(layout.tiles)
+          ? layout.tiles
+          : legacyCameras.map((camera, index) => ({
+            id: `tile-${index + 1}`,
+            camera,
+            x: index,
+            y: 0,
+            w: 1,
+            h: 1,
+          }));
+        const tiles = sourceTiles
+          .map((tile, index) => {
+            const camera = String(tile?.camera || tile?.cameraName || '').trim();
+            if (!camera) return null;
+            return {
+              id: String(tile?.id || `tile-${index + 1}`).trim() || `tile-${index + 1}`,
+              camera,
+              x: Number.isFinite(Number(tile?.x)) ? Math.max(0, Math.floor(Number(tile.x))) : index,
+              y: Number.isFinite(Number(tile?.y)) ? Math.max(0, Math.floor(Number(tile.y))) : 0,
+              w: Number.isFinite(Number(tile?.w)) ? Math.max(1, Math.floor(Number(tile.w))) : 1,
+              h: Number.isFinite(Number(tile?.h)) ? Math.max(1, Math.floor(Number(tile.h))) : 1,
+            };
+          })
+          .filter(Boolean);
+
+        return {
+          id: String(layout.id),
+          name: String(layout.name).trim(),
+          cols: Number.isFinite(Number(layout.cols)) ? Math.max(1, Math.floor(Number(layout.cols))) : undefined,
+          rows: Number.isFinite(Number(layout.rows)) ? Math.max(1, Math.floor(Number(layout.rows))) : undefined,
+          tiles,
+          cameras: tiles.map((tile) => tile.camera),
+        };
+      })
       .filter((layout) => layout.name)
     : [],
 });
 
 const createLayoutId = () => `layout-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+const createLayoutTile = (camera, index = 0) => ({
+  id: `tile-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+  camera,
+  x: index,
+  y: 0,
+  w: 1,
+  h: 1,
+});
 
 const makeLiveHref = (params = {}) => {
   const search = new URLSearchParams();
@@ -247,6 +282,7 @@ export function Header({ version = VERSION }) {
     return {
       tag: params.get('tag') || '',
       stream: params.get('stream') || '',
+      layout: params.get('layout') || '',
     };
   }, [activeNav, locationSearch]);
 
@@ -668,6 +704,7 @@ export function Header({ version = VERSION }) {
         {
           id: createLayoutId(),
           name,
+          tiles: [],
           cameras: [],
         },
       ],
@@ -714,35 +751,40 @@ export function Header({ version = VERSION }) {
     const camera = String(cameraName || '').trim();
     if (!camera || !isAdmin) return;
 
-    let changed = false;
     const previous = liveLayouts;
     const next = {
       layouts: liveLayouts.layouts.map((layout) => {
-        if (layout.id !== layoutId || layout.cameras.includes(camera)) {
+        if (layout.id !== layoutId) {
           return layout;
         }
-        changed = true;
+        const tiles = Array.isArray(layout.tiles) ? layout.tiles : [];
+        const nextTiles = [...tiles, createLayoutTile(camera, tiles.length)];
         return {
           ...layout,
-          cameras: [...layout.cameras, camera],
+          tiles: nextTiles,
+          cameras: nextTiles.map((tile) => tile.camera),
         };
       }),
     };
 
-    if (changed) {
-      await saveLiveLayouts(next, previous);
-    }
+    await saveLiveLayouts(next, previous);
   }, [isAdmin, liveLayouts, saveLiveLayouts]);
 
-  const removeCameraFromLayout = useCallback(async (layoutId, cameraName) => {
+  const removeTileFromLayout = useCallback(async (layoutId, tileId) => {
     if (!isAdmin) return;
     const previous = liveLayouts;
     const next = {
-      layouts: liveLayouts.layouts.map((layout) => (
-        layout.id === layoutId
-          ? { ...layout, cameras: layout.cameras.filter((camera) => camera !== cameraName) }
-          : layout
-      )),
+      layouts: liveLayouts.layouts.map((layout) => {
+        if (layout.id !== layoutId) return layout;
+        const nextTiles = (Array.isArray(layout.tiles) ? layout.tiles : [])
+          .filter((tile) => tile.id !== tileId)
+          .map((tile, index) => ({ ...tile, x: index, y: 0 }));
+        return {
+          ...layout,
+          tiles: nextTiles,
+          cameras: nextTiles.map((tile) => tile.camera),
+        };
+      }),
     };
     await saveLiveLayouts(next, previous);
   }, [isAdmin, liveLayouts, saveLiveLayouts]);
@@ -932,23 +974,30 @@ export function Header({ version = VERSION }) {
                       />
                     </form>
                   ) : (
-                    <div className="sidebar-layout-title" title={layout.name}>
+                    <a
+                      href={makeLiveHref({ layout: layout.id })}
+                      className={`sidebar-layout-title no-underline ${activeNav === 'nav-live' && liveSelection.layout === layout.id ? 'is-active' : ''}`}
+                      title={layout.name}
+                      aria-current={activeNav === 'nav-live' && liveSelection.layout === layout.id ? 'page' : undefined}
+                      onClick={(event) => forceNavigation(makeLiveHref({ layout: layout.id }), event)}
+                    >
                       <TreeIcon type="area" />
                       <span className="sidebar-tree-label">{layout.name}</span>
-                      <span className="sidebar-tree-count">{layout.cameras.length}</span>
-                    </div>
+                      <span className="sidebar-tree-count">{layout.tiles.length}</span>
+                    </a>
                   )}
                   {renderLayoutMenu(layout)}
                 </div>
                 {expanded && (
                   <ul className="sidebar-layout-camera-tree">
-                    {layout.cameras.map((cameraName) => {
+                    {layout.tiles.map((tile, index) => {
+                      const cameraName = tile.camera;
                       const stream = streamByName.get(cameraName);
                       const statusKind = stream ? getStreamStatusKind(stream) : 'offline';
                       const cameraHref = makeLiveHref({ cols: 1, rows: 1, stream: cameraName });
                       const cameraActive = activeNav === 'nav-live' && liveSelection.stream === cameraName;
                       return (
-                        <li key={cameraName} className={`sidebar-layout-camera-node ${cameraActive ? 'is-active' : ''}`}>
+                        <li key={`${tile.id}-${index}`} className={`sidebar-layout-camera-node ${cameraActive ? 'is-active' : ''}`}>
                           <a
                             href={cameraHref}
                             className={`sidebar-camera-link sidebar-layout-camera-link ${cameraActive ? 'is-active' : ''}`}
@@ -965,7 +1014,7 @@ export function Header({ version = VERSION }) {
                               type="button"
                               className="sidebar-layout-camera-remove"
                               aria-label={`Remove ${cameraName} from ${layout.name}`}
-                              onClick={() => removeCameraFromLayout(layout.id, cameraName)}
+                              onClick={() => removeTileFromLayout(layout.id, tile.id)}
                             >
                               <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" aria-hidden="true">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4l8 8M12 4l-8 8" />
