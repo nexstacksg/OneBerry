@@ -280,9 +280,10 @@ export function UsersView() {
     if (e) e.preventDefault();
 
     console.log('Adding user:', formData.username);
+    const allowedTags = formData.allowed_tags?.trim();
     const userData = {
       ...formData,
-      allowed_tags: formData.allowed_tags?.trim() || null,
+      allowed_tags: allowedTags || (Number(formData.role) === 0 ? null : ''),
       allowed_login_cidrs: formData.allowed_login_cidrs?.trim() || null
     };
     addUserMutate(userData);
@@ -296,9 +297,10 @@ export function UsersView() {
     if (e) e.preventDefault();
 
     console.log('Editing user:', selectedUser.id, selectedUser.username);
+    const allowedTags = formData.allowed_tags?.trim();
     const userData = {
       ...formData,
-      allowed_tags: formData.allowed_tags?.trim() || null,
+      allowed_tags: allowedTags || (Number(formData.role) === 0 ? null : ''),
       allowed_login_cidrs: formData.allowed_login_cidrs?.trim() || null
     };
     editUserMutation.mutate({

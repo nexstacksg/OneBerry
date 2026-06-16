@@ -364,6 +364,24 @@ void test_allowed_login_cidrs_validation_and_storage(void) {
     TEST_ASSERT_FALSE(user.has_login_cidr_restriction);
 }
 
+void test_empty_allowed_tags_restricts_all_streams(void) {
+    int64_t uid = 0;
+    int rc = db_auth_create_user("nogroups", "password123", NULL, USER_ROLE_USER, true, &uid);
+    TEST_ASSERT_EQUAL_INT(0, rc);
+
+    rc = db_auth_set_allowed_tags(uid, "");
+    TEST_ASSERT_EQUAL_INT(0, rc);
+
+    user_t user;
+    rc = db_auth_get_user_by_id(uid, &user);
+    TEST_ASSERT_EQUAL_INT(0, rc);
+    TEST_ASSERT_TRUE(user.has_tag_restriction);
+    TEST_ASSERT_EQUAL_STRING("", user.allowed_tags);
+    TEST_ASSERT_FALSE(db_auth_stream_allowed_for_user(&user, "Group1"));
+    TEST_ASSERT_FALSE(db_auth_stream_allowed_for_user(&user, "building:HQ, Group1"));
+    TEST_ASSERT_FALSE(db_auth_stream_allowed_for_user(&user, ""));
+}
+
 void test_ip_allowed_for_user_matches_cidrs(void) {
     int64_t uid = 0;
     int rc = db_auth_create_user("cidrmatch", "password123", NULL, USER_ROLE_USER, true, &uid);
@@ -431,6 +449,7 @@ int main(void) {
     RUN_TEST(test_generate_and_use_api_key);
     RUN_TEST(test_totp_set_get_enable);
     RUN_TEST(test_allowed_login_cidrs_validation_and_storage);
+    RUN_TEST(test_empty_allowed_tags_restricts_all_streams);
     RUN_TEST(test_ip_allowed_for_user_matches_cidrs);
     RUN_TEST(test_ip_allowed_for_user_accepts_comma_separated_cidrs);
     RUN_TEST(test_ip_allowed_for_user_accepts_single_host_ip_entries);
@@ -439,4 +458,3 @@ int main(void) {
     unlink(TEST_DB_PATH);
     return result;
 }
-

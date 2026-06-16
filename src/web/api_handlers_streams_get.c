@@ -58,6 +58,50 @@ static bool is_live_warmup_request(const http_request_t *req) {
            (strcmp(value, "1") == 0 || strcasecmp(value, "true") == 0);
 }
 
+static bool get_streams_request_user(const http_request_t *req, http_response_t *res,
+                                     user_t *auth_user, bool *have_auth_user) {
+    if (!auth_user || !have_auth_user) {
+        http_response_set_json_error(res, 500, "Internal error");
+        return false;
+    }
+
+    memset(auth_user, 0, sizeof(*auth_user));
+    *have_auth_user = false;
+
+    if (!g_config.web_auth_enabled) {
+        return true;
+    }
+
+    if (g_config.demo_mode) {
+        if (!httpd_check_viewer_access(req, auth_user)) {
+            log_error("Authentication failed for streams request");
+            http_response_set_json_error(res, 401, "Unauthorized");
+            return false;
+        }
+    } else if (!httpd_get_authenticated_user(req, auth_user)) {
+        log_error("Authentication failed for streams request");
+        http_response_set_json_error(res, 401, "Unauthorized");
+        return false;
+    }
+
+    *have_auth_user = true;
+    return true;
+}
+
+static bool stream_config_allowed_for_user(const stream_config_t *config,
+                                           const user_t *auth_user,
+                                           bool have_auth_user) {
+    if (!config) {
+        return false;
+    }
+
+    if (have_auth_user && auth_user && auth_user->has_tag_restriction) {
+        return db_auth_stream_allowed_for_user(auth_user, config->tags);
+    }
+
+    return true;
+}
+
 static void get_stream_api_credentials(const stream_config_t *config,
                                        char *safe_url, size_t safe_url_size,
                                        char *safe_secondary_url, size_t safe_secondary_url_size,
@@ -122,31 +166,11 @@ void handle_get_streams(const http_request_t *req, http_response_t *res) {
 
 	// Capture the authenticated user so we can apply tag-based RBAC filtering
 	user_t auth_user;
-	memset(&auth_user, 0, sizeof(auth_user));
 	bool have_auth_user = false;
 
-	// When web authentication is enabled, require a valid authenticated user
-	// for access to the streams list. In demo mode, unauthenticated users
-	// get viewer access.
-	if (g_config.web_auth_enabled) {
-		// In demo mode, allow unauthenticated viewer access
-		if (g_config.demo_mode) {
-			if (!httpd_check_viewer_access(req, &auth_user)) {
-				log_error("Authentication failed for GET /api/streams request");
-				http_response_set_json_error(res, 401, "Unauthorized");
-				return;
-			}
-			have_auth_user = true;
-		} else {
-			// Normal mode: require authentication
-			if (!httpd_get_authenticated_user(req, &auth_user)) {
-				log_error("Authentication failed for GET /api/streams request");
-				http_response_set_json_error(res, 401, "Unauthorized");
-				return;
-			}
-			have_auth_user = true;
-		}
-	}
+    if (!get_streams_request_user(req, res, &auth_user, &have_auth_user)) {
+        return;
+    }
 
     // Get all stream configurations from database (heap-allocated)
     stream_config_t *db_streams = calloc(g_config.max_streams, sizeof(stream_config_t));
@@ -183,12 +207,10 @@ void handle_get_streams(const http_request_t *req, http_response_t *res) {
     // Add each stream to the array, applying tag-based RBAC if user has a restriction
     for (int i = 0; i < count; i++) {
         // Skip streams that don't match the user's allowed_tags restriction
-        if (have_auth_user && auth_user.has_tag_restriction) {
-            if (!db_auth_stream_allowed_for_user(&auth_user, db_streams[i].tags)) {
-                log_debug("Stream '%s' hidden from user '%s' (tag restriction)",
-                          db_streams[i].name, auth_user.username);
-                continue;
-            }
+        if (!stream_config_allowed_for_user(&db_streams[i], &auth_user, have_auth_user)) {
+            log_debug("Stream '%s' hidden from user '%s' (tag restriction)",
+                      db_streams[i].name, auth_user.username);
+            continue;
         }
 
         cJSON *stream_obj = cJSON_CreateObject();
@@ -352,6 +374,18 @@ void handle_get_stream(const http_request_t *req, http_response_t *res) {
         return;
     }
 
+    user_t auth_user;
+    bool have_auth_user = false;
+    if (!get_streams_request_user(req, res, &auth_user, &have_auth_user)) {
+        return;
+    }
+    if (!stream_config_allowed_for_user(&config, &auth_user, have_auth_user)) {
+        log_debug("Stream '%s' hidden from user '%s' (tag restriction)",
+                  config.name, auth_user.username);
+        http_response_set_json_error(res, 404, "Stream not found");
+        return;
+    }
+
     // Create JSON object
     cJSON *stream_obj = cJSON_CreateObject();
     if (!stream_obj) {
@@ -508,6 +542,18 @@ void handle_get_stream_full(const http_request_t *req, http_response_t *res) {
     if (get_stream_config(stream, &config) != 0) {
         log_error("Failed to get stream configuration for: %s", stream_id);
         http_response_set_json_error(res, 500, "Failed to get stream configuration");
+        return;
+    }
+
+    user_t auth_user;
+    bool have_auth_user = false;
+    if (!get_streams_request_user(req, res, &auth_user, &have_auth_user)) {
+        return;
+    }
+    if (!stream_config_allowed_for_user(&config, &auth_user, have_auth_user)) {
+        log_debug("Stream '%s' hidden from user '%s' (tag restriction)",
+                  config.name, auth_user.username);
+        http_response_set_json_error(res, 404, "Stream not found");
         return;
     }
 

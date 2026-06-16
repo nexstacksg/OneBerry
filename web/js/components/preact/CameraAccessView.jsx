@@ -29,6 +29,10 @@ const addTag = (value, tag) => {
 };
 
 const removeTag = (value, tag) => joinTagList(parseTagList(value).filter((item) => item !== tag));
+const serializeAllowedTags = (user, tags) => {
+  const value = String(tags || '').trim();
+  return value || (Number(user?.role) === 0 ? null : '');
+};
 
 const normalizeGroupName = (value) => value.trim().replace(/\s+/g, ' ');
 const getGroupKey = (mode, tag) => `${mode}:${tag}`;
@@ -648,7 +652,7 @@ export function CameraAccessView() {
                 'Content-Type': 'application/json',
                 ...getAuthHeaders(),
               },
-              body: JSON.stringify({ allowed_tags: nextTags || null }),
+              body: JSON.stringify({ allowed_tags: serializeAllowedTags(user, nextTags) }),
               timeout: 15000,
               retries: 1,
               retryDelay: 500,
@@ -692,7 +696,7 @@ export function CameraAccessView() {
               'Content-Type': 'application/json',
               ...getAuthHeaders(),
             },
-            body: JSON.stringify({ allowed_tags: nextTags || null }),
+            body: JSON.stringify({ allowed_tags: serializeAllowedTags(user, nextTags) }),
             timeout: 15000,
             retries: 1,
             retryDelay: 500,
@@ -797,17 +801,20 @@ export function CameraAccessView() {
         await Promise.all(
           users
             .filter((user) => hasTag(user.allowed_tags, tag))
-            .map((user) => fetchJSON(`/api/auth/users/${user.id}`, {
-              method: 'PUT',
-              headers: {
-                'Content-Type': 'application/json',
-                ...getAuthHeaders(),
-              },
-              body: JSON.stringify({ allowed_tags: removeTag(user.allowed_tags || '', tag) || null }),
-              timeout: 15000,
-              retries: 1,
-              retryDelay: 500,
-            }))
+            .map((user) => {
+              const nextTags = removeTag(user.allowed_tags || '', tag);
+              return fetchJSON(`/api/auth/users/${user.id}`, {
+                method: 'PUT',
+                headers: {
+                  'Content-Type': 'application/json',
+                  ...getAuthHeaders(),
+                },
+                body: JSON.stringify({ allowed_tags: serializeAllowedTags(user, nextTags) }),
+                timeout: 15000,
+                retries: 1,
+                retryDelay: 500,
+              });
+            })
         );
         showStatusMessage(t('cameraAccess.userGroupDeleted'), 'success', 4000);
       }
