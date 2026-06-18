@@ -1889,7 +1889,7 @@ export function WebRTCVideoCell({
           style={{
             width: '100%',
             height: '100%',
-            objectFit: isFullscreenCell ? 'contain' : 'cover',
+            objectFit: 'cover',
             position: 'absolute',
             inset: isFullscreenCell ? 0 : undefined,
             display: isFullscreenCell && fullscreenPlayback ? 'none' : undefined
@@ -1945,7 +1945,7 @@ export function WebRTCVideoCell({
             style={{
               width: '100%',
               height: '100%',
-              objectFit: 'contain',
+              objectFit: 'cover',
               position: 'absolute',
               inset: 0,
               zIndex: 1,
@@ -1962,7 +1962,7 @@ export function WebRTCVideoCell({
             style={{
               width: '100%',
               height: '100%',
-              objectFit: 'contain',
+              objectFit: 'cover',
               position: 'absolute',
               inset: 0,
               zIndex: 2,
