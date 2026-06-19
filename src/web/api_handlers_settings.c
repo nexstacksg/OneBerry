@@ -67,7 +67,7 @@ static bool is_safe_storage_path(const char *path) {
 #define LIVE_LAYOUT_ID_MAX_LEN 96
 #define LIVE_LAYOUT_CAMERA_MAX_LEN 255
 #define LIVE_LAYOUT_TILE_MAX_LEN 96
-#define LIVE_LAYOUT_GRID_MAX_SIDE 9
+#define LIVE_LAYOUT_GRID_MAX_SIDE 64
 
 static void trim_location_value(const char *src, char *dst, size_t dst_size) {
     if (!dst || dst_size == 0) return;

@@ -110,6 +110,10 @@ const getStoredSidebarState = () => {
 };
 
 const LAYOUT_TREE_STORAGE_KEY = 'oneberry.dashboardLayouts';
+const WORKSPACE_GRID_COLS = 48;
+const WORKSPACE_GRID_ROWS = 27;
+const DEFAULT_WORKSPACE_TILE_W = 24;
+const DEFAULT_WORKSPACE_TILE_H = 13;
 
 const getStoredExpandedTree = (storageKey) => {
   try {
@@ -170,11 +174,34 @@ const createLayoutId = () => `layout-${Date.now()}-${Math.random().toString(36).
 const createLayoutTile = (camera, index = 0) => ({
   id: `tile-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
   camera,
-  x: index,
-  y: 0,
-  w: 1,
-  h: 1,
+  x: (index * DEFAULT_WORKSPACE_TILE_W) % WORKSPACE_GRID_COLS,
+  y: Math.floor((index * DEFAULT_WORKSPACE_TILE_W) / WORKSPACE_GRID_COLS) * DEFAULT_WORKSPACE_TILE_H,
+  w: DEFAULT_WORKSPACE_TILE_W,
+  h: DEFAULT_WORKSPACE_TILE_H,
 });
+
+const buildResponsiveLayoutTiles = (tiles) => {
+  const count = tiles.length;
+  if (count === 0) return [];
+
+  const layoutCols = Math.ceil(Math.sqrt(count));
+  const layoutRows = Math.ceil(count / layoutCols);
+  return tiles.map((tile, index) => {
+    const col = index % layoutCols;
+    const row = Math.floor(index / layoutCols);
+    const x = Math.floor((col * WORKSPACE_GRID_COLS) / layoutCols);
+    const y = Math.floor((row * WORKSPACE_GRID_ROWS) / layoutRows);
+    const nextX = Math.floor(((col + 1) * WORKSPACE_GRID_COLS) / layoutCols);
+    const nextY = Math.floor(((row + 1) * WORKSPACE_GRID_ROWS) / layoutRows);
+    return {
+      ...tile,
+      x,
+      y,
+      w: Math.max(1, nextX - x),
+      h: Math.max(1, nextY - y),
+    };
+  });
+};
 
 const makeLiveHref = (params = {}) => {
   const search = new URLSearchParams();
@@ -704,6 +731,8 @@ export function Header({ version = VERSION }) {
         {
           id: createLayoutId(),
           name,
+          cols: WORKSPACE_GRID_COLS,
+          rows: WORKSPACE_GRID_ROWS,
           tiles: [],
           cameras: [],
         },
@@ -758,9 +787,11 @@ export function Header({ version = VERSION }) {
           return layout;
         }
         const tiles = Array.isArray(layout.tiles) ? layout.tiles : [];
-        const nextTiles = [...tiles, createLayoutTile(camera, tiles.length)];
+        const nextTiles = buildResponsiveLayoutTiles([...tiles, createLayoutTile(camera, tiles.length)]);
         return {
           ...layout,
+          cols: WORKSPACE_GRID_COLS,
+          rows: WORKSPACE_GRID_ROWS,
           tiles: nextTiles,
           cameras: nextTiles.map((tile) => tile.camera),
         };
@@ -776,11 +807,13 @@ export function Header({ version = VERSION }) {
     const next = {
       layouts: liveLayouts.layouts.map((layout) => {
         if (layout.id !== layoutId) return layout;
-        const nextTiles = (Array.isArray(layout.tiles) ? layout.tiles : [])
-          .filter((tile) => tile.id !== tileId)
-          .map((tile, index) => ({ ...tile, x: index, y: 0 }));
+        const nextTiles = buildResponsiveLayoutTiles(
+          (Array.isArray(layout.tiles) ? layout.tiles : []).filter((tile) => tile.id !== tileId)
+        );
         return {
           ...layout,
+          cols: WORKSPACE_GRID_COLS,
+          rows: WORKSPACE_GRID_ROWS,
           tiles: nextTiles,
           cameras: nextTiles.map((tile) => tile.camera),
         };
@@ -803,7 +836,7 @@ export function Header({ version = VERSION }) {
 
     event.preventDefault();
     window.dispatchEvent(new CustomEvent('oneberry:add-live-camera', {
-      detail: { cameraName },
+      detail: { cameraName, autoFit: true },
     }));
   }, [activeNav]);
 
