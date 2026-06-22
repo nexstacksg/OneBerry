@@ -801,27 +801,6 @@ export function Header({ version = VERSION }) {
     await saveLiveLayouts(next, previous);
   }, [isAdmin, liveLayouts, saveLiveLayouts]);
 
-  const removeTileFromLayout = useCallback(async (layoutId, tileId) => {
-    if (!isAdmin) return;
-    const previous = liveLayouts;
-    const next = {
-      layouts: liveLayouts.layouts.map((layout) => {
-        if (layout.id !== layoutId) return layout;
-        const nextTiles = buildResponsiveLayoutTiles(
-          (Array.isArray(layout.tiles) ? layout.tiles : []).filter((tile) => tile.id !== tileId)
-        );
-        return {
-          ...layout,
-          cols: WORKSPACE_GRID_COLS,
-          rows: WORKSPACE_GRID_ROWS,
-          tiles: nextTiles,
-          cameras: nextTiles.map((tile) => tile.camera),
-        };
-      }),
-    };
-    await saveLiveLayouts(next, previous);
-  }, [isAdmin, liveLayouts, saveLiveLayouts]);
-
   const handleCameraDragStart = useCallback((event, cameraName) => {
     event.dataTransfer.effectAllowed = 'copy';
     event.dataTransfer.setData('text/plain', cameraName);
@@ -1042,18 +1021,6 @@ export function Header({ version = VERSION }) {
                             <TreeIcon type="camera" />
                             <span className="sidebar-camera-name">{cameraName}</span>
                           </a>
-                          {isAdmin && (
-                            <button
-                              type="button"
-                              className="sidebar-layout-camera-remove"
-                              aria-label={`Remove ${cameraName} from ${layout.name}`}
-                              onClick={() => removeTileFromLayout(layout.id, tile.id)}
-                            >
-                              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" aria-hidden="true">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4l8 8M12 4l-8 8" />
-                              </svg>
-                            </button>
-                          )}
                         </li>
                       );
                     })}

@@ -817,6 +817,17 @@
     box-shadow: 0 10px 26px -18px rgba(0, 0, 0, 0.95);
     backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(0.35rem);
+    transition: opacity 160ms ease, transform 160ms ease;
+}
+
+.video-cell:hover .stream-controls,
+.video-cell:focus-within .stream-controls {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateY(0);
 }
 
 .video-cell .stream-controls button {
@@ -843,6 +854,9 @@
 
 .video-cell .stream-controls.stream-controls-fullscreen {
     align-items: center;
+    opacity: 1;
+    pointer-events: auto;
+    transform: none;
     flex-wrap: nowrap;
     box-sizing: border-box;
     min-width: 0;
@@ -1012,6 +1026,12 @@
 
     .video-cell .stream-controls {
         padding: 0.5rem;
+    }
+
+    .video-container.is-workspace-grid .video-cell:not(:hover):not(:focus-within) .stream-controls {
+        opacity: 0;
+        pointer-events: none;
+        transform: translateY(0.35rem);
     }
 
     .video-cell .stream-controls button {

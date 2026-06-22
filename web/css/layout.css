@@ -618,30 +618,6 @@ body > .container {
     margin-left: 0;
 }
 
-.sidebar-layout-camera-remove {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 1.45rem;
-    height: 1.45rem;
-    border: 0;
-    border-radius: 0.35rem;
-    background: transparent;
-    color: hsl(var(--muted-foreground));
-    cursor: pointer;
-    flex: 0 0 auto;
-}
-
-.sidebar-layout-camera-remove:hover {
-    background: hsl(var(--danger) / 0.12);
-    color: hsl(var(--danger));
-}
-
-.sidebar-layout-camera-remove svg {
-    width: 0.8rem;
-    height: 0.8rem;
-}
-
 .sidebar-building-empty {
     padding: 0.5rem 0.625rem;
     color: hsl(var(--muted-foreground));
