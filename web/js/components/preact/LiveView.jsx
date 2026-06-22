@@ -161,6 +161,79 @@ function findOpenWorkspaceSlot(workspaceTiles, width, height, cols, rows) {
   return null;
 }
 
+function buildWorkspaceOccupancyPrefix(workspaceTiles, cols, rows) {
+  const safeCols = Math.max(1, cols || 1);
+  const safeRows = Math.max(1, rows || 1);
+  const occupied = Array.from({ length: safeRows }, () => Array(safeCols).fill(0));
+
+  workspaceTiles.forEach((tile) => {
+    const bounded = normalizeWorkspaceBounds(tile, safeCols, safeRows);
+    for (let y = bounded.y; y < bounded.y + bounded.h; y += 1) {
+      for (let x = bounded.x; x < bounded.x + bounded.w; x += 1) {
+        occupied[y][x] = 1;
+      }
+    }
+  });
+
+  const prefix = Array.from({ length: safeRows + 1 }, () => Array(safeCols + 1).fill(0));
+  for (let y = 0; y < safeRows; y += 1) {
+    for (let x = 0; x < safeCols; x += 1) {
+      prefix[y + 1][x + 1] = occupied[y][x] + prefix[y][x + 1] + prefix[y + 1][x] - prefix[y][x];
+    }
+  }
+  return prefix;
+}
+
+function isWorkspaceRectEmpty(prefix, x, y, w, h) {
+  const x2 = x + w;
+  const y2 = y + h;
+  return (prefix[y2][x2] - prefix[y][x2] - prefix[y2][x] + prefix[y][x]) === 0;
+}
+
+function findBestOpenWorkspaceArea(workspaceTiles, cols, rows, preferredPoint = null) {
+  const safeCols = Math.max(1, cols || 1);
+  const safeRows = Math.max(1, rows || 1);
+  const prefix = buildWorkspaceOccupancyPrefix(workspaceTiles, safeCols, safeRows);
+  const preferred = preferredPoint
+    ? {
+      x: Math.max(0, Math.min(safeCols - 1, Math.floor(Number(preferredPoint.x) || 0))),
+      y: Math.max(0, Math.min(safeRows - 1, Math.floor(Number(preferredPoint.y) || 0))),
+    }
+    : null;
+  const mustContainPreferred = preferred && isWorkspaceRectEmpty(prefix, preferred.x, preferred.y, 1, 1);
+
+  let best = null;
+  for (let y = 0; y < safeRows; y += 1) {
+    for (let x = 0; x < safeCols; x += 1) {
+      for (let h = 1; y + h <= safeRows; h += 1) {
+        for (let w = 1; x + w <= safeCols; w += 1) {
+          if (mustContainPreferred) {
+            const containsPreferred =
+              preferred.x >= x && preferred.x < x + w &&
+              preferred.y >= y && preferred.y < y + h;
+            if (!containsPreferred) continue;
+          }
+          if (!isWorkspaceRectEmpty(prefix, x, y, w, h)) continue;
+
+          const area = w * h;
+          const distance = preferred
+            ? Math.abs(x + (w / 2) - preferred.x) + Math.abs(y + (h / 2) - preferred.y)
+            : x + y;
+          if (
+            !best ||
+            area > best.area ||
+            (area === best.area && distance < best.distance)
+          ) {
+            best = { x, y, w, h, area, distance };
+          }
+        }
+      }
+    }
+  }
+
+  return best ? { x: best.x, y: best.y, w: best.w, h: best.h } : null;
+}
+
 function normalizeWorkspaceBounds(tile, cols, rows) {
   const safeCols = Math.max(1, cols || 1);
   const safeRows = Math.max(1, rows || 1);
@@ -820,28 +893,33 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
     setWorkspaceStarted(true);
     setWorkspaceTiles((previousTiles) => {
       const candidateTile = createWorkspaceTile(cameraId);
-      if (!placement && (workspaceAutoGrid || options.autoFit)) {
+      if (!placement && workspaceAutoGrid && options.autoFit !== false) {
         return buildResponsiveWorkspaceLayout([...previousTiles, candidateTile]);
       }
 
-      const index = previousTiles.length;
-      const openSlot = findOpenWorkspaceSlot(
+      const openArea = findBestOpenWorkspaceArea(
         previousTiles,
-        DEFAULT_WORKSPACE_TILE_W,
-        DEFAULT_WORKSPACE_TILE_H,
+        workspaceGridCols,
+        workspaceGridRows,
+        placement
+      );
+      const openSlot = openArea || findOpenWorkspaceSlot(
+        previousTiles,
+        Math.min(DEFAULT_WORKSPACE_TILE_W, workspaceGridCols),
+        Math.min(DEFAULT_WORKSPACE_TILE_H, workspaceGridRows),
         workspaceGridCols,
         workspaceGridRows
       );
-      const point = placement || {
-        x: openSlot?.x ?? ((index * DEFAULT_WORKSPACE_TILE_W) % Math.max(1, workspaceGridCols)),
+      const point = openArea || placement || {
+        x: openSlot?.x ?? 0,
         y: openSlot?.y ?? 0,
       };
       const nextTile = normalizeWorkspaceBounds({
         ...candidateTile,
         x: point.x,
         y: point.y,
-        w: DEFAULT_WORKSPACE_TILE_W,
-        h: DEFAULT_WORKSPACE_TILE_H,
+        w: openArea?.w ?? DEFAULT_WORKSPACE_TILE_W,
+        h: openArea?.h ?? DEFAULT_WORKSPACE_TILE_H,
       }, workspaceGridCols, workspaceGridRows);
       const collision = findTileCollision(nextTile, previousTiles);
       if (collision) {
@@ -852,8 +930,8 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
         const fallback = normalizeWorkspaceBounds(createWorkspaceTile(cameraId, {
           x: openSlot.x,
           y: openSlot.y,
-          w: DEFAULT_WORKSPACE_TILE_W,
-          h: DEFAULT_WORKSPACE_TILE_H,
+          w: openSlot.w ?? DEFAULT_WORKSPACE_TILE_W,
+          h: openSlot.h ?? DEFAULT_WORKSPACE_TILE_H,
         }), workspaceGridCols, workspaceGridRows);
         return [...previousTiles, fallback];
       }
@@ -862,7 +940,7 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
     });
     if (placement) {
       setWorkspaceAutoGrid(false);
-    } else if (options.autoFit) {
+    } else if (workspaceAutoGrid && options.autoFit !== false) {
       setWorkspaceAutoGrid(true);
     }
     setCurrentPage(0);

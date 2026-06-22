@@ -106,7 +106,8 @@ static void get_stream_api_credentials(const stream_config_t *config,
                                        char *safe_url, size_t safe_url_size,
                                        char *safe_secondary_url, size_t safe_secondary_url_size,
                                        char *onvif_username, size_t onvif_username_size,
-                                       char *onvif_password, size_t onvif_password_size) {
+                                       char *onvif_password, size_t onvif_password_size,
+                                       bool include_url_credentials) {
     char extracted_username[128] = {0};
     char extracted_password[128] = {0};
     bool use_separate_credentials;
@@ -146,15 +147,34 @@ static void get_stream_api_credentials(const stream_config_t *config,
         }
     }
 
-    if (url_strip_credentials(config->url, safe_url, safe_url_size) != 0) {
+    if (include_url_credentials && onvif_username[0] != '\0') {
+        if (url_apply_credentials(config->url,
+                                  onvif_username,
+                                  onvif_password[0] != '\0' ? onvif_password : NULL,
+                                  safe_url,
+                                  safe_url_size) != 0) {
+            strncpy(safe_url, config->url, safe_url_size - 1);
+            safe_url[safe_url_size - 1] = '\0';
+        }
+    } else if (url_strip_credentials(config->url, safe_url, safe_url_size) != 0) {
         strncpy(safe_url, config->url, safe_url_size - 1);
         safe_url[safe_url_size - 1] = '\0';
     }
 
-    if (config->secondary_url[0] != '\0' &&
-        url_strip_credentials(config->secondary_url, safe_secondary_url, safe_secondary_url_size) != 0) {
-        strncpy(safe_secondary_url, config->secondary_url, safe_secondary_url_size - 1);
-        safe_secondary_url[safe_secondary_url_size - 1] = '\0';
+    if (config->secondary_url[0] != '\0') {
+        if (include_url_credentials && onvif_username[0] != '\0') {
+            if (url_apply_credentials(config->secondary_url,
+                                      onvif_username,
+                                      onvif_password[0] != '\0' ? onvif_password : NULL,
+                                      safe_secondary_url,
+                                      safe_secondary_url_size) != 0) {
+                strncpy(safe_secondary_url, config->secondary_url, safe_secondary_url_size - 1);
+                safe_secondary_url[safe_secondary_url_size - 1] = '\0';
+            }
+        } else if (url_strip_credentials(config->secondary_url, safe_secondary_url, safe_secondary_url_size) != 0) {
+            strncpy(safe_secondary_url, config->secondary_url, safe_secondary_url_size - 1);
+            safe_secondary_url[safe_secondary_url_size - 1] = '\0';
+        }
     }
 }
 
@@ -225,10 +245,13 @@ void handle_get_streams(const http_request_t *req, http_response_t *res) {
         char safe_secondary_url[MAX_URL_LENGTH];
         char api_onvif_username[sizeof(db_streams[i].onvif_username)];
         char api_onvif_password[sizeof(db_streams[i].onvif_password)];
+        bool include_url_credentials = !g_config.demo_mode &&
+            (!have_auth_user || auth_user.role != USER_ROLE_VIEWER);
         get_stream_api_credentials(&db_streams[i], safe_url, sizeof(safe_url),
                                    safe_secondary_url, sizeof(safe_secondary_url),
                                    api_onvif_username, sizeof(api_onvif_username),
-                                   api_onvif_password, sizeof(api_onvif_password));
+                                   api_onvif_password, sizeof(api_onvif_password),
+                                   include_url_credentials);
 
         // Add stream properties
         cJSON_AddStringToObject(stream_obj, "name", db_streams[i].name);
@@ -398,10 +421,13 @@ void handle_get_stream(const http_request_t *req, http_response_t *res) {
     char safe_secondary_url[MAX_URL_LENGTH];
     char api_onvif_username[sizeof(config.onvif_username)];
     char api_onvif_password[sizeof(config.onvif_password)];
+    bool include_url_credentials = !g_config.demo_mode &&
+        (!have_auth_user || auth_user.role != USER_ROLE_VIEWER);
     get_stream_api_credentials(&config, safe_url, sizeof(safe_url),
                                safe_secondary_url, sizeof(safe_secondary_url),
                                api_onvif_username, sizeof(api_onvif_username),
-                               api_onvif_password, sizeof(api_onvif_password));
+                               api_onvif_password, sizeof(api_onvif_password),
+                               include_url_credentials);
 
     // Add stream properties
     cJSON_AddStringToObject(stream_obj, "name", config.name);
@@ -569,10 +595,13 @@ void handle_get_stream_full(const http_request_t *req, http_response_t *res) {
     char safe_secondary_url_full[MAX_URL_LENGTH];
     char api_onvif_username_full[sizeof(config.onvif_username)];
     char api_onvif_password_full[sizeof(config.onvif_password)];
+    bool include_url_credentials = !g_config.demo_mode &&
+        (!have_auth_user || auth_user.role != USER_ROLE_VIEWER);
     get_stream_api_credentials(&config, safe_url_full, sizeof(safe_url_full),
                                safe_secondary_url_full, sizeof(safe_secondary_url_full),
                                api_onvif_username_full, sizeof(api_onvif_username_full),
-                               api_onvif_password_full, sizeof(api_onvif_password_full));
+                               api_onvif_password_full, sizeof(api_onvif_password_full),
+                               include_url_credentials);
 
     cJSON_AddStringToObject(stream_obj, "name", config.name);
     cJSON_AddStringToObject(stream_obj, "url", safe_url_full);

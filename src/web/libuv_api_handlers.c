@@ -26,6 +26,7 @@
 #include "web/api_handlers_recordings_batch_download.h"
 #include "web/api_handlers_timeline.h"
 #include "web/api_handlers_onvif.h"
+#include "web/api_handlers_discovery.h"
 #include "web/api_handlers_users.h"
 #include "web/api_handlers_totp.h"
 #include "web/api_handlers_ice_servers.h"
@@ -180,9 +181,14 @@ int register_all_libuv_handlers(http_server_handle_t server) {
     http_server_register_handler(server, "/api/onvif/discovery/status", "GET", handle_get_onvif_discovery_status);
     http_server_register_handler(server, "/api/onvif/devices", "GET", handle_get_discovered_onvif_devices);
     http_server_register_handler(server, "/api/onvif/discovery/discover", "POST", handle_post_discover_onvif_devices);
+    http_server_register_handler(server, "/api/onvif/discover", "POST", handle_post_discover_onvif_devices);
     http_server_register_handler(server, "/api/onvif/device/profiles", "GET", handle_get_onvif_device_profiles);
     http_server_register_handler(server, "/api/onvif/device/add", "POST", handle_post_add_onvif_device_as_stream);
     http_server_register_handler(server, "/api/onvif/device/test", "POST", handle_post_test_onvif_connection);
+
+    // Universal camera discovery API
+    http_server_register_handler(server, "/api/discovery/cameras", "POST", handle_post_discover_cameras);
+    http_server_register_handler(server, "/api/discovery/rtsp/validate", "POST", handle_post_validate_rtsp_device);
 
     // Recordings API (backend-agnostic handlers)
     // Note: More specific routes must come before wildcard routes
