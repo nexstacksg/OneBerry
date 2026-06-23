@@ -11,6 +11,13 @@
 void handle_post_discover_cameras(const http_request_t *req, http_response_t *res);
 
 /**
+ * @brief Get the current universal camera discovery progress.
+ *
+ * GET /api/discovery/cameras/status
+ */
+void handle_get_discover_cameras_status(const http_request_t *req, http_response_t *res);
+
+/**
  * @brief Validate common RTSP stream paths for one discovered host.
  *
  * POST /api/discovery/rtsp/validate

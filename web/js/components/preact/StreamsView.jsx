@@ -995,19 +995,26 @@ export function StreamsView() {
     setOnvifFps('');
     setIsEditing(false);
     setIsCloning(false);
+    let discoveryNetwork = 'auto';
     // Fetch the configured default network from settings
     try {
       const settings = await fetchJSON('/api/settings', { timeout: 5000 });
       if (settings && settings.onvif_discovery_network) {
-        setOnvifNetworkOverride(settings.onvif_discovery_network);
+        discoveryNetwork = settings.onvif_discovery_network;
       } else {
-        setOnvifNetworkOverride('auto');
+        discoveryNetwork = 'auto';
       }
     } catch (e) {
       console.warn('Could not fetch ONVIF discovery network setting, using auto', e);
-      setOnvifNetworkOverride('auto');
+      discoveryNetwork = 'auto';
     }
+    setOnvifNetworkOverride(discoveryNetwork);
     setOnvifModalVisible(true);
+    onvifDiscoveryMutation.mutate({
+      network: discoveryNetwork,
+      include_onvif: true,
+      include_rtsp: true
+    });
   };
 
   // Handle form input change
@@ -1097,18 +1104,21 @@ export function StreamsView() {
   const onvifDiscoveryMutation = usePostMutation(
     '/api/discovery/cameras',
     {
-      timeout: 120000,
+      timeout: 15000,
       retries: 0
     },
     {
       onMutate: () => {
         setIsDiscovering(true);
+        setDiscoveredDevices([]);
         setSelectedDevice(null);
+        setSelectedProfile(null);
         setDeviceProfiles([]);
+        setShowCustomNameInput(false);
       },
       onSuccess: (data) => {
         setDiscoveredDevices(data.devices || []);
-        setIsDiscovering(false);
+        setIsDiscovering(data.running === true);
       },
       onError: (error) => {
         showStatusMessage(t('streams.errorDiscoveringOnvifDevices', { message: error.message }), 'error', 5000);
@@ -1116,6 +1126,45 @@ export function StreamsView() {
       }
     }
   );
+
+  useEffect(() => {
+    if (!onvifModalVisible || !isDiscovering) {
+      return undefined;
+    }
+
+    let cancelled = false;
+    const pollDiscoveryStatus = async () => {
+      try {
+        const data = await fetchJSON('/api/discovery/cameras/status', {
+          timeout: 5000,
+          retries: 0
+        });
+        if (cancelled) {
+          return;
+        }
+        setDiscoveredDevices(data.devices || []);
+        if (data.error) {
+          showStatusMessage(t('streams.errorDiscoveringOnvifDevices', { message: data.error }), 'error', 5000);
+          setIsDiscovering(false);
+          return;
+        }
+        if (!data.running || data.completed) {
+          setIsDiscovering(false);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          console.warn('Unable to poll camera discovery status:', error);
+        }
+      }
+    };
+
+    pollDiscoveryStatus();
+    const intervalId = window.setInterval(pollDiscoveryStatus, 800);
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [onvifModalVisible, isDiscovering, t]);
 
   const validateRtspDeviceMutation = usePostMutation(
     '/api/discovery/rtsp/validate',
@@ -1358,15 +1407,6 @@ export function StreamsView() {
       onError: () => {
         setIsAddingStream(false);
       },
-    });
-  };
-
-  // Start ONVIF discovery
-  const startOnvifDiscovery = () => {
-    onvifDiscoveryMutation.mutate({
-      network: onvifNetworkOverride || 'auto',
-      include_onvif: true,
-      include_rtsp: true
     });
   };
 
@@ -1992,7 +2032,7 @@ export function StreamsView() {
 
       {onvifModalVisible && (
         <div id="onvif-modal" className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 transition-opacity duration-300 p-4">
-          <div className="bg-card text-card-foreground rounded-lg shadow-xl w-full max-w-6xl max-h-[92vh] overflow-hidden flex flex-col">
+          <div className="bg-card text-card-foreground rounded-lg shadow-xl w-[min(96vw,1440px)] max-h-[94vh] overflow-hidden flex flex-col">
             <div className="flex items-start justify-between gap-4 p-5 border-b border-border">
               <div>
                 <h3 className="text-lg font-semibold">{t('streams.cameraDiscovery')}</h3>
@@ -2001,7 +2041,10 @@ export function StreamsView() {
               <button
                 type="button"
                 className="text-2xl leading-none text-muted-foreground hover:text-foreground"
-                onClick={() => setOnvifModalVisible(false)}
+                onClick={() => {
+                  setOnvifModalVisible(false);
+                  setIsDiscovering(false);
+                }}
                 aria-label={t('common.close')}
               >
                 ×
@@ -2009,7 +2052,7 @@ export function StreamsView() {
             </div>
 
             <div className="p-5 border-b border-border bg-muted/20">
-              <div className="grid gap-3 md:grid-cols-[1fr_auto] md:items-end">
+              <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
                 <div>
                   <label htmlFor="onvif-network-override" className="block text-sm font-medium mb-1">
                     {t('streams.discoveryNetwork')}
@@ -2021,7 +2064,7 @@ export function StreamsView() {
                       className="px-3 py-2 border border-input rounded-md bg-background text-foreground w-full max-w-sm text-sm focus:outline-none focus:ring-2 focus:ring-primary"
                       value={onvifNetworkOverride}
                       onChange={(e) => setOnvifNetworkOverride(e.target.value)}
-                      disabled={isDiscovering}
+                      disabled
                       placeholder={t('streams.auto')}
                     />
                     <span className="text-xs text-muted-foreground">
@@ -2029,28 +2072,26 @@ export function StreamsView() {
                     </span>
                   </div>
                 </div>
-                <button
-                  id="discover-btn"
-                  className="btn-primary focus:outline-none focus:ring-2 focus:ring-primary"
-                  onClick={startOnvifDiscovery}
-                  disabled={isDiscovering}
-                  type="button"
-                >
+                <div className={`inline-flex h-10 items-center rounded-md border px-3 text-sm font-medium ${
+                  isDiscovering
+                    ? 'border-primary/25 bg-primary/10 text-primary'
+                    : 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                }`}>
                   {isDiscovering ? (
                     <span className="flex items-center">
                       {t('streams.discovering')}
                       <span className="ml-1 flex space-x-1">
-                        <span className="animate-pulse delay-0 h-1.5 w-1.5 bg-white rounded-full"></span>
-                        <span className="animate-pulse delay-150 h-1.5 w-1.5 bg-white rounded-full"></span>
-                        <span className="animate-pulse delay-300 h-1.5 w-1.5 bg-white rounded-full"></span>
+                        <span className="animate-pulse delay-0 h-1.5 w-1.5 bg-current rounded-full"></span>
+                        <span className="animate-pulse delay-150 h-1.5 w-1.5 bg-current rounded-full"></span>
+                        <span className="animate-pulse delay-300 h-1.5 w-1.5 bg-current rounded-full"></span>
                       </span>
                     </span>
-                  ) : t('streams.startDiscovery')}
-                </button>
+                  ) : 'Discovery complete'}
+                </div>
               </div>
             </div>
 
-            <div className="grid min-h-0 flex-1 lg:grid-cols-[minmax(0,1fr)_360px]">
+            <div className="grid min-h-0 flex-1 lg:grid-cols-[minmax(0,1fr)_380px]">
               <div className="min-h-0 overflow-y-auto p-5">
                 <div className="mb-3 flex items-center justify-between gap-3">
                   <div>
@@ -2080,7 +2121,6 @@ export function StreamsView() {
                   <div className="space-y-2">
                     {discoveredDevices.map(device => {
                       const alreadyAdded = isDeviceAlreadyAdded(device);
-                      const isConnecting = isLoadingProfiles && selectedDevice && selectedDevice.ip_address === device.ip_address;
                       const isSelected = selectedDevice && selectedDevice.ip_address === device.ip_address;
                       const ports = Array.isArray(device.rtsp_ports) ? device.rtsp_ports : [];
                       return (
@@ -2095,13 +2135,17 @@ export function StreamsView() {
                           }`}
                           onClick={() => {
                             setSelectedDevice(device);
+                            setSelectedProfile(null);
                             setDeviceProfiles([]);
+                            setShowCustomNameInput(false);
                           }}
                           onKeyDown={(event) => {
                             if (event.key === 'Enter' || event.key === ' ') {
                               event.preventDefault();
                               setSelectedDevice(device);
+                              setSelectedProfile(null);
                               setDeviceProfiles([]);
+                              setShowCustomNameInput(false);
                             }
                           }}
                         >
@@ -2129,16 +2173,18 @@ export function StreamsView() {
                                 {device.status || (device.rtsp ? 'RTSP Found' : 'Discovered')}
                               </span>
                               <button
-                                className={alreadyAdded ? 'btn-secondary focus:outline-none' : 'btn-primary focus:outline-none'}
+                                className={isSelected || alreadyAdded ? 'btn-secondary focus:outline-none' : 'btn-primary focus:outline-none'}
                                 onClick={(event) => {
                                   event.stopPropagation();
-                                  testOnvifConnection(device);
+                                  setSelectedDevice(device);
+                                  setSelectedProfile(null);
+                                  setDeviceProfiles([]);
+                                  setShowCustomNameInput(false);
                                 }}
-                                disabled={isConnecting}
                                 type="button"
                                 title={alreadyAdded ? t('streams.deviceAlreadyInUseTitle') : undefined}
                               >
-                                {isConnecting ? t('common.loading') : alreadyAdded ? t('streams.connectAnyway') : t('streams.connect')}
+                                {isSelected ? 'Selected' : alreadyAdded ? t('streams.connectAnyway') : t('streams.connect')}
                               </button>
                             </div>
                           </div>
@@ -2151,41 +2197,10 @@ export function StreamsView() {
 
               <aside className="min-h-0 overflow-y-auto border-t border-border bg-muted/15 p-5 lg:border-l lg:border-t-0">
                 <div className="space-y-5">
-                  <div>
-                    <h4 className="text-base font-semibold">{t('streams.authentication')}</h4>
-                    <p className="mt-1 text-sm text-muted-foreground">{t('streams.onvifAuthenticationHelp')}</p>
-                    <div className="mt-4 space-y-3">
-                      <div className="form-group">
-                        <label htmlFor="onvif-username" className="block text-sm font-medium mb-1">{t('auth.username')}</label>
-                        <input
-                          type="text"
-                          id="onvif-username"
-                          name="username"
-                          className="w-full px-3 py-2 border border-input rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-primary bg-background text-foreground"
-                          placeholder="admin"
-                          value={onvifCredentials.username}
-                          onChange={handleCredentialChange}
-                        />
-                      </div>
-                      <div className="form-group">
-                        <label htmlFor="onvif-password" className="block text-sm font-medium mb-1">{t('auth.password')}</label>
-                        <input
-                          type="password"
-                          id="onvif-password"
-                          name="password"
-                          className="w-full px-3 py-2 border border-input rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-primary bg-background text-foreground"
-                          placeholder="password"
-                          value={onvifCredentials.password}
-                          onChange={handleCredentialChange}
-                        />
-                      </div>
-                    </div>
-                  </div>
-
                   <div className="rounded-lg border border-border bg-background p-4">
                     <h4 className="text-sm font-semibold">{t('streams.selectedDevice')}</h4>
                     {selectedDevice ? (
-                      <div className="mt-3 space-y-2 text-sm">
+                      <div className="mt-3 space-y-4 text-sm">
                         <div className="flex justify-between gap-3">
                           <span className="text-muted-foreground">{t('streams.ipAddress')}</span>
                           <span className="font-mono text-foreground">{selectedDevice.ip_address}</span>
@@ -2203,6 +2218,36 @@ export function StreamsView() {
                             {t('streams.deviceAlreadyInUseTitle')}
                           </p>
                         )}
+                        <div className="border-t border-border pt-4">
+                          <h4 className="text-base font-semibold">{t('streams.authentication')}</h4>
+                          <p className="mt-1 text-sm text-muted-foreground">{t('streams.onvifAuthenticationHelp')}</p>
+                          <div className="mt-4 space-y-3">
+                            <div className="form-group">
+                              <label htmlFor="onvif-username" className="block text-sm font-medium mb-1">{t('auth.username')}</label>
+                              <input
+                                type="text"
+                                id="onvif-username"
+                                name="username"
+                                className="w-full px-3 py-2 border border-input rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-primary bg-background text-foreground"
+                                placeholder="admin"
+                                value={onvifCredentials.username}
+                                onChange={handleCredentialChange}
+                              />
+                            </div>
+                            <div className="form-group">
+                              <label htmlFor="onvif-password" className="block text-sm font-medium mb-1">{t('auth.password')}</label>
+                              <input
+                                type="password"
+                                id="onvif-password"
+                                name="password"
+                                className="w-full px-3 py-2 border border-input rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-primary bg-background text-foreground"
+                                placeholder="password"
+                                value={onvifCredentials.password}
+                                onChange={handleCredentialChange}
+                              />
+                            </div>
+                          </div>
+                        </div>
                         <button
                           type="button"
                           className="btn-primary w-full focus:outline-none focus:ring-2 focus:ring-primary"
@@ -2249,6 +2294,7 @@ export function StreamsView() {
                 className="px-4 py-2 bg-secondary text-secondary-foreground rounded hover:bg-secondary/80 transition-colors"
                 onClick={() => {
                   setOnvifModalVisible(false);
+                  setIsDiscovering(false);
                   setShowCustomNameInput(false);
                 }}
                 type="button"

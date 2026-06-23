@@ -21,6 +21,7 @@
 #include <libavutil/avutil.h>
 #include <inttypes.h>
 #include <netinet/in.h>
+#include <pthread.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -33,6 +34,7 @@
 #define MAX_UNIVERSAL_DEVICES 128
 #define MAX_SCAN_HOSTS 1024
 #define MAX_RTSP_PORTS 3
+#define RTSP_DISCOVERY_CONNECT_TIMEOUT_MS 45
 
 typedef struct {
     char ip_address[64];
@@ -55,7 +57,28 @@ typedef struct {
     char codec[64];
 } rtsp_stream_info_t;
 
+typedef struct {
+    pthread_mutex_t mutex;
+    bool running;
+    bool completed;
+    unsigned int scan_id;
+    char network[64];
+    char error[128];
+    discovered_camera_t devices[MAX_UNIVERSAL_DEVICES];
+    int count;
+} discovery_scan_state_t;
+
+typedef struct {
+    char network[64];
+    bool include_onvif;
+    bool include_rtsp;
+    unsigned int scan_id;
+} discovery_scan_job_t;
+
 static const int RTSP_PORTS[] = {554, 8554, 10554};
+static discovery_scan_state_t g_camera_discovery = {
+    .mutex = PTHREAD_MUTEX_INITIALIZER
+};
 
 static const char *COMMON_RTSP_PATHS[] = {
     "/stream1",
@@ -218,6 +241,25 @@ static void append_rtsp_device(discovered_camera_t *devices, int *count, const c
     snprintf(device->action, sizeof(device->action), "%s", "Connect");
 }
 
+static void publish_discovery_device(unsigned int scan_id, const discovered_camera_t *device) {
+    if (!device || device->ip_address[0] == '\0') {
+        return;
+    }
+
+    pthread_mutex_lock(&g_camera_discovery.mutex);
+    if (g_camera_discovery.scan_id == scan_id) {
+        int index = find_device_by_ip(g_camera_discovery.devices, g_camera_discovery.count, device->ip_address);
+        if (index < 0 && g_camera_discovery.count < MAX_UNIVERSAL_DEVICES) {
+            index = g_camera_discovery.count++;
+            memset(&g_camera_discovery.devices[index], 0, sizeof(g_camera_discovery.devices[index]));
+        }
+        if (index >= 0) {
+            g_camera_discovery.devices[index] = *device;
+        }
+    }
+    pthread_mutex_unlock(&g_camera_discovery.mutex);
+}
+
 static cJSON *device_to_json(const discovered_camera_t *device) {
     cJSON *item = cJSON_CreateObject();
     if (!item) {
@@ -245,7 +287,7 @@ static cJSON *device_to_json(const discovered_camera_t *device) {
     return item;
 }
 
-static int scan_rtsp_devices(const char *network, discovered_camera_t *devices, int *count) {
+static int scan_rtsp_devices(const char *network, discovered_camera_t *devices, int *count, unsigned int scan_id) {
     uint32_t base_addr = 0;
     uint32_t subnet_mask = 0;
 
@@ -273,8 +315,12 @@ static int scan_rtsp_devices(const char *network, discovered_camera_t *devices, 
         snprintf(ip_copy, sizeof(ip_copy), "%s", ip);
 
         for (size_t p = 0; p < sizeof(RTSP_PORTS) / sizeof(RTSP_PORTS[0]); p++) {
-            if (is_port_open(ip_copy, RTSP_PORTS[p], 80)) {
+            if (is_port_open(ip_copy, RTSP_PORTS[p], RTSP_DISCOVERY_CONNECT_TIMEOUT_MS)) {
                 append_rtsp_device(devices, count, ip_copy, RTSP_PORTS[p]);
+                int index = find_device_by_ip(devices, *count, ip_copy);
+                if (index >= 0) {
+                    publish_discovery_device(scan_id, &devices[index]);
+                }
             }
         }
     }
@@ -344,6 +390,72 @@ static void build_rtsp_url(char *dst, size_t size, const char *ip, int port, con
     snprintf(dst, size, "rtsp://%s:%d%s", ip, port, normalized_path);
 }
 
+static char *build_discovery_status_json_locked(void) {
+    cJSON *root = cJSON_CreateObject();
+    cJSON *array = root ? cJSON_AddArrayToObject(root, "devices") : NULL;
+    if (!root || !array) {
+        cJSON_Delete(root);
+        return NULL;
+    }
+
+    cJSON_AddBoolToObject(root, "running", g_camera_discovery.running);
+    cJSON_AddBoolToObject(root, "completed", g_camera_discovery.completed);
+    cJSON_AddNumberToObject(root, "scan_id", (double)g_camera_discovery.scan_id);
+    cJSON_AddStringToObject(root, "network", g_camera_discovery.network);
+    cJSON_AddStringToObject(root, "error", g_camera_discovery.error);
+    cJSON_AddNumberToObject(root, "count", g_camera_discovery.count);
+
+    for (int i = 0; i < g_camera_discovery.count; i++) {
+        cJSON *item = device_to_json(&g_camera_discovery.devices[i]);
+        if (item) {
+            cJSON_AddItemToArray(array, item);
+        }
+    }
+
+    char *json = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    return json;
+}
+
+static void *discovery_scan_worker(void *arg) {
+    discovery_scan_job_t *job = (discovery_scan_job_t *)arg;
+    if (!job) {
+        return NULL;
+    }
+
+    discovered_camera_t devices[MAX_UNIVERSAL_DEVICES];
+    memset(devices, 0, sizeof(devices));
+    int count = 0;
+
+    if (job->include_onvif) {
+        onvif_device_info_t onvif_devices[32];
+        int onvif_count = discover_onvif_devices(job->network, onvif_devices, 32);
+        if (onvif_count > 0) {
+            for (int i = 0; i < onvif_count; i++) {
+                append_onvif_device(devices, &count, &onvif_devices[i]);
+                int index = find_device_by_ip(devices, count, onvif_devices[i].ip_address);
+                if (index >= 0) {
+                    publish_discovery_device(job->scan_id, &devices[index]);
+                }
+            }
+        }
+    }
+
+    if (job->include_rtsp) {
+        scan_rtsp_devices(job->network, devices, &count, job->scan_id);
+    }
+
+    pthread_mutex_lock(&g_camera_discovery.mutex);
+    if (g_camera_discovery.scan_id == job->scan_id) {
+        g_camera_discovery.running = false;
+        g_camera_discovery.completed = true;
+    }
+    pthread_mutex_unlock(&g_camera_discovery.mutex);
+
+    free(job);
+    return NULL;
+}
+
 void handle_post_discover_cameras(const http_request_t *req, http_response_t *res) {
     cJSON *body = httpd_parse_json_body(req);
     if (!body) {
@@ -366,46 +478,63 @@ void handle_post_discover_cameras(const http_request_t *req, http_response_t *re
         return;
     }
 
-    discovered_camera_t devices[MAX_UNIVERSAL_DEVICES];
-    memset(devices, 0, sizeof(devices));
-    int count = 0;
-
-    if (include_onvif) {
-        onvif_device_info_t onvif_devices[32];
-        int onvif_count = discover_onvif_devices(scan_network, onvif_devices, 32);
-        if (onvif_count > 0) {
-            for (int i = 0; i < onvif_count; i++) {
-                append_onvif_device(devices, &count, &onvif_devices[i]);
-            }
-        }
-    }
-
-    if (include_rtsp) {
-        scan_rtsp_devices(scan_network, devices, &count);
-    }
-
-    cJSON *root = cJSON_CreateObject();
-    cJSON *array = root ? cJSON_AddArrayToObject(root, "devices") : NULL;
-    if (!root || !array) {
+    discovery_scan_job_t *job = calloc(1, sizeof(*job));
+    if (!job) {
         cJSON_Delete(body);
-        cJSON_Delete(root);
-        http_response_set_json_error(res, 500, "Failed to create discovery response");
+        http_response_set_json_error(res, 500, "Failed to start discovery");
         return;
     }
 
-    cJSON_AddStringToObject(root, "network", scan_network);
-    cJSON_AddNumberToObject(root, "count", count);
+    pthread_mutex_lock(&g_camera_discovery.mutex);
+    unsigned int scan_id = ++g_camera_discovery.scan_id;
+    memset(g_camera_discovery.devices, 0, sizeof(g_camera_discovery.devices));
+    g_camera_discovery.count = 0;
+    g_camera_discovery.running = true;
+    g_camera_discovery.completed = false;
+    g_camera_discovery.error[0] = '\0';
+    snprintf(g_camera_discovery.network, sizeof(g_camera_discovery.network), "%s", scan_network);
+    pthread_mutex_unlock(&g_camera_discovery.mutex);
 
-    for (int i = 0; i < count; i++) {
-        cJSON *item = device_to_json(&devices[i]);
-        if (item) {
-            cJSON_AddItemToArray(array, item);
-        }
+    snprintf(job->network, sizeof(job->network), "%s", scan_network);
+    job->include_onvif = include_onvif;
+    job->include_rtsp = include_rtsp;
+    job->scan_id = scan_id;
+
+    pthread_t thread;
+    int thread_result = pthread_create(&thread, NULL, discovery_scan_worker, job);
+    if (thread_result != 0) {
+        pthread_mutex_lock(&g_camera_discovery.mutex);
+        g_camera_discovery.running = false;
+        g_camera_discovery.completed = true;
+        snprintf(g_camera_discovery.error, sizeof(g_camera_discovery.error), "%s", "Failed to create discovery thread");
+        pthread_mutex_unlock(&g_camera_discovery.mutex);
+        free(job);
+        cJSON_Delete(body);
+        http_response_set_json_error(res, 500, "Failed to start discovery");
+        return;
+    }
+    pthread_detach(thread);
+
+    pthread_mutex_lock(&g_camera_discovery.mutex);
+    char *json = build_discovery_status_json_locked();
+    pthread_mutex_unlock(&g_camera_discovery.mutex);
+    cJSON_Delete(body);
+    if (!json) {
+        http_response_set_json_error(res, 500, "Failed to serialize discovery response");
+        return;
     }
 
-    char *json = cJSON_PrintUnformatted(root);
-    cJSON_Delete(body);
-    cJSON_Delete(root);
+    http_response_set_json(res, 200, json);
+    free(json);
+}
+
+void handle_get_discover_cameras_status(const http_request_t *req, http_response_t *res) {
+    (void)req;
+
+    pthread_mutex_lock(&g_camera_discovery.mutex);
+    char *json = build_discovery_status_json_locked();
+    pthread_mutex_unlock(&g_camera_discovery.mutex);
+
     if (!json) {
         http_response_set_json_error(res, 500, "Failed to serialize discovery response");
         return;

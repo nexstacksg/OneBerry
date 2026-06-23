@@ -188,6 +188,7 @@ int register_all_libuv_handlers(http_server_handle_t server) {
 
     // Universal camera discovery API
     http_server_register_handler(server, "/api/discovery/cameras", "POST", handle_post_discover_cameras);
+    http_server_register_handler(server, "/api/discovery/cameras/status", "GET", handle_get_discover_cameras_status);
     http_server_register_handler(server, "/api/discovery/rtsp/validate", "POST", handle_post_validate_rtsp_device);
 
     // Recordings API (backend-agnostic handlers)
