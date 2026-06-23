@@ -658,7 +658,7 @@ export function MSEVideoCell({
       {/* Control buttons overlay */}
       {showControls && isPlaying && !error && (
         <div
-          className="video-controls"
+          className="stream-controls"
           style={{
             position: 'absolute',
             bottom: '8px',
