@@ -4,6 +4,10 @@
 
 LightNVR is a C/CMake application with a Vite web interface. Core C sources live in `src/`, with headers mirrored under `include/` by domain (`core`, `database`, `storage`, `video`, `web`). Database migrations are in `db/migrations/`. Runtime configuration examples live in `config/`, `examples/`, and `go2rtc/`. Frontend source and assets are under `web/js`, `web/css`, and `web/img`; production assets are emitted to `web/dist/`. Tests are split between C tests in `tests/unit` and `tests/database`, Playwright specs in `tests/integration/specs`, and load tooling in `tests/load`.
 
+## Codebase Memory
+
+This project is configured for `codebase-memory-mcp`. For structural code exploration, prefer the graph tools first: `search_graph`, `trace_path`, `get_code_snippet`, `query_graph`, and `get_architecture`. Use regular file search afterward for exact text checks, unindexed generated files, or when the graph result needs source verification.
+
 ## Build, Test, and Development Commands
 
 - `bash scripts/build.sh --debug` builds the C backend with tests enabled.
