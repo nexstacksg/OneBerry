@@ -33,8 +33,9 @@
 
 #define MAX_UNIVERSAL_DEVICES 128
 #define MAX_SCAN_HOSTS 1024
+#define MAX_RTSP_BATCH_PROBES 256
 #define MAX_RTSP_PORTS 3
-#define RTSP_DISCOVERY_CONNECT_TIMEOUT_MS 45
+#define RTSP_DISCOVERY_CONNECT_TIMEOUT_MS 75
 
 typedef struct {
     char ip_address[64];
@@ -89,58 +90,6 @@ static const char *COMMON_RTSP_PATHS[] = {
     "/h264Preview_01_main",
     NULL
 };
-
-static int is_port_open(const char *ip_addr, int port, int timeout_ms) {
-    int sock = socket(AF_INET, SOCK_STREAM, 0);
-    if (sock < 0) {
-        return 0;
-    }
-
-    long flags = fcntl(sock, F_GETFL, 0);
-    if (flags >= 0) {
-        fcntl(sock, F_SETFL, flags | O_NONBLOCK);
-    }
-
-    struct sockaddr_in addr;
-    memset(&addr, 0, sizeof(addr));
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons((uint16_t)port);
-    if (inet_aton(ip_addr, &addr.sin_addr) == 0) {
-        close(sock);
-        return 0;
-    }
-
-    int res = connect(sock, (struct sockaddr *)&addr, sizeof(addr));
-    if (res == 0) {
-        close(sock);
-        return 1;
-    }
-
-    if (errno != EINPROGRESS) {
-        close(sock);
-        return 0;
-    }
-
-    fd_set writefds;
-    FD_ZERO(&writefds);
-    FD_SET(sock, &writefds);
-
-    struct timeval tv;
-    tv.tv_sec = timeout_ms / 1000;
-    tv.tv_usec = (long)(timeout_ms % 1000) * 1000;
-
-    res = select(sock + 1, NULL, &writefds, NULL, &tv);
-    if (res > 0) {
-        int so_error = 0;
-        socklen_t len = sizeof(so_error);
-        getsockopt(sock, SOL_SOCKET, SO_ERROR, &so_error, &len);
-        close(sock);
-        return so_error == 0;
-    }
-
-    close(sock);
-    return 0;
-}
 
 static int resolve_scan_network(const char *requested_network, char *network, size_t network_size) {
     if (requested_network && requested_network[0] != '\0' && strcmp(requested_network, "auto") != 0) {
@@ -287,6 +236,136 @@ static cJSON *device_to_json(const discovered_camera_t *device) {
     return item;
 }
 
+typedef struct {
+    int sock;
+    char ip_address[64];
+} rtsp_probe_t;
+
+static int add_rtsp_probe(rtsp_probe_t *probes, int *probe_count, const char *ip, int port) {
+    int sock = socket(AF_INET, SOCK_STREAM, 0);
+    if (sock < 0) {
+        return -1;
+    }
+
+    long flags = fcntl(sock, F_GETFL, 0);
+    if (flags >= 0) {
+        fcntl(sock, F_SETFL, flags | O_NONBLOCK);
+    }
+
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons((uint16_t)port);
+    if (inet_aton(ip, &addr.sin_addr) == 0) {
+        close(sock);
+        return -1;
+    }
+
+    int res = connect(sock, (struct sockaddr *)&addr, sizeof(addr));
+    if (res == 0) {
+        close(sock);
+        return 1;
+    }
+
+    if (errno != EINPROGRESS) {
+        close(sock);
+        return -1;
+    }
+
+    probes[*probe_count].sock = sock;
+    snprintf(probes[*probe_count].ip_address, sizeof(probes[*probe_count].ip_address), "%s", ip);
+    (*probe_count)++;
+    return 0;
+}
+
+static void close_rtsp_probes(rtsp_probe_t *probes, int probe_count) {
+    for (int i = 0; i < probe_count; i++) {
+        if (probes[i].sock >= 0) {
+            close(probes[i].sock);
+            probes[i].sock = -1;
+        }
+    }
+}
+
+static int scan_rtsp_port_batch(uint32_t network_addr, uint64_t start_offset, uint64_t host_count, int port,
+                                discovered_camera_t *devices, int *count, unsigned int scan_id) {
+    rtsp_probe_t probes[MAX_RTSP_BATCH_PROBES];
+    int probe_count = 0;
+    memset(probes, 0, sizeof(probes));
+    for (int i = 0; i < MAX_RTSP_BATCH_PROBES; i++) {
+        probes[i].sock = -1;
+    }
+
+    uint64_t end_offset = start_offset + MAX_RTSP_BATCH_PROBES - 1;
+    if (end_offset > host_count) {
+        end_offset = host_count;
+    }
+
+    for (uint64_t offset = start_offset; offset <= end_offset && probe_count < MAX_RTSP_BATCH_PROBES; offset++) {
+        struct in_addr addr;
+        addr.s_addr = htonl(network_addr + (uint32_t)offset);
+        const char *ip = inet_ntoa(addr);
+        if (!ip) {
+            continue;
+        }
+
+        char ip_copy[64];
+        snprintf(ip_copy, sizeof(ip_copy), "%s", ip);
+
+        int probe_result = add_rtsp_probe(probes, &probe_count, ip_copy, port);
+        if (probe_result == 1) {
+            append_rtsp_device(devices, count, ip_copy, port);
+            int index = find_device_by_ip(devices, *count, ip_copy);
+            if (index >= 0) {
+                publish_discovery_device(scan_id, &devices[index]);
+            }
+        }
+    }
+
+    if (probe_count <= 0) {
+        return 0;
+    }
+
+    fd_set writefds;
+    FD_ZERO(&writefds);
+    int max_fd = -1;
+    for (int i = 0; i < probe_count; i++) {
+        if (probes[i].sock >= 0) {
+            FD_SET(probes[i].sock, &writefds);
+            if (probes[i].sock > max_fd) {
+                max_fd = probes[i].sock;
+            }
+        }
+    }
+
+    struct timeval tv;
+    tv.tv_sec = RTSP_DISCOVERY_CONNECT_TIMEOUT_MS / 1000;
+    tv.tv_usec = (long)(RTSP_DISCOVERY_CONNECT_TIMEOUT_MS % 1000) * 1000;
+
+    int ready = select(max_fd + 1, NULL, &writefds, NULL, &tv);
+    if (ready > 0) {
+        for (int i = 0; i < probe_count; i++) {
+            if (probes[i].sock < 0 || !FD_ISSET(probes[i].sock, &writefds)) {
+                continue;
+            }
+
+            int so_error = 0;
+            socklen_t len = sizeof(so_error);
+            getsockopt(probes[i].sock, SOL_SOCKET, SO_ERROR, &so_error, &len);
+            if (so_error == 0) {
+                append_rtsp_device(devices, count, probes[i].ip_address, port);
+                int index = find_device_by_ip(devices, *count, probes[i].ip_address);
+                if (index >= 0) {
+                    publish_discovery_device(scan_id, &devices[index]);
+                }
+            }
+        }
+    }
+
+    close_rtsp_probes(probes, probe_count);
+    return 0;
+}
+
 static int scan_rtsp_devices(const char *network, discovered_camera_t *devices, int *count, unsigned int scan_id) {
     uint32_t base_addr = 0;
     uint32_t subnet_mask = 0;
@@ -303,25 +382,9 @@ static int scan_rtsp_devices(const char *network, discovered_camera_t *devices, 
         host_count = MAX_SCAN_HOSTS;
     }
 
-    for (uint64_t offset = 1; offset <= host_count && *count < MAX_UNIVERSAL_DEVICES; offset++) {
-        struct in_addr addr;
-        addr.s_addr = htonl(network_addr + (uint32_t)offset);
-        const char *ip = inet_ntoa(addr);
-        if (!ip) {
-            continue;
-        }
-
-        char ip_copy[64];
-        snprintf(ip_copy, sizeof(ip_copy), "%s", ip);
-
-        for (size_t p = 0; p < sizeof(RTSP_PORTS) / sizeof(RTSP_PORTS[0]); p++) {
-            if (is_port_open(ip_copy, RTSP_PORTS[p], RTSP_DISCOVERY_CONNECT_TIMEOUT_MS)) {
-                append_rtsp_device(devices, count, ip_copy, RTSP_PORTS[p]);
-                int index = find_device_by_ip(devices, *count, ip_copy);
-                if (index >= 0) {
-                    publish_discovery_device(scan_id, &devices[index]);
-                }
-            }
+    for (size_t p = 0; p < sizeof(RTSP_PORTS) / sizeof(RTSP_PORTS[0]) && *count < MAX_UNIVERSAL_DEVICES; p++) {
+        for (uint64_t offset = 1; offset <= host_count && *count < MAX_UNIVERSAL_DEVICES; offset += MAX_RTSP_BATCH_PROBES) {
+            scan_rtsp_port_batch(network_addr, offset, host_count, RTSP_PORTS[p], devices, count, scan_id);
         }
     }
 
@@ -427,6 +490,10 @@ static void *discovery_scan_worker(void *arg) {
     memset(devices, 0, sizeof(devices));
     int count = 0;
 
+    if (job->include_rtsp) {
+        scan_rtsp_devices(job->network, devices, &count, job->scan_id);
+    }
+
     if (job->include_onvif) {
         onvif_device_info_t onvif_devices[32];
         int onvif_count = discover_onvif_devices(job->network, onvif_devices, 32);
@@ -439,10 +506,6 @@ static void *discovery_scan_worker(void *arg) {
                 }
             }
         }
-    }
-
-    if (job->include_rtsp) {
-        scan_rtsp_devices(job->network, devices, &count, job->scan_id);
     }
 
     pthread_mutex_lock(&g_camera_discovery.mutex);

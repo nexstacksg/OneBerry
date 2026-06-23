@@ -104,74 +104,6 @@ int get_discovered_onvif_devices(onvif_device_info_t *devices, int max_devices) 
     return count;
 }
 
-// Check if a port is open on a given IP address
-static int is_port_open(const char *ip_addr, int port, int timeout_ms) {
-    int sock;
-    struct sockaddr_in addr;
-    struct timeval tv;
-    fd_set fdset;
-    int res;
-    
-    // Create socket
-    sock = socket(AF_INET, SOCK_STREAM, 0);
-    if (sock < 0) {
-        return 0; // Failed to create socket
-    }
-    
-    // Set non-blocking
-    long arg = fcntl(sock, F_GETFL, NULL);
-    arg |= O_NONBLOCK;
-    fcntl(sock, F_SETFL, arg);
-    
-    // Set up address
-    memset(&addr, 0, sizeof(addr));
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(port);
-    
-    // Convert IP address
-    if (inet_aton(ip_addr, &addr.sin_addr) == 0) {
-        close(sock);
-        return 0; // Invalid IP address
-    }
-    
-    // Try to connect
-    res = connect(sock, (struct sockaddr *)&addr, sizeof(addr));
-    
-    if (res < 0) {
-        if (errno == EINPROGRESS) {
-            // Connection in progress, wait for result
-            tv.tv_sec = timeout_ms / 1000;
-            tv.tv_usec = (long)(timeout_ms % 1000) * 1000;
-            
-            FD_ZERO(&fdset);
-            FD_SET(sock, &fdset);
-            
-            // Wait for socket to be writable (connected)
-            res = select(sock + 1, NULL, &fdset, NULL, &tv);
-            
-            if (res > 0) {
-                // Socket is writable, check if there was an error
-                int so_error;
-                socklen_t len = sizeof(so_error);
-                
-                getsockopt(sock, SOL_SOCKET, SO_ERROR, &so_error, &len);
-                
-                if (so_error == 0) {
-                    close(sock);
-                    return 1; // Port is open
-                }
-            }
-        }
-    } else {
-        // Connected immediately
-        close(sock);
-        return 1; // Port is open
-    }
-    
-    close(sock);
-    return 0; // Port is closed or connection timed out
-}
-
 // Discover ONVIF devices on a specific network
 int discover_onvif_devices(const char *network, onvif_device_info_t *devices,
                           int max_devices) {
@@ -241,36 +173,12 @@ int discover_onvif_devices(const char *network, onvif_device_info_t *devices,
     // Calculate network range
     uint32_t network_addr = base_addr & subnet_mask;
     uint32_t broadcast = network_addr | ~subnet_mask;
-    
-    // First scan for open ports on the network
-    log_info("Scanning network for open ONVIF ports (3702 and 80)");
-    
     // Array to store IPs with open ports
     #define MAX_CANDIDATE_IPS 256
     char candidate_ips[MAX_CANDIDATE_IPS][16];
     int candidate_count = 0;
-    
-    // Scan all IPs in the range
-    for (uint32_t ip = network_addr + 1; ip < broadcast && candidate_count < MAX_CANDIDATE_IPS; ip++) {
-        // Skip addresses too close to network or broadcast addresses
-        if (ip == network_addr + 1 || ip == broadcast - 1) {
-            continue;
-        }
 
-        addr.s_addr = htonl(ip);
-        snprintf(ip_addr, sizeof(ip_addr), "%s", inet_ntoa(addr));
-        
-        // Check if port 3702 (ONVIF) or port 80 (HTTP) is open with a shorter timeout
-        if (is_port_open(ip_addr, 3702, 25) || is_port_open(ip_addr, 80, 25)) {
-            log_debug("Found potential ONVIF device at %s", ip_addr);
-            
-            // Add to candidate list
-            strncpy(candidate_ips[candidate_count], ip_addr, 16);
-            candidate_count++;
-        }
-    }
-    
-    log_info("Found %d potential ONVIF devices with open ports", candidate_count);
+    log_info("Skipping slow TCP pre-scan; using UDP broadcast and multicast for ONVIF discovery");
     
     // If no candidates found, try broadcast and multicast
     if (candidate_count == 0) {
