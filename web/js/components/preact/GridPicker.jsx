@@ -6,9 +6,9 @@
 import { useState, useEffect, useRef } from 'preact/hooks';
 import { useI18n } from '../../i18n.js';
 
-// Hard cap: more than 36 simultaneous HLS/MSE streams will exhaust tab memory.
+// Hard cap: more than 64 simultaneous HLS/MSE streams will exhaust tab memory.
 // Streams beyond this limit are handled via pagination.
-export const MAX_GRID_CELLS = 36;
+export const MAX_GRID_CELLS = 64;
 
 const MAX_GRID_SIDE = Math.ceil(Math.sqrt(MAX_GRID_CELLS));
 

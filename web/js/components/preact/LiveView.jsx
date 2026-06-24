@@ -374,7 +374,11 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
   const [workspaceAutoGrid, setWorkspaceAutoGrid] = useState(true);
   const [activeLayoutId, setActiveLayoutId] = useState(() => {
     const p = new URLSearchParams(window.location.search);
-    return p.get('layout') || localStorage.getItem(`lightnvr-${storagePrefix}-last-layout`) || '';
+    const layoutParam = p.get('layout');
+    if (layoutParam === 'none' || layoutParam === 'workspace') {
+      return '';
+    }
+    return layoutParam || localStorage.getItem(`lightnvr-${storagePrefix}-last-layout`) || '';
   });
   const [hydratedLayoutId, setHydratedLayoutId] = useState('');
   const lastSavedLayoutPayloadRef = useRef('');
@@ -470,7 +474,7 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
   const workspaceGridRows = workspaceStarted ? WORKSPACE_GRID_ROWS : rows;
 
   // Clamp cols×rows to MAX_GRID_CELLS — guards against stale URL params or
-  // localStorage values written before the 36-stream cap was enforced.
+  // localStorage values written before the 64-stream cap was enforced.
   useEffect(() => {
     if (cols * rows > MAX_GRID_CELLS) {
       setRows(Math.max(1, Math.floor(MAX_GRID_CELLS / cols)));
@@ -890,10 +894,11 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
       return;
     }
 
+    const shouldAutoTile = !activeLayoutId && !placement && options.autoFit !== false;
     setWorkspaceStarted(true);
     setWorkspaceTiles((previousTiles) => {
       const candidateTile = createWorkspaceTile(cameraId);
-      if (!placement && workspaceAutoGrid && options.autoFit !== false) {
+      if (shouldAutoTile || (!placement && workspaceAutoGrid && options.autoFit !== false)) {
         return buildResponsiveWorkspaceLayout([...previousTiles, candidateTile]);
       }
 
@@ -940,12 +945,12 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
     });
     if (placement) {
       setWorkspaceAutoGrid(false);
-    } else if (workspaceAutoGrid && options.autoFit !== false) {
+    } else if (shouldAutoTile || (workspaceAutoGrid && options.autoFit !== false)) {
       setWorkspaceAutoGrid(true);
     }
     setCurrentPage(0);
     setSelectedStream(cameraId);
-  }, [streamByName, workspaceAutoGrid, workspaceGridCols, workspaceGridRows, workspaceLocked]);
+  }, [activeLayoutId, streamByName, workspaceAutoGrid, workspaceGridCols, workspaceGridRows, workspaceLocked]);
 
   const removeWorkspaceTile = useCallback((instanceId) => {
     if (workspaceLocked) {

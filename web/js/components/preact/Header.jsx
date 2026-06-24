@@ -306,10 +306,11 @@ export function Header({ version = VERSION }) {
       return { tag: '', stream: '' };
     }
     const params = new URLSearchParams(locationSearch);
+    const layout = params.get('layout') || '';
     return {
       tag: params.get('tag') || '',
       stream: params.get('stream') || '',
-      layout: params.get('layout') || '',
+      layout: layout === 'none' || layout === 'workspace' ? '' : layout,
     };
   }, [activeNav, locationSearch]);
 
@@ -813,11 +814,16 @@ export function Header({ version = VERSION }) {
       return;
     }
 
-    event.preventDefault();
-    window.dispatchEvent(new CustomEvent('oneberry:add-live-camera', {
-      detail: { cameraName, autoFit: true },
-    }));
-  }, [activeNav]);
+    if (!liveSelection.layout) {
+      event.preventDefault();
+      window.dispatchEvent(new CustomEvent('oneberry:add-live-camera', {
+        detail: { cameraName, autoFit: true },
+      }));
+      return;
+    }
+
+    forceNavigation(makeLiveHref({ layout: 'none', stream: cameraName }), event);
+  }, [activeNav, liveSelection.layout]);
 
   const renderCameraList = () => {
     if (sidebarCameraList.length === 0) {
@@ -1073,7 +1079,7 @@ export function Header({ version = VERSION }) {
 
         <div className="sidebar-content">
           <nav className="sidebar-main-nav" aria-label="Primary navigation">
-            <div className="sidebar-section-label">{t('nav.live')}</div>
+            <div className="sidebar-section-label">Camera List</div>
             {renderCameraList()}
             {renderLayouts()}
 
