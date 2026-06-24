@@ -276,7 +276,7 @@ void load_default_config(config_t *config) {
     memset(config, 0, sizeof(config_t));
 
     // --- Runtime stream limit ---
-    config->max_streams = 32; // default; overridden by [streams] max_streams in INI
+    config->max_streams = 64; // default; overridden by [streams] max_streams in INI
     config->streams = calloc(config->max_streams, sizeof(stream_config_t));
     if (!config->streams) {
         // Fatal: we can't run without a streams array. Caller will detect NULL.
