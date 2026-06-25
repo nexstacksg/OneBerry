@@ -263,7 +263,7 @@ static void *mp4_recording_thread(void *arg) {
     }
 
     // Set segment duration in the MP4 writer
-    int segment_duration = ctx->config.segment_duration > 0 ? ctx->config.segment_duration : 30;
+    int segment_duration = ctx->config.segment_duration > 0 ? ctx->config.segment_duration : 60;
     mp4_writer_set_segment_duration(ctx->mp4_writer, segment_duration);
     log_info("Set segment duration to %d seconds for MP4 writer for stream %s",
              segment_duration, stream_name);
