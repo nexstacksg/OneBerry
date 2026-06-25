@@ -32,6 +32,7 @@ export function TimelineBarBody({
   startHour,
   endHour,
   dateLabel,
+  compact = false,
   isLoading = false,
   error = null,
   loadingText = 'Loading...',
@@ -85,26 +86,26 @@ export function TimelineBarBody({
 
   return (
     <>
-      <div className="border-b border-white/10 bg-black/40 px-2 py-1 text-center text-[11px] uppercase tracking-[0.24em] text-white/55 sm:px-3">
+      <div className={`border-b border-white/10 bg-black/40 text-center uppercase tracking-[0.24em] text-white/55 ${compact ? 'px-2 py-0.5 text-[10px]' : 'px-2 py-1 text-[11px] sm:px-3'}`}>
         {dateLabel}
       </div>
 
-      <div className="px-2 pb-2 pt-2 sm:px-3">
+      <div className={compact ? 'px-2 pb-1.5 pt-1.5' : 'px-2 pb-2 pt-2 sm:px-3'}>
         {isLoading ? (
-          <div className="flex h-20 items-center justify-center px-3 text-sm text-white/55">
+          <div className={`flex items-center justify-center px-3 text-white/55 ${compact ? 'h-14 text-[11px]' : 'h-20 text-sm'}`}>
             {loadingText}
           </div>
         ) : error ? (
-          <div className="flex h-20 items-center justify-center px-3 text-sm text-red-200">
+          <div className={`flex items-center justify-center px-3 text-red-200 ${compact ? 'h-14 text-[11px]' : 'h-20 text-sm'}`}>
             {errorText}
           </div>
         ) : segments.length === 0 ? (
-          <div className="flex h-20 items-center justify-center px-3 text-sm text-white/45">
+          <div className={`flex items-center justify-center px-3 text-white/45 ${compact ? 'h-14 text-[11px]' : 'h-20 text-sm'}`}>
             {emptyText}
           </div>
         ) : (
-          <div className="space-y-2" onWheel={onWheel}>
-            <div className="relative h-6">
+          <div className={compact ? 'space-y-1.5' : 'space-y-2'} onWheel={onWheel}>
+            <div className={compact ? 'relative h-4' : 'relative h-6'}>
               {visibleMarkers}
             </div>
 

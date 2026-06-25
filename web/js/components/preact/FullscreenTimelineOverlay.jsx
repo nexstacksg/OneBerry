@@ -681,7 +681,7 @@ export function FullscreenTimelineOverlay({
   return (
     <div
       ref={rootRef}
-      className={`text-white ${isDocked ? 'w-full' : 'border-t border-white/10 bg-[#05070d]'}`}
+      className={`cursor-default text-white ${isDocked ? 'w-full' : 'border-t border-white/10 bg-[#05070d]'}`}
       style={{
         pointerEvents: 'auto',
         position: isDocked ? 'relative' : 'fixed',
@@ -709,20 +709,20 @@ export function FullscreenTimelineOverlay({
       </div>
 
       {isExpanded && (
-        <div className={isDocked ? 'px-2 pb-2 pt-2 sm:px-3' : 'px-2 pb-2 pt-2 sm:px-3 sm:pb-3'}>
+        <div className={isDocked ? 'px-2 pb-1 pt-1 sm:px-3' : 'px-2 pb-2 pt-2 sm:px-3 sm:pb-3'}>
           <div className={isDocked
             ? 'overflow-hidden rounded-t-2xl rounded-b-none border border-white/10 bg-[#05070d]/96 shadow-[0_-24px_60px_rgba(0,0,0,0.48)]'
             : 'overflow-hidden rounded-2xl border border-white/10 bg-black/45 shadow-2xl'
           }>
-            <div className={`flex flex-nowrap items-center justify-between gap-2 overflow-x-auto border-b border-white/10 px-2 py-2 sm:px-3 ${isDocked ? 'bg-black/35' : ''}`}>
+            <div className={`flex flex-nowrap items-center justify-between gap-2 overflow-x-auto border-b border-white/10 px-2 ${isDocked ? 'bg-black/35 py-1 sm:px-3' : 'py-2 sm:px-3'}`}>
               <div className="min-w-0 flex items-center gap-3">
                 <div className="min-w-0">
-                  <div className="font-mono text-[12px] font-semibold tabular-nums tracking-[0.12em] text-sky-200 sm:text-[13px]">
+                  <div className={`font-mono font-semibold tabular-nums tracking-[0.12em] text-sky-200 ${isDocked ? 'text-[10px] sm:text-[11px]' : 'text-[12px] sm:text-[13px]'}`}>
                     {currentTimeLabel}
                   </div>
-                  <div className="mt-1 flex items-center gap-1">
+                  <div className="mt-0.5 flex items-center gap-1">
                     <IconButton title="Previous day" onClick={() => shiftSelectedDate(-1)}>
-                      <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <svg xmlns="http://www.w3.org/2000/svg" className={isDocked ? 'h-3 w-3' : 'h-3.5 w-3.5'} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                         <path d="m15 18-6-6 6-6" />
                       </svg>
                     </IconButton>
@@ -735,11 +735,11 @@ export function FullscreenTimelineOverlay({
                       value={selectedDate}
                       max={todayDate}
                       onChange={(event) => changeSelectedDate(event.currentTarget.value)}
-                      className="h-7 rounded-md border border-white/10 bg-black/25 px-2 text-[11px] uppercase tracking-[0.08em] text-white/75 outline-none transition-colors hover:bg-white/10 focus:border-sky-300/50 focus:text-white"
+                      className={`rounded-md border border-white/10 bg-black/25 px-2 uppercase tracking-[0.08em] text-white/75 outline-none transition-colors hover:bg-white/10 focus:border-sky-300/50 focus:text-white ${isDocked ? 'h-5 text-[9px]' : 'h-7 text-[11px]'}`}
                       title={fullDateLabel}
                     />
                     <IconButton title="Next day" onClick={() => shiftSelectedDate(1)} disabled={isTodaySelected}>
-                      <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <svg xmlns="http://www.w3.org/2000/svg" className={isDocked ? 'h-3 w-3' : 'h-3.5 w-3.5'} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                         <path d="m9 18 6-6-6-6" />
                       </svg>
                     </IconButton>
@@ -755,7 +755,7 @@ export function FullscreenTimelineOverlay({
                       type="button"
                       title={`Playback speed ${speed}x`}
                       onClick={() => onPlaybackSpeedChange?.(speed)}
-                      className={`h-6 min-w-[34px] rounded px-1.5 text-[10px] font-semibold tabular-nums transition-colors ${
+                      className={`min-w-[30px] rounded px-1 font-semibold tabular-nums transition-colors ${isDocked ? 'h-5 text-[8px]' : 'h-6 text-[10px]'} ${
                         speed === playbackSpeed
                           ? 'bg-sky-400 text-black'
                           : 'text-white/65 hover:bg-white/10 hover:text-white'
@@ -768,12 +768,12 @@ export function FullscreenTimelineOverlay({
 
                 <div className="hidden min-[700px]:flex items-center gap-1 rounded-md border border-white/10 bg-black/25 p-1">
                   <IconButton title="Back 5m" onClick={() => stepCursor(-300)}>
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="currentColor">
+                    <svg xmlns="http://www.w3.org/2000/svg" className={isDocked ? 'h-3 w-3' : 'h-3.5 w-3.5'} viewBox="0 0 24 24" fill="currentColor">
                       <path d="M6 6h2v12H6zM20 7.4 11.4 12 20 16.6V7.4zM10 7.4 1.4 12 10 16.6V7.4z" />
                     </svg>
                   </IconButton>
                   <IconButton title="Back 1m" onClick={() => stepCursor(-60)}>
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="currentColor">
+                    <svg xmlns="http://www.w3.org/2000/svg" className={isDocked ? 'h-3 w-3' : 'h-3.5 w-3.5'} viewBox="0 0 24 24" fill="currentColor">
                       <path d="M11 12 20 5v14l-9-7Zm-1 0 9-7v14l-9-7ZM4 5h2v14H4z" />
                     </svg>
                   </IconButton>
@@ -783,23 +783,23 @@ export function FullscreenTimelineOverlay({
                     onClick={handlePlayPauseButton}
                   >
                     {isFollowingLive ? (
-                      <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="currentColor">
+                      <svg xmlns="http://www.w3.org/2000/svg" className={isDocked ? 'h-3 w-3' : 'h-3.5 w-3.5'} viewBox="0 0 24 24" fill="currentColor">
                         <rect x="6" y="5" width="4" height="14" rx="1" />
                         <rect x="14" y="5" width="4" height="14" rx="1" />
                       </svg>
                     ) : (
-                      <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="currentColor">
+                      <svg xmlns="http://www.w3.org/2000/svg" className={isDocked ? 'h-3 w-3' : 'h-3.5 w-3.5'} viewBox="0 0 24 24" fill="currentColor">
                         <path d="M8 5.1v13.8l11-6.9-11-6.9Z" />
                       </svg>
                     )}
                   </IconButton>
                   <IconButton title="Forward 1m" onClick={() => stepCursor(60)}>
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="currentColor">
+                    <svg xmlns="http://www.w3.org/2000/svg" className={isDocked ? 'h-3 w-3' : 'h-3.5 w-3.5'} viewBox="0 0 24 24" fill="currentColor">
                       <path d="M13 12 4 5v14l9-7Zm1 0-9-7v14l9-7ZM20 5h-2v14h2z" />
                     </svg>
                   </IconButton>
                   <IconButton title="Forward 5m" onClick={() => stepCursor(300)}>
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="currentColor">
+                    <svg xmlns="http://www.w3.org/2000/svg" className={isDocked ? 'h-3 w-3' : 'h-3.5 w-3.5'} viewBox="0 0 24 24" fill="currentColor">
                       <path d="M18 6h-2v12h2zM4 7.4 12.6 12 4 16.6V7.4zM14 7.4 22.6 12 14 16.6V7.4z" />
                     </svg>
                   </IconButton>
@@ -810,7 +810,7 @@ export function FullscreenTimelineOverlay({
                   onClick={zoomOut}
                   disabled={stripHours(endHour - startHour) >= dayLengthHours}
                 >
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="currentColor">
+                  <svg xmlns="http://www.w3.org/2000/svg" className={isDocked ? 'h-3 w-3' : 'h-3.5 w-3.5'} viewBox="0 0 24 24" fill="currentColor">
                     <path d="M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
                   </svg>
                 </IconButton>
@@ -819,7 +819,7 @@ export function FullscreenTimelineOverlay({
                   onClick={zoomIn}
                   disabled={stripHours(endHour - startHour) <= MIN_FULLSCREEN_TIMELINE_VIEW_HOURS}
                 >
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="currentColor">
+                  <svg xmlns="http://www.w3.org/2000/svg" className={isDocked ? 'h-3 w-3' : 'h-3.5 w-3.5'} viewBox="0 0 24 24" fill="currentColor">
                     <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
                   </svg>
                 </IconButton>
@@ -828,14 +828,14 @@ export function FullscreenTimelineOverlay({
                   type="button"
                   title={isFollowingLive ? 'Current live position' : 'Back to live'}
                   onClick={handleLiveButton}
-                  className="inline-flex h-7 items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-2 text-[10px] font-semibold uppercase tracking-[0.22em] text-white/75 transition-colors hover:bg-white/10"
+                  className={`inline-flex items-center gap-1 rounded-full border border-white/10 bg-white/5 px-2 font-semibold uppercase tracking-[0.22em] text-white/75 transition-colors hover:bg-white/10 ${isDocked ? 'h-5 text-[8px]' : 'h-7 text-[10px]'}`}
                 >
-                  <span className="h-2 w-2 rounded-full bg-emerald-400 shadow-[0_0_10px_rgba(74,222,128,0.55)]" />
+                  <span className={isDocked ? 'h-1 w-1 rounded-full bg-emerald-400 shadow-[0_0_10px_rgba(74,222,128,0.55)]' : 'h-2 w-2 rounded-full bg-emerald-400 shadow-[0_0_10px_rgba(74,222,128,0.55)]'} />
                   LIVE
                 </button>
 
-                <div className="hidden min-[700px]:flex items-center gap-1.5 rounded-full border border-sky-400/20 bg-sky-400/10 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.22em] text-sky-200">
-                  <span className="h-2 w-2 rounded-full bg-sky-300 shadow-[0_0_10px_rgba(125,211,252,0.6)]" />
+                <div className={`hidden min-[700px]:flex items-center gap-1 rounded-full border border-sky-400/20 bg-sky-400/10 px-2 font-semibold uppercase tracking-[0.22em] text-sky-200 ${isDocked ? 'py-0 text-[8px]' : 'py-1 text-[10px]'}`}>
+                  <span className={isDocked ? 'h-1 w-1 rounded-full bg-sky-300 shadow-[0_0_10px_rgba(125,211,252,0.6)]' : 'h-2 w-2 rounded-full bg-sky-300 shadow-[0_0_10px_rgba(125,211,252,0.6)]'} />
                   {isFollowingLive ? 'SYNC' : 'PAUSED'}
                 </div>
               </div>
@@ -854,12 +854,13 @@ export function FullscreenTimelineOverlay({
                   loadingText={t('common.loading')}
                   errorText={t('timeline.reloadTimelineData')}
                   emptyText={t('recordings.noRecordingsFound')}
+                  compact={isDocked}
                   onPreviewSelect={handlePreviewSelect}
                   onWheel={handleWheelZoom}
                   renderTrackContent={() => (
                     <div
                       ref={trackRef}
-                      className="relative h-11 overflow-hidden rounded-xl border border-white/10 bg-gradient-to-b from-[#121417] via-[#0d0f12] to-[#07080a] shadow-inner"
+                      className={`relative cursor-default overflow-hidden rounded-xl border border-white/10 bg-gradient-to-b from-[#121417] via-[#0d0f12] to-[#07080a] shadow-inner ${isDocked ? 'h-6' : 'h-11'}`}
                       onPointerDown={handleTrackPointerDown}
                       onPointerMove={handleTrackPointerMove}
                       onPointerUp={endTrackScrub}
@@ -907,8 +908,8 @@ export function FullscreenTimelineOverlay({
                             transform: 'translateX(-50%)'
                           }}
                         >
-                          <div className="mx-auto h-4 w-[2px] rounded-full bg-amber-400 shadow-[0_0_10px_rgba(251,191,36,0.75)]" />
-                          <div className="mt-0.5 -translate-x-1/2 rounded-sm border border-amber-300/30 bg-amber-500/90 px-1.5 py-0.5 text-[9px] font-semibold tracking-[0.12em] text-black shadow-lg">
+                          <div className={isDocked ? 'mx-auto h-2.5 w-[2px] rounded-full bg-amber-400 shadow-[0_0_10px_rgba(251,191,36,0.75)]' : 'mx-auto h-4 w-[2px] rounded-full bg-amber-400 shadow-[0_0_10px_rgba(251,191,36,0.75)]'} />
+                          <div className={`mt-0.5 -translate-x-1/2 rounded-sm border border-amber-300/30 bg-amber-500/90 px-1 py-0.5 font-semibold tracking-[0.12em] text-black shadow-lg ${isDocked ? 'text-[7px]' : 'text-[9px]'}`}>
                             {formatClockLabel(activeCursorTimestamp)}
                           </div>
                         </div>
@@ -916,9 +917,9 @@ export function FullscreenTimelineOverlay({
                     </div>
                   )}
                   footerContent={(
-                    <div className="flex items-center justify-end gap-2 px-1 text-[10px] uppercase tracking-[0.22em] text-white/35">
-                      <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-white/65">Click to seek</span>
-                      <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-white/65">
+                    <div className={`flex items-center justify-end gap-1.5 px-1 uppercase tracking-[0.22em] text-white/35 ${isDocked ? 'text-[8px]' : 'text-[10px]'}`}>
+                      <span className="rounded-full border border-white/10 bg-white/5 px-1.5 py-0.5 text-white/65">Click to seek</span>
+                      <span className="rounded-full border border-white/10 bg-white/5 px-1.5 py-0.5 text-white/65">
                         {isFollowingLive ? 'Live sync' : 'Paused'}
                       </span>
                     </div>
@@ -926,28 +927,28 @@ export function FullscreenTimelineOverlay({
                 />
               </div>
 
-              <aside className="border-t border-white/10 bg-black/30 p-2 min-[980px]:border-l min-[980px]:border-t-0">
+              <aside className={`border-t border-white/10 bg-black/30 p-2 min-[980px]:border-l min-[980px]:border-t-0 ${isDocked ? 'min-[980px]:p-1' : ''}`}>
                 <div className="mb-2 flex items-center justify-between gap-2">
-                  <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-white/55">Motion clips</div>
-                  <div className="h-2 w-2 rounded-full bg-emerald-400 shadow-[0_0_10px_rgba(74,222,128,0.55)]" />
+                  <div className={isDocked ? 'text-[9px] font-semibold uppercase tracking-[0.22em] text-white/55' : 'text-[10px] font-semibold uppercase tracking-[0.22em] text-white/55'}>Motion clips</div>
+                  <div className={isDocked ? 'h-1.5 w-1.5 rounded-full bg-emerald-400 shadow-[0_0_10px_rgba(74,222,128,0.55)]' : 'h-2 w-2 rounded-full bg-emerald-400 shadow-[0_0_10px_rgba(74,222,128,0.55)]'} />
                 </div>
-                <div className="max-h-[7.35rem] space-y-1 overflow-y-auto pr-1">
+                <div className={isDocked ? 'max-h-[4rem] space-y-1 overflow-y-auto pr-1' : 'max-h-[7.35rem] space-y-1 overflow-y-auto pr-1'}>
                   {isMotionLoading && motionSegments.length === 0 ? (
-                    <div className="px-2 py-3 text-[11px] text-white/45">{t('common.loading')}</div>
+                    <div className={isDocked ? 'px-1.5 py-1.5 text-[9px] text-white/45' : 'px-2 py-3 text-[11px] text-white/45'}>{t('common.loading')}</div>
                   ) : motionSegments.length === 0 ? (
-                    <div className="px-2 py-3 text-[11px] text-white/40">No motion clips</div>
+                    <div className={isDocked ? 'px-1.5 py-1.5 text-[9px] text-white/40' : 'px-2 py-3 text-[11px] text-white/40'}>No motion clips</div>
                   ) : (
                     motionSegments.map((segment) => (
                       <button
                         key={`motion-${segment.id}-${segment.start_timestamp}`}
                         type="button"
                         onClick={(event) => handlePreviewSelect(buildPlaybackSample(segment, segment.start_timestamp), event)}
-                        className="flex w-full items-center justify-between gap-2 rounded-md border border-white/10 bg-white/5 px-2 py-1.5 text-left transition-colors hover:border-amber-300/30 hover:bg-amber-300/10"
+                        className={`flex w-full items-center justify-between gap-2 rounded-md border border-white/10 bg-white/5 px-1.5 text-left transition-colors hover:border-amber-300/30 hover:bg-amber-300/10 ${isDocked ? 'py-0.5' : 'py-1.5'}`}
                       >
-                        <span className="min-w-0 font-mono text-[11px] tabular-nums text-white/80">
+                        <span className={isDocked ? 'min-w-0 font-mono text-[9px] tabular-nums text-white/80' : 'min-w-0 font-mono text-[11px] tabular-nums text-white/80'}>
                           {formatClockLabel(segment.start_timestamp)}
                         </span>
-                        <span className="shrink-0 text-[10px] text-white/45">
+                        <span className={isDocked ? 'shrink-0 text-[8px] text-white/45' : 'shrink-0 text-[10px] text-white/45'}>
                           {formatDurationLabel(Number(segment.end_timestamp) - Number(segment.start_timestamp))}
                         </span>
                       </button>

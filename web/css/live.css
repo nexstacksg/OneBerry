@@ -458,6 +458,11 @@
     cursor: grabbing;
 }
 
+.fullscreen-mode .live-workspace-tile,
+.fullscreen-mode .live-workspace-tile:active {
+    cursor: default;
+}
+
 @starting-style {
     .live-workspace-tile,
     .live-workspace-slot {
