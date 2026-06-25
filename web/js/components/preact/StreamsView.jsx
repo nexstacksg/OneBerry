@@ -111,6 +111,79 @@ function applyCredentialsToStreamUrl(url, username, password) {
   }
 }
 
+function getDiscoveryProfileSortScore(profile) {
+  if (!profile) {
+    return 0;
+  }
+
+  const name = String(profile.name || '').toLowerCase();
+  const width = Number(profile.width) || 0;
+  const height = Number(profile.height) || 0;
+  const fps = Number(profile.fps) || 0;
+  const bitrate = Number(profile.bitrate) || 0;
+  let score = (width * height) + (bitrate * 8) + (fps * 250);
+
+  if (/(main|primary|high|stream[\s_-]*1|\b1\b)/.test(name)) {
+    score += 100000000;
+  }
+
+  if (/(sub|secondary|low|stream[\s_-]*2|\b2\b)/.test(name)) {
+    score -= 50000000;
+  }
+
+  return score;
+}
+
+function getDiscoveryProfileRole(profile, index) {
+  const backendRole = String(profile?.stream_role || '').toLowerCase();
+  if (backendRole === 'primary' || backendRole === 'secondary' || backendRole === 'additional') {
+    return backendRole;
+  }
+
+  const name = String(profile?.name || '').toLowerCase();
+  if (/(main|primary|high|stream[\s_-]*1|\b1\b)/.test(name)) {
+    return 'primary';
+  }
+  if (/(sub|secondary|low|stream[\s_-]*2|\b2\b)/.test(name)) {
+    return 'secondary';
+  }
+
+  if (index === 0) return 'primary';
+  if (index === 1) return 'secondary';
+  return 'additional';
+}
+
+function getDiscoveryProfileRoleLabel(role) {
+  if (role === 'primary') return 'Primary stream';
+  if (role === 'secondary') return 'Secondary stream';
+  return 'Additional stream';
+}
+
+function getDiscoveryProfileStreamName(device, profile, role) {
+  const deviceName = String(device?.name || device?.ip_address || 'camera').trim();
+  const safeDeviceName = deviceName.replace(/\s+/g, '_');
+  const profileName = String(profile?.name || 'stream').trim().replace(/\s+/g, '_');
+
+  if (role === 'primary') {
+    return `${safeDeviceName}_main`;
+  }
+
+  if (role === 'secondary') {
+    return `${safeDeviceName}_sub`;
+  }
+
+  return `${safeDeviceName}_${profileName}`;
+}
+
+function buildDiscoveryPairName(device, primaryProfile, secondaryProfile) {
+  const primaryName = getDiscoveryProfileStreamName(device, primaryProfile, 'primary');
+  if (!secondaryProfile) {
+    return primaryName;
+  }
+
+  return `${primaryName}_sub`;
+}
+
 /**
  * StreamsView component
  * @returns {JSX.Element} StreamsView component
@@ -164,6 +237,7 @@ export function StreamsView() {
   const [deviceProfiles, setDeviceProfiles] = useState([]);
   const [selectedDevice, setSelectedDevice] = useState(null);
   const [selectedProfile, setSelectedProfile] = useState(null);
+  const [selectedSecondaryProfile, setSelectedSecondaryProfile] = useState(null);
   const [customStreamName, setCustomStreamName] = useState('');
   const [onvifCredentials, setOnvifCredentials] = useState({ username: '', password: '' });
   const [isDiscovering, setIsDiscovering] = useState(false);
@@ -989,6 +1063,7 @@ export function StreamsView() {
     setDeviceProfiles([]);
     setSelectedDevice(null);
     setSelectedProfile(null);
+    setSelectedSecondaryProfile(null);
     setCustomStreamName('');
     setShowCustomNameInput(false);
     setOnvifResolution('');
@@ -1113,6 +1188,7 @@ export function StreamsView() {
         setDiscoveredDevices([]);
         setSelectedDevice(null);
         setSelectedProfile(null);
+        setSelectedSecondaryProfile(null);
         setDeviceProfiles([]);
         setShowCustomNameInput(false);
       },
@@ -1363,6 +1439,13 @@ export function StreamsView() {
       onvifCredentials.username,
       onvifCredentials.password
     );
+    const secondaryStreamUrl = selectedSecondaryProfile?.stream_uri
+      ? applyCredentialsToStreamUrl(
+          selectedSecondaryProfile.stream_uri,
+          onvifCredentials.username,
+          onvifCredentials.password
+        )
+      : '';
 
     // Prepare stream data
     const streamData = {
@@ -1372,7 +1455,7 @@ export function StreamsView() {
       // This mapping intentionally translates the ONVIF profile shape to the
       // stream configuration shape expected by the API.
       url: streamUrl,
-      secondary_url: '',
+      secondary_url: secondaryStreamUrl,
       enabled: true,
       streaming_enabled: true,
       width,
@@ -1399,6 +1482,7 @@ export function StreamsView() {
         setShowCustomNameInput(false);
         setOnvifModalVisible(false);
         setSelectedProfile(null);
+        setSelectedSecondaryProfile(null);
         setSelectedDevice(null);
         setCustomStreamName('');
         setOnvifResolution('');
@@ -1414,27 +1498,50 @@ export function StreamsView() {
   const getDeviceProfiles = (device) => {
     setSelectedDevice(device);
     setDeviceProfiles([]);
+    setSelectedProfile(null);
+    setSelectedSecondaryProfile(null);
     getDeviceProfilesMutation.mutate({
       device,
       credentials: onvifCredentials
     });
   };
 
-  // Add ONVIF device as stream with selected profile
-  const addOnvifDeviceAsStream = (profile) => {
-    setSelectedProfile({ ...profile, isOnvif: true });
-    setCustomStreamName(`${selectedDevice.name || t('streams.onvifDefaultName')}_${profile.name || t('streams.defaultStreamName')}`);
-    setOnvifResolution(formatResolutionValue(profile.width, profile.height));
-    setOnvifFps(formatFpsValue(profile.fps));
+  const openSelectedDiscoveryStream = () => {
+    if (!selectedDevice || !selectedProfile) {
+      showStatusMessage(t('streams.missingRequiredInformation'), 'error', 5000);
+      return;
+    }
+
+    setCustomStreamName(buildDiscoveryPairName(selectedDevice, selectedProfile, selectedSecondaryProfile));
+    setOnvifResolution(formatResolutionValue(selectedProfile.width, selectedProfile.height));
+    setOnvifFps(formatFpsValue(selectedProfile.fps));
     setShowCustomNameInput(true);
   };
 
-  const addRtspDeviceAsStream = (profile) => {
+  // Select ONVIF device profile for the new stream
+  const addOnvifDeviceAsStream = (profile, role = 'additional') => {
+    const normalizedProfile = { ...profile, isOnvif: true };
+    if (role === 'secondary') {
+      setSelectedSecondaryProfile(normalizedProfile);
+      return;
+    }
+
+    setSelectedProfile(normalizedProfile);
+    if (selectedSecondaryProfile?.token === normalizedProfile.token) {
+      setSelectedSecondaryProfile(null);
+    }
+  };
+
+  const addRtspDeviceAsStream = (profile, role = 'additional') => {
+    if (role === 'secondary') {
+      setSelectedSecondaryProfile(profile);
+      return;
+    }
+
     setSelectedProfile(profile);
-    setCustomStreamName(`${selectedDevice?.ip_address || 'RTSP'}_${profile.name || t('streams.defaultStreamName')}`);
-    setOnvifResolution(formatResolutionValue(profile.width, profile.height));
-    setOnvifFps(formatFpsValue(profile.fps));
-    setShowCustomNameInput(true);
+    if (selectedSecondaryProfile?.token === profile.token) {
+      setSelectedSecondaryProfile(null);
+    }
   };
 
   // Check if a discovered ONVIF device is already added as a stream
@@ -1488,6 +1595,7 @@ export function StreamsView() {
     // Store the selected device first
     setSelectedDevice(device);
     setDeviceProfiles([]);
+    setSelectedSecondaryProfile(null);
 
     if (device.rtsp && !device.onvif) {
       const ports = Array.isArray(device.rtsp_ports) ? device.rtsp_ports : [];
@@ -1531,7 +1639,72 @@ export function StreamsView() {
     return 'bg-muted text-muted-foreground border-border';
   };
 
+  const rankedDeviceProfiles = [...deviceProfiles].sort((a, b) => getDiscoveryProfileSortScore(b) - getDiscoveryProfileSortScore(a));
   const selectedDeviceAlreadyAdded = selectedDevice ? isDeviceAlreadyAdded(selectedDevice) : false;
+  const renderDiscoveredProfileCard = (profile, index, variant = 'default') => {
+    if (!profile) {
+      return null;
+    }
+
+    const role = getDiscoveryProfileRole(profile, index);
+    const roleLabel = getDiscoveryProfileRoleLabel(role);
+    const isRtsp = !!profile.isRtsp;
+    const isPrimaryVariant = variant === 'primary';
+    const isSecondaryVariant = variant === 'secondary';
+    const isPrimarySelected = selectedProfile?.token === profile.token;
+    const isSecondarySelected = selectedSecondaryProfile?.token === profile.token;
+
+    return (
+      <div
+        key={profile.token || `${profile.name || 'profile'}-${index}`}
+        className={`rounded-md border p-3 ${
+          isPrimaryVariant
+            ? 'border-emerald-200 bg-emerald-50/40'
+            : isSecondaryVariant
+              ? 'border-blue-200 bg-blue-50/40'
+              : 'border-border bg-background'
+        }`}
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="font-medium text-sm">{profile.name}</div>
+              <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium ${
+                role === 'primary'
+                  ? 'border-emerald-200 bg-emerald-100 text-emerald-700'
+                  : role === 'secondary'
+                    ? 'border-blue-200 bg-blue-100 text-blue-700'
+                    : 'border-border bg-muted text-muted-foreground'
+              }`}>
+                {roleLabel}
+              </span>
+            </div>
+            <div className="mt-1 text-xs text-muted-foreground">
+              {profile.width || 0}x{profile.height || 0} · {profile.encoding || t('common.unknown')} · {profile.fps || 0} {t('streams.fps')}
+            </div>
+          </div>
+        </div>
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          <button
+            className={isPrimarySelected ? 'btn-secondary focus:outline-none focus:ring-2 focus:ring-primary' : 'btn-primary focus:outline-none focus:ring-2 focus:ring-primary'}
+            onClick={() => (isRtsp ? addRtspDeviceAsStream(profile, 'primary') : addOnvifDeviceAsStream(profile, 'primary'))}
+            type="button"
+            disabled={isSecondarySelected}
+          >
+            {isPrimarySelected ? 'Primary selected' : 'Use as primary'}
+          </button>
+          <button
+            className={isSecondarySelected ? 'btn-secondary focus:outline-none focus:ring-2 focus:ring-primary' : 'btn-primary focus:outline-none focus:ring-2 focus:ring-primary'}
+            onClick={() => (isRtsp ? addRtspDeviceAsStream(profile, 'secondary') : addOnvifDeviceAsStream(profile, 'secondary'))}
+            type="button"
+            disabled={isPrimarySelected}
+          >
+            {isSecondarySelected ? 'Secondary selected' : 'Use as secondary'}
+          </button>
+        </div>
+      </div>
+    );
+  };
 
   return (
     <section id="streams-page" className="page">
@@ -2136,6 +2309,7 @@ export function StreamsView() {
                           onClick={() => {
                             setSelectedDevice(device);
                             setSelectedProfile(null);
+                            setSelectedSecondaryProfile(null);
                             setDeviceProfiles([]);
                             setShowCustomNameInput(false);
                           }}
@@ -2144,6 +2318,7 @@ export function StreamsView() {
                               event.preventDefault();
                               setSelectedDevice(device);
                               setSelectedProfile(null);
+                              setSelectedSecondaryProfile(null);
                               setDeviceProfiles([]);
                               setShowCustomNameInput(false);
                             }
@@ -2178,6 +2353,7 @@ export function StreamsView() {
                                   event.stopPropagation();
                                   setSelectedDevice(device);
                                   setSelectedProfile(null);
+                                  setSelectedSecondaryProfile(null);
                                   setDeviceProfiles([]);
                                   setShowCustomNameInput(false);
                                 }}
@@ -2256,31 +2432,56 @@ export function StreamsView() {
                         >
                           {isLoadingProfiles ? t('common.loading') : t('streams.connect')}
                         </button>
+
+                        <div className="rounded-lg border border-border bg-muted/25 p-4">
+                          <h4 className="text-sm font-semibold">Selected stream pair</h4>
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            Choose a primary stream and optional secondary stream from the same camera, then continue once.
+                          </p>
+                          <div className="mt-3 space-y-2 text-sm">
+                            <div className="flex items-start justify-between gap-3">
+                              <span className="text-muted-foreground">Primary</span>
+                              <span className="text-right text-foreground">
+                                {selectedProfile ? selectedProfile.name : 'Not selected'}
+                              </span>
+                            </div>
+                            <div className="flex items-start justify-between gap-3">
+                              <span className="text-muted-foreground">Secondary</span>
+                              <span className="text-right text-foreground">
+                                {selectedSecondaryProfile ? selectedSecondaryProfile.name : 'Optional'}
+                              </span>
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            className="btn-primary mt-4 w-full focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-50"
+                            disabled={!selectedProfile}
+                            onClick={openSelectedDiscoveryStream}
+                          >
+                            Continue
+                          </button>
+                        </div>
                       </div>
                     ) : (
                       <p className="mt-2 text-sm text-muted-foreground">{t('streams.selectDeviceHelp')}</p>
                     )}
                   </div>
 
-                  {selectedDevice && deviceProfiles.length > 0 && (
+                  {selectedDevice && rankedDeviceProfiles.length > 0 && (
                     <div className="rounded-lg border border-border bg-background p-4">
                       <h4 className="text-sm font-semibold">{t('streams.availableProfilesFor', { ip: selectedDevice.ip_address })}</h4>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Primary and secondary streams are shown first so you can add both from the same camera.
+                      </p>
                       <div className="mt-3 space-y-2">
-                        {deviceProfiles.map(profile => (
-                          <div key={profile.token} className="rounded-md border border-border p-3">
-                            <div className="font-medium text-sm">{profile.name}</div>
-                            <div className="mt-1 text-xs text-muted-foreground">
-                              {profile.width || 0}x{profile.height || 0} · {profile.encoding || t('common.unknown')} · {profile.fps || 0} {t('streams.fps')}
-                            </div>
-                            <button
-                              className="btn-primary mt-3 w-full focus:outline-none focus:ring-2 focus:ring-primary"
-                              onClick={() => profile.isRtsp ? addRtspDeviceAsStream(profile) : addOnvifDeviceAsStream(profile)}
-                              type="button"
-                            >
-                              {t('streams.addAsStream')}
-                            </button>
+                        {rankedDeviceProfiles[0] && renderDiscoveredProfileCard(rankedDeviceProfiles[0], 0, 'primary')}
+                        {rankedDeviceProfiles[1] && renderDiscoveredProfileCard(rankedDeviceProfiles[1], 1, 'secondary')}
+                        {rankedDeviceProfiles.length > 2 && (
+                          <div className="space-y-2 pt-1">
+                            <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Additional profiles</div>
+                            {rankedDeviceProfiles.slice(2).map((profile, index) => renderDiscoveredProfileCard(profile, index + 2))}
                           </div>
-                        ))}
+                        )}
                       </div>
                     </div>
                   )}
@@ -2311,7 +2512,16 @@ export function StreamsView() {
           <div className="bg-card text-card-foreground rounded-lg shadow-xl max-w-md w-full">
             <div className="flex justify-between items-center p-4 border-b border-border">
               <h3 className="text-lg font-medium">{t('streams.streamName')}</h3>
-              <span className="text-2xl cursor-pointer" onClick={() => setShowCustomNameInput(false)}>×</span>
+              <span
+                className="text-2xl cursor-pointer"
+                onClick={() => {
+                  setShowCustomNameInput(false);
+                  setSelectedProfile(null);
+                  setSelectedSecondaryProfile(null);
+                }}
+              >
+                ×
+              </span>
             </div>
             <div className="p-4">
               <div className="mb-4">
@@ -2368,6 +2578,7 @@ export function StreamsView() {
                   onClick={() => {
                     setShowCustomNameInput(false);
                     setSelectedProfile(null);
+                    setSelectedSecondaryProfile(null);
                   }}
                   type="button"
               >
