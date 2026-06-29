@@ -22,7 +22,7 @@ LightNVR provides a lightweight yet powerful solution for recording and managing
 
 #### 🎯 Smart Detection & Recording
 - **Detection Zones**: Visual polygon-based zone editor for targeted object detection - define multiple zones per camera with custom class filters and confidence thresholds
-- **light-object-detect Integration**: Seamless integration with [light-object-detect](https://github.com/opensensor/light-object-detect) API for ONNX/TFLite-based object detection with zone filtering
+- **light-object-detect Integration**: Seamless integration with [light-object-detect](https://github.com/opensensor/light-object-detect) API for model-based object detection with zone filtering
 - **ONVIF Motion Recording**: Automated recording triggered by ONVIF motion detection events
 - **Object Detection**: Optional SOD integration for motion and object detection (supports both RealNet and CNN models)
 
@@ -108,7 +108,7 @@ LightNVR is perfect for:
 | **Detection Zones** | ✅ Visual polygon editor | ❌ Usually grid-based or none | ✅ Varies by provider |
 | **Custom Themes** | ✅ 7 themes + intensity control | ❌ Fixed UI | ⚠️ Limited options |
 | **WebRTC Streaming** | ✅ Sub-second latency | ⚠️ Often RTSP only | ✅ Usually supported |
-| **Object Detection** | ✅ ONNX/TFLite/SOD support | ⚠️ Proprietary or limited | ✅ Usually included |
+| **Object Detection** | External detection API and SOD support | Proprietary or limited | Usually included |
 | **Privacy** | ✅ 100% local, no cloud | ✅ Local | ❌ Data sent to cloud |
 | **Cost** | ✅ Free & open-source | 💰 $200-2000+ | 💰 $10-50/month per camera |
 | **Customization** | ✅ Full source code access | ❌ Closed source | ❌ Limited to API |
@@ -188,11 +188,11 @@ Experience real-time camera feeds with sub-second latency using WebRTC technolog
 
 ### light-object-detect Integration
 
-Powerful object detection using modern ONNX and TFLite models with zone-aware filtering.
+Powerful object detection through an external detection API with zone-aware filtering.
 
 **Integration features:**
 - Per-stream API endpoint configuration
-- Configurable detection backends (ONNX, TFLite, OpenCV)
+- Configurable external detection backends, depending on the deployed detection service
 - Zone-based filtering to reduce false positives
 - Track ID and zone ID support for advanced analytics
 - Direct go2rtc frame extraction (no FFmpeg overhead)
@@ -534,7 +534,7 @@ LightNVR is built on the shoulders of giants. Special thanks to:
 - **[HLS.js](https://github.com/video-dev/hls.js/)** - JavaScript HLS client
 
 ### Detection & AI
-- **[light-object-detect](https://github.com/opensensor/light-object-detect)** - ONNX/TFLite object detection API
+- **[light-object-detect](https://github.com/opensensor/light-object-detect)** - External object detection API
 - **[SOD](https://github.com/symisc/sod)** - Embedded computer vision library
 
 ### Community

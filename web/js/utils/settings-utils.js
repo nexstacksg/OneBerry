@@ -5,6 +5,9 @@
 
 import { fetchJSON } from '../fetch-utils.js';
 import { nowMilliseconds } from './date-utils.js';
+import { createLogger } from './logger.js';
+
+const log = createLogger('settings');
 
 // Cache for settings
 let settingsCache = null;
@@ -45,11 +48,11 @@ export async function getSettings(forceRefresh = false) {
     return settings;
   }).catch(error => {
     settingsInflight = null;
-    console.error('Failed to fetch settings:', error);
+    log.error('Failed to fetch settings:', error);
 
     // Return cached settings if available, even if stale
     if (settingsCache) {
-      console.warn('Using stale cached settings');
+      log.warn('Using stale cached settings');
       return settingsCache;
     }
 
@@ -139,7 +142,7 @@ let go2rtcAvailableCache = null;
 let go2rtcAvailableCacheTime = 0;
 // 5-minute TTL: go2rtc doesn't go up/down during normal viewing sessions.
 // A short TTL caused false-negative health checks when go2rtc was busy serving
-// many streams — the check timed out, flipped the cache to false, and caused
+// many streams - the check timed out, flipped the cache to false, and caused
 // a stampede of re-registration requests from HLS.js error-recovery loops.
 const GO2RTC_CACHE_TTL = 300000;
 
@@ -182,7 +185,7 @@ export async function isGo2rtcAvailable(forceRefresh = false) {
       go2rtcAvailableCacheTime = nowMilliseconds();
 
       if (!available) {
-        console.warn(`go2rtc API responded with status ${response.status}`);
+        log.warn(`go2rtc API responded with status ${response.status}`);
       }
       return available;
     } catch (error) {
@@ -191,11 +194,11 @@ export async function isGo2rtcAvailable(forceRefresh = false) {
       // go2rtc under load (e.g. 60+ simultaneous HLS streams) may be slow to
       // respond to health checks even though it is serving streams correctly.
       if (go2rtcAvailableCache === true) {
-        console.warn(`go2rtc health check failed (${error.message}) but was previously available — assuming still up`);
+        log.warn(`go2rtc health check failed (${error.message}) but was previously available - assuming still up`);
         go2rtcAvailableCacheTime = nowMilliseconds(); // reset TTL so we don't spam retries
         return true;
       }
-      console.warn('go2rtc is not available:', error.message);
+      log.warn('go2rtc is not available:', error.message);
       go2rtcAvailableCache = false;
       go2rtcAvailableCacheTime = nowMilliseconds();
       return false;

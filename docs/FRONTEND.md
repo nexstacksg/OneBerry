@@ -9,7 +9,7 @@ The LightNVR frontend is a multi-page application built with modern web technolo
 - **Preact** for lightweight component-based UI (React-compatible)
 - **Tailwind CSS** for utility-first styling with dark mode and theme customization
 - **Vite** for build tooling, bundling, and development server
-- **@tanstack/query** for data fetching and caching
+- **@preact-signals/query** for data fetching and caching
 - **HLS.js** for HLS video playback
 - **WebRTC/MSE** for low-latency live viewing via go2rtc
 
@@ -17,87 +17,47 @@ The LightNVR frontend is a multi-page application built with modern web technolo
 
 ```
 web/
-├── css/                              # Stylesheets
-├── js/
-│   ├── pages/                        # Page-level entry points
-│   │   ├── index-page.jsx            # Live view
-│   │   ├── recordings-page.jsx       # Recording browser
-│   │   ├── streams-page.jsx          # Stream management
-│   │   ├── settings-page.jsx         # System settings
-│   │   ├── system-page.jsx           # System info and logs
-│   │   ├── users-page.jsx            # User management
-│   │   ├── timeline-page.jsx         # Timeline playback
-│   │   ├── hls-page.jsx              # Direct HLS viewer
-│   │   └── login-page.jsx            # Authentication
-│   ├── components/
-│   │   └── preact/                   # Preact components
-│   │       ├── LiveView.jsx          # Live camera grid
-│   │       ├── WebRTCVideoCell.jsx   # WebRTC video player
-│   │       ├── HLSVideoCell.jsx      # HLS video player
-│   │       ├── MSEVideoCell.jsx      # MSE video player
-│   │       ├── RecordingsView.jsx    # Recording browser
-│   │       ├── StreamsView.jsx       # Stream list
-│   │       ├── StreamConfigModal.jsx # Stream config with zones
-│   │       ├── StreamDeleteModal.jsx # Stream deletion
-│   │       ├── SettingsView.jsx      # System settings
-│   │       ├── SystemView.jsx        # System info dashboard
-│   │       ├── UsersView.jsx         # User management
-│   │       ├── LoginView.jsx         # Login form
-│   │       ├── ZoneEditor.jsx        # Detection zone editor
-│   │       ├── DetectionOverlay.jsx  # Detection overlay
-│   │       ├── PTZControls.jsx       # Pan-Tilt-Zoom controls
-│   │       ├── ThemeCustomizer.jsx   # Theme/dark mode
-│   │       ├── SnapshotManager.jsx   # Camera snapshots
-│   │       ├── FullscreenManager.jsx # Fullscreen video
-│   │       ├── BatchDeleteModal.jsx  # Batch recording delete
-│   │       ├── Toast.jsx / ToastContainer.jsx  # Notifications
-│   │       ├── Header.jsx / Footer.jsx         # Layout
-│   │       ├── LoadingIndicator.jsx  # Loading spinner
-│   │       ├── UI.jsx                # Shared UI primitives
-│   │       ├── recordings/           # Recording sub-components
-│   │       │   ├── ActiveFilters.jsx
-│   │       │   ├── FiltersSidebar.jsx
-│   │       │   ├── PaginationControls.jsx
-│   │       │   ├── RecordingsTable.jsx
-│   │       │   ├── formatUtils.js
-│   │       │   ├── recordingsAPI.jsx
-│   │       │   └── urlUtils.js
-│   │       ├── system/               # System sub-components
-│   │       │   ├── LogsView.jsx / LogsPoller.jsx
-│   │       │   ├── MemoryStorage.jsx
-│   │       │   ├── NetworkInfo.jsx
-│   │       │   ├── StreamStorage.jsx / StreamsInfo.jsx
-│   │       │   ├── SystemControls.jsx / SystemInfo.jsx
-│   │       │   ├── RestartModal.jsx
-│   │       │   └── SystemUtils.js
-│   │       ├── timeline/             # Timeline sub-components
-│   │       │   ├── TimelinePage.jsx
-│   │       │   ├── TimelinePlayer.jsx
-│   │       │   ├── TimelineSegments.jsx
-│   │       │   ├── TimelineRuler.jsx
-│   │       │   ├── TimelineCursor.jsx
-│   │       │   ├── TimelineControls.jsx
-│   │       │   └── SpeedControls.jsx
-│   │       └── users/                # User sub-components
-│   │           ├── UsersTable.jsx
-│   │           ├── AddUserModal.jsx
-│   │           ├── EditUserModal.jsx
-│   │           ├── DeleteUserModal.jsx
-│   │           ├── ApiKeyModal.jsx
-│   │           ├── TotpSetupModal.jsx
-│   │           └── UserRoles.js
-│   ├── utils/                        # Utility modules
-│   │   ├── auth-utils.js
-│   │   ├── dom-utils.js
-│   │   ├── settings-utils.js
-│   │   ├── theme-init.js
-│   │   └── url-utils.js
-│   ├── lib/                          # Third-party libraries
-│   ├── fetch-utils.js                # HTTP fetch helpers
-│   ├── query-client.js               # @tanstack/query client
-│   ├── url-param-handler.js          # URL parameter management
-│   └── version.js                    # Version info
-└── *.html                            # HTML entry points
+|-- css/                              # Stylesheets
+|-- js/
+|   |-- pages/                        # Page-level entry points
+|   |   |-- index-page.jsx            # Live view
+|   |   |-- recordings-page.jsx       # Recording browser
+|   |   |-- streams-page.jsx          # Stream management
+|   |   |-- settings-page.jsx         # System settings
+|   |   |-- system-page.jsx           # System info and logs
+|   |   |-- users-page.jsx            # User management
+|   |   |-- timeline-page.jsx         # Timeline playback
+|   |   |-- hls-page.jsx              # Direct HLS viewer
+|   |   `-- login-page.jsx            # Authentication
+|   |-- components/
+|   |   `-- preact/                   # Preact components and feature groups
+|   |       |-- recordings/           # Recording sub-components
+|   |       |-- system/               # System sub-components
+|   |       |-- timeline/             # Timeline sub-components
+|   |       |-- users/                # User sub-components
+|   |       |-- LiveView.jsx
+|   |       |-- WebRTCVideoCell.jsx
+|   |       |-- HLSVideoCell.jsx
+|   |       |-- MSEVideoCell.jsx
+|   |       |-- RecordingsView.jsx
+|   |       |-- StreamsView.jsx
+|   |       |-- StreamConfigModal.jsx
+|   |       |-- SettingsView.jsx
+|   |       |-- SystemView.jsx
+|   |       |-- UsersView.jsx
+|   |       |-- LoginView.jsx
+|   |       |-- ZoneEditor.jsx
+|   |       |-- DetectionOverlay.jsx
+|   |       |-- PTZControls.jsx
+|   |       |-- ThemeCustomizer.jsx
+|   |       `-- UI.jsx
+|   |-- utils/                        # Utility modules
+|   |-- lib/                          # Third-party libraries
+|   |-- fetch-utils.js                # HTTP fetch helpers
+|   |-- query-client.js               # @preact-signals/query client wrapper
+|   |-- url-param-handler.js          # URL parameter management
+|   `-- version.js                    # Version info
+`-- *.html                            # HTML entry points
 ```
 
 ## Tailwind CSS Integration
@@ -202,22 +162,22 @@ export function StreamCard({ stream, onToggle, onEdit, onDelete }) {
 
 ## State Management
 
-State management uses a combination of Preact hooks and @tanstack/query:
+State management uses a combination of Preact hooks and @preact-signals/query:
 
-- **@tanstack/query (Preact Query)**: Primary data-fetching and server-state caching layer. Handles loading states, error handling, retries, cache invalidation, and stale-while-revalidate patterns.
+- **@preact-signals/query**: Primary data-fetching and server-state caching layer. Handles loading states, error handling, retries, cache invalidation, and stale-while-revalidate patterns.
 - **useState / useEffect**: For component-local UI state (modals, forms, toggles)
 - **useCallback / useMemo**: For memoized callbacks and computed values
 - **useRef**: For DOM element references and persistent values across renders
 
 ### Data Fetching with Preact Query
 
-The `query-client.js` module provides custom hooks that wrap @tanstack/query with `enhancedFetch` (automatic timeout, retries, auth redirect on 401):
+The `query-client.js` module provides custom hooks that wrap @preact-signals/query with `enhancedFetch` (automatic timeout, retries, auth redirect on 401):
 
-- `useQuery(key, url, options)` — Declarative data fetching with caching
-- `useMutation(options)` — For POST/PUT/DELETE operations
-- `usePostMutation(url)` / `usePutMutation(url)` — Convenience mutation hooks
-- `useQueryClient()` — Access query client for cache invalidation
-- `prefetchQuery(key, url)` — Prefetch data into cache
+- `useQuery(key, url, options)` - Declarative data fetching with caching
+- `useMutation(options)` - For POST/PUT/DELETE operations
+- `usePostMutation(url)` / `usePutMutation(url)` - Convenience mutation hooks
+- `useQueryClient()` - Access query client for cache invalidation
+- `prefetchQuery(key, url)` - Prefetch data into cache
 
 ### Example: Fetching Streams
 
@@ -253,9 +213,9 @@ const saveMutation = useMutation({
 
 The frontend communicates with the backend through a layered fetch architecture:
 
-1. **`fetch-utils.js`** — `enhancedFetch()` wraps the native Fetch API with timeouts, retries, abort controller support, and automatic 401 → login redirect. `fetchJSON()` adds JSON parsing.
-2. **`query-client.js`** — Wraps `enhancedFetch` in @tanstack/query hooks for declarative data fetching with caching and automatic background refetching.
-3. **Components** — Use `useQuery` / `useMutation` hooks for all server communication. Direct `fetch()` calls are avoided in favor of the query hooks.
+1. **`fetch-utils.js`** - `enhancedFetch()` wraps the native Fetch API with timeouts, retries, abort controller support, and automatic 401-to-login redirect. `fetchJSON()` adds JSON parsing.
+2. **`query-client.js`** - Wraps `enhancedFetch` in @preact-signals/query hooks for declarative data fetching with caching and automatic background refetching.
+3. **Components** - Use `useQuery` / `useMutation` hooks for server communication where practical. Some legacy components still contain direct `fetch()` calls and should be migrated incrementally.
 
 Session cookies (`credentials: 'same-origin'`) are automatically included in all requests.
 
@@ -332,10 +292,10 @@ function DarkModeToggle() {
 Several performance optimizations are implemented in the frontend:
 
 - **Preact over React**: ~3KB virtual DOM library with identical API, significantly smaller than React
-- **@tanstack/query Caching**: Server data cached with configurable stale times (5 min default), reducing redundant API calls
+- **@preact-signals/query Caching**: Server data cached with configurable stale times (5 min default), reducing redundant API calls
 - **Vite Build**: Tree-shaking, code splitting, and minification for optimized production bundles
 - **Memoization**: Using `useCallback` and `useMemo` to prevent unnecessary re-renders
-- **Request Deduplication**: @tanstack/query automatically deduplicates concurrent requests for the same data
+- **Request Deduplication**: @preact-signals/query automatically deduplicates concurrent requests for the same data
 - **Abort Controllers**: Fetch requests are cancellable via AbortController to prevent stale responses
 - **Efficient Rendering**: Using keys for list items and optimizing render cycles
 
@@ -367,4 +327,4 @@ Planned enhancements for the frontend:
 2. **Customizable Dashboard** with drag-and-drop widgets
 3. **Internationalization** support for multiple languages
 
-**Note:** WebSocket support has been removed in favor of HTTP polling and @tanstack/query's background refetching. WebRTC live viewing is available via go2rtc integration.
+**Note:** WebSocket support has been removed in favor of HTTP polling and @preact-signals/query background refetching. WebRTC live viewing is available via go2rtc integration.

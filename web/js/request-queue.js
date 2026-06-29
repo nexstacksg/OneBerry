@@ -14,14 +14,17 @@
  *
  *   // High priority for visible content
  *   queueThumbnailLoad(url, Priority.HIGH)
- *     .then(() => console.log('Loaded!'))
- *     .catch(err => console.error('Failed:', err));
+ *     .then(() => {})
+ *     .catch(() => {});
  *
  *   // Low priority for preloading
  *   queueThumbnailLoad(url, Priority.LOW).catch(() => {});
  */
 
 import { nowMilliseconds } from './utils/date-utils.js';
+import { createLogger } from './utils/logger.js';
+
+const log = createLogger('request-queue');
 
 /**
  * Priority levels for queued requests
@@ -48,7 +51,7 @@ export class RequestQueue {
 
   _log(...args) {
     if (this.debug) {
-      console.log('[RequestQueue]', ...args);
+      log.debug(...args);
     }
   }
 
@@ -226,7 +229,7 @@ export function queueThumbnailLoad(url, priority = Priority.NORMAL, maxRetries =
     if (attempt > maxRetries) {
       return Promise.reject(err);
     }
-    // Exponential back-off: 2s, 4s, 8s  – gives the backend time to
+    // Exponential back-off: 2s, 4s, 8s - gives the backend time to
     // finish in-flight ffmpeg jobs so the thumbnail may be cached by
     // the next attempt.
     const delay = Math.min(2000 * Math.pow(2, attempt - 1), 10000);
@@ -242,4 +245,3 @@ export function queueThumbnailLoad(url, priority = Priority.NORMAL, maxRetries =
 export function clearThumbnailQueue() {
   thumbnailQueue.clear();
 }
-

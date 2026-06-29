@@ -245,6 +245,15 @@ function applyFullscreenPlaybackSpeed(video, speed) {
   }
 }
 
+function isVideoActivelyRendering(video) {
+  return !!video &&
+    video.readyState >= 2 &&
+    video.videoWidth > 0 &&
+    video.videoHeight > 0 &&
+    !video.paused &&
+    !video.ended;
+}
+
 // Connection quality classification thresholds
 // Packet loss values are percentages (0-100), RTT and jitter are in seconds.
 const CONNECTION_QUALITY_THRESHOLDS = {
@@ -498,6 +507,44 @@ export function WebRTCVideoCell({
   const fullscreenTimelineSeekRequestRef = useRef(0);
   const fullscreenPlaybackTimestampRef = useRef(null);
   const fullscreenPlaybackSeekTargetRef = useRef(null);
+  const errorRef = useRef(error);
+  const isLoadingRef = useRef(isLoading);
+  const isPlayingRef = useRef(isPlaying);
+
+  useEffect(() => {
+    errorRef.current = error;
+  }, [error]);
+
+  useEffect(() => {
+    isLoadingRef.current = isLoading;
+  }, [isLoading]);
+
+  useEffect(() => {
+    isPlayingRef.current = isPlaying;
+  }, [isPlaying]);
+
+  const clearStalePlaybackErrorIfActive = useCallback((reason) => {
+    const videoElement = videoRef.current;
+    if (!isVideoActivelyRendering(videoElement)) {
+      return false;
+    }
+
+    if (errorRef.current) {
+      console.log(`Clearing stale WebRTC error for stream ${stream?.name || 'unknown'} after ${reason}`);
+    }
+
+    if (errorRef.current) {
+      setError(null);
+    }
+    if (isLoadingRef.current) {
+      setIsLoading(false);
+    }
+    if (!isPlayingRef.current) {
+      setIsPlaying(true);
+    }
+    noDataReconnectAttemptsRef.current = 0;
+    return true;
+  }, [stream?.name]);
 
   useEffect(() => {
     const syncFullscreenState = () => {
@@ -950,8 +997,8 @@ export function WebRTCVideoCell({
           videoDataTimeout = setTimeout(() => {
             videoDataCheckCount++;
 
-            // Video is playing or has dimensions — nothing to do
-            if (videoElement && videoElement.videoWidth > 0 && !videoElement.paused) {
+            // Active video playback means any previous error overlay is stale.
+            if (clearStalePlaybackErrorIfActive('video data check')) {
               return;
             }
 
@@ -1035,6 +1082,7 @@ export function WebRTCVideoCell({
         // Add event handlers
         videoElement.onloadedmetadata = () => {
           console.log(`Video metadata loaded for stream ${stream.name}`);
+          clearStalePlaybackErrorIfActive('loadedmetadata');
           // Clear the video data timeout since we got metadata
           if (videoDataTimeout) {
             clearTimeout(videoDataTimeout);
@@ -1044,6 +1092,16 @@ export function WebRTCVideoCell({
 
         videoElement.onloadeddata = () => {
           console.log(`Video data loaded for stream ${stream.name}`);
+          clearStalePlaybackErrorIfActive('loadeddata');
+        };
+
+        videoElement.oncanplay = () => {
+          console.log(`Video can play for stream ${stream.name}`);
+          clearStalePlaybackErrorIfActive('canplay');
+        };
+
+        videoElement.ontimeupdate = () => {
+          clearStalePlaybackErrorIfActive('timeupdate');
         };
 
         videoElement.onplaying = () => {
@@ -1126,10 +1184,7 @@ export function WebRTCVideoCell({
         }
         startConnectionMonitoring();
         reconnectAttemptsRef.current = 0;
-        if (error) {
-          console.log(`WebRTC connection restored for stream ${stream.name}`);
-          setError(null);
-        }
+        clearStalePlaybackErrorIfActive('ICE connected');
       } else if (pc.iceConnectionState === 'failed') {
         console.error(`WebRTC ICE connection failed for stream ${stream.name}`);
 
@@ -1196,6 +1251,30 @@ export function WebRTCVideoCell({
           if (peerConnectionRef.current &&
               (peerConnectionRef.current.iceConnectionState === 'disconnected' ||
                peerConnectionRef.current.iceConnectionState === 'failed')) {
+            if (clearStalePlaybackErrorIfActive('ICE disconnect recovery timeout')) {
+              return;
+            }
+
+            if (!connectionRefreshRequestedRef.current && reconnectAttemptsRef.current < 3) {
+              connectionRefreshRequestedRef.current = true;
+              reconnectAttemptsRef.current++;
+              console.log(
+                `Auto-refreshing go2rtc registration after ICE disconnect for stream ${stream.name} ` +
+                `(attempt ${reconnectAttemptsRef.current}/3)`
+              );
+
+              (async () => {
+                try {
+                  await refreshStreamRegistration();
+                  await new Promise(resolve => setTimeout(resolve, 800));
+                } catch (err) {
+                  console.error(`Error refreshing stream ${stream.name} after ICE disconnect:`, err);
+                }
+                setRetryCount(prev => prev + 1);
+              })();
+              return;
+            }
+
             console.error(`WebRTC ICE connection could not recover for stream ${stream.name}`);
             setError(t('live.webrtcConnectionLostPleaseRetry'));
             setIsLoading(false);
@@ -1592,7 +1671,7 @@ export function WebRTCVideoCell({
     };
 
     return cleanupWebRTCResources;
-  }, [stream?.name, retryCount, selectedStreamSource]);
+  }, [stream?.name, retryCount, selectedStreamSource, clearStalePlaybackErrorIfActive]);
 
   /**
    * Refresh the stream's go2rtc registration
@@ -2217,7 +2296,7 @@ export function WebRTCVideoCell({
           </button>
         )}
         {/* PTZ control toggle button */}
-        {showFullStreamControls && stream.ptz_enabled && isPlaying && (
+        {(showFullStreamControls || isFullscreenCell) && stream.ptz_enabled && isPlaying && (
           <button
             className={`ptz-toggle-btn ${showPTZControls ? 'active' : ''}`}
             title={showPTZControls ? t('live.hidePtzControls') : t('live.showPtzControls')}
@@ -2334,8 +2413,9 @@ export function WebRTCVideoCell({
       {/* PTZ Controls overlay */}
       <PTZControls
         stream={stream}
-        isVisible={showPTZControls && !isFullscreenCell}
+        isVisible={showPTZControls}
         onClose={() => setShowPTZControls(false)}
+        isFullscreen={isFullscreenCell}
       />
 
       {/* Microphone error indicator */}

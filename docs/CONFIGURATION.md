@@ -76,7 +76,7 @@ path = /var/lib/lightnvr/data/models
 
 [api_detection]
 url = http://localhost:9001/api/v1/detect
-backend = onnx  ; Detection backend: onnx (YOLOv8), tflite, or opencv
+backend = onnx  ; Detection backend handled by the external detection API
 confidence_threshold = 0.35
 filter_classes = car,motorcycle,truck,bus,bicycle  ; Comma-separated class filter
 
@@ -124,6 +124,17 @@ The INI format offers several advantages:
 - Organized into sections
 - Support for comments
 - Lightweight parsing
+
+Internally, LightNVR groups existing INI sections into broader logical areas
+for validation and future refactoring. This does not change the external file
+format:
+
+- `web`: `[web]`
+- `security`: security-related fields currently stored in `[web]`
+- `storage`: `[storage]`, `[database]`
+- `streams`: `[streams]`, `[go2rtc]`, `[onvif]`
+- `detection`: `[api_detection]`, `[models]`, `[mqtt]`
+- `runtime`: `[general]`, `[memory]`, `[hardware]`
 
 ## Configuration Options
 
@@ -236,6 +247,17 @@ web_thread_pool_size = 8
 - `auth_timeout_hours`: Session timeout in hours (default: 24)
 - `web_thread_pool_size`: Number of worker threads for the web server (default: 8)
 
+#### Web TLS / HTTPS
+
+LightNVR's built-in web server currently listens over HTTP. The SSL/TLS fields and
+`ENABLE_SSL` build option are incomplete plumbing and should not be treated as a
+production HTTPS feature.
+
+For HTTPS deployments, terminate TLS at a reverse proxy such as nginx, Caddy, or
+Traefik, then forward traffic to the LightNVR HTTP port. If the proxy adds
+`X-Forwarded-For`, set `trusted_proxy_cidrs` to the proxy's CIDR range so
+LightNVR only trusts forwarded client IPs from known proxy addresses.
+
 ### Stream Settings
 
 ```ini
@@ -267,7 +289,7 @@ filter_classes = car,motorcycle,truck,bus,bicycle
 ```
 
 - `url`: URL of the external detection API
-- `backend`: Detection backend to use: `onnx` (YOLOv8 - best accuracy), `tflite`, or `opencv`
+- `backend`: Detection backend identifier passed to the external detection service (default: `onnx`). The current C backend does not provide a complete local TensorFlow Lite execution path.
 - `confidence_threshold`: Minimum confidence threshold for detections (0.0-1.0)
 - `filter_classes`: Comma-separated list of object classes to detect (empty = all classes)
 

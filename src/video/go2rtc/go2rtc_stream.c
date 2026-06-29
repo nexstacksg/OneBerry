@@ -191,10 +191,10 @@ bool go2rtc_stream_register(const char *stream_id, const char *stream_url,
         return false;
     }
 
-    // Log the input parameters for debugging
-    // Sanitize the stream name so it can be safely used in a URL. Note that URL-encoding
-    // the spaces results in go2rtc complaining with "source with spaces may be insecure",
-    // so we strip any problematic characters from the string.
+    // Keep an encoded form only for source expressions that embed the stream ID.
+    // The go2rtc API functions accept a raw stream ID and encode the query parameter
+    // themselves. Passing this encoded value to those functions double-encodes names
+    // with spaces (for example, "Front Door" becomes the literal key "Front%20Door").
     char encoded_stream_id[URL_BUFFER_SIZE * 3];
     simple_url_escape(stream_id, encoded_stream_id, URL_BUFFER_SIZE * 3);
 
@@ -273,15 +273,15 @@ bool go2rtc_stream_register(const char *stream_id, const char *stream_url,
         snprintf(ffmpeg_aac_source, URL_BUFFER_SIZE, "ffmpeg:%s#audio=aac", encoded_stream_id);
 
         sources[source_count++] = ffmpeg_aac_source;
-        result = go2rtc_api_add_stream_multi(encoded_stream_id, sources, source_count);
+        result = go2rtc_api_add_stream_multi(stream_id, sources, source_count);
 
         if (result) {
-            log_info("Successfully registered stream with go2rtc (with AAC audio for recording): %s", encoded_stream_id);
+            log_info("Successfully registered stream with go2rtc (with AAC audio for recording): %s", stream_id);
         } else {
-            log_error("Failed to register stream with go2rtc (with AAC audio): %s", encoded_stream_id);
+            log_error("Failed to register stream with go2rtc (with AAC audio): %s", stream_id);
             // Fall back to primary RTSP source only
             log_warn("Falling back to single source registration without audio transcoding");
-            result = go2rtc_api_add_stream(encoded_stream_id, primary_url);
+            result = go2rtc_api_add_stream(stream_id, primary_url);
         }
     } else {
         // No audio recording: register only the primary RTSP source.
@@ -289,12 +289,12 @@ bool go2rtc_stream_register(const char *stream_id, const char *stream_url,
         // without requiring a persistent ffmpeg process.
         log_info("Registering stream %s with primary RTSP source only (on-demand OPUS transcoding by go2rtc)", stream_id);
 
-        result = go2rtc_api_add_stream(encoded_stream_id, primary_url);
+        result = go2rtc_api_add_stream(stream_id, primary_url);
 
         if (result) {
-            log_info("Successfully registered stream with go2rtc: %s", encoded_stream_id);
+            log_info("Successfully registered stream with go2rtc: %s", stream_id);
         } else {
-            log_error("Failed to register stream with go2rtc: %s", encoded_stream_id);
+            log_error("Failed to register stream with go2rtc: %s", stream_id);
         }
     }
 
@@ -321,7 +321,7 @@ bool go2rtc_stream_register(const char *stream_id, const char *stream_url,
     // is already listening.
     if (result) {
         log_debug("Registered stream %s with go2rtc without preloading; startup paths will preload on demand",
-                  encoded_stream_id);
+                  stream_id);
     }
 
     return result;

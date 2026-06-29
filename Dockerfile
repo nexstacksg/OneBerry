@@ -169,6 +169,16 @@ RUN mkdir -p /etc/lightnvr /var/lib/lightnvr/data /var/log/lightnvr /var/run/lig
     ./scripts/build.sh --release --with-sod --sod-dynamic --with-go2rtc --go2rtc-binary=/bin/go2rtc --go2rtc-config-dir=/etc/lightnvr/go2rtc --go2rtc-api-port=1984 && \
     ./scripts/install.sh --prefix=/ --with-go2rtc --go2rtc-config-dir=/etc/lightnvr/go2rtc --without-systemd
 
+# Optional verification target. Build with:
+#   docker build --target test --output type=cacheonly .
+# This executes tests without exporting the full builder image.
+FROM builder AS test
+
+RUN ctest_status=0; jest_status=0; \
+    ctest --test-dir /opt/build/Release --output-on-failure || ctest_status=$?; \
+    cd /opt/web && npm test -- --runInBand || jest_status=$?; \
+    test "$ctest_status" -eq 0 && test "$jest_status" -eq 0
+
 # Stage 2: Minimal runtime image
 FROM debian:${DEBIAN_SUITE}-slim AS runtime
 

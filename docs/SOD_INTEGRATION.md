@@ -130,10 +130,13 @@ The following detection model types are supported:
 
 - SOD models (`.sod` extension)
 - SOD RealNet models (`.realnet.sod` extension)
-- TensorFlow Lite models (`.tflite` extension)
 
 SOD and SOD RealNet models require SOD to be available (either built-in or dynamically loaded).
-TensorFlow Lite models require the TensorFlow Lite library to be available.
+
+Some UI/API paths still list TensorFlow Lite model files (`.tflite`), but the
+current C backend does not provide a complete TensorFlow Lite execution path.
+Treat TFLite as reserved/incomplete until that backend is implemented behind a
+guarded feature flag.
 
 ## Unified Detection Interface
 

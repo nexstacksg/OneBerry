@@ -119,6 +119,20 @@ node scripts/capture-screenshots.js --url http://localhost:8080
 | `start-test-lightnvr.sh` | Starts lightNVR with test configuration |
 | `test-streams.sh` | Manages test RTSP streams via go2rtc |
 
+## Static Analysis
+
+The GitHub `Static Analysis` workflow runs `clang-tidy` and `cppcheck` on pull
+requests that touch C sources, headers, tests, CMake, or config examples. These
+checks are advisory for now: they upload reports and write a job summary, but do
+not fail the workflow while the baseline is being reduced.
+
+Local equivalents after a CMake build:
+
+```bash
+clang-tidy -p build/compile_commands.json $(find src -name '*.c' -not -path '*/sod/*' -not -path '*/ezxml/*')
+cppcheck --enable=all --suppress=missingIncludeSystem --suppress=unusedFunction -I include/ -i src/sod -i src/ezxml src/
+```
+
 ## Common Workflows
 
 ### Fresh Installation

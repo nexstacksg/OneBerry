@@ -49,6 +49,68 @@ static int safe_atoi(const char *str, int fallback) {
     return parsed;
 }
 
+typedef struct {
+    const char *section;
+    config_section_group_t group;
+} config_section_mapping_t;
+
+// Existing INI section names mapped into stable logical groups. The mapping is
+// documentation/validation support only; it does not change parser behavior.
+static const config_section_mapping_t config_section_mappings[] = {
+    {"general",       CONFIG_SECTION_RUNTIME},
+    {"memory",        CONFIG_SECTION_RUNTIME},
+    {"hardware",      CONFIG_SECTION_RUNTIME},
+    {"web",           CONFIG_SECTION_WEB},
+    {"storage",       CONFIG_SECTION_STORAGE},
+    {"database",      CONFIG_SECTION_STORAGE},
+    {"go2rtc",        CONFIG_SECTION_STREAMS},
+    {"streams",       CONFIG_SECTION_STREAMS},
+    {"onvif",         CONFIG_SECTION_STREAMS},
+    {"models",        CONFIG_SECTION_DETECTION},
+    {"api_detection", CONFIG_SECTION_DETECTION},
+    {"mqtt",          CONFIG_SECTION_DETECTION},
+    {NULL,            CONFIG_SECTION_UNKNOWN}
+};
+
+config_section_group_t config_get_section_group(const char *section) {
+    if (!section || section[0] == '\0') {
+        return CONFIG_SECTION_UNKNOWN;
+    }
+
+    // Legacy [stream.<name>] sections are known but no longer parsed into
+    // stream config; they are grouped with streams so warnings/docs can point
+    // users at the database-backed stream model.
+    if (strncmp(section, "stream.", 7) == 0) {
+        return CONFIG_SECTION_STREAMS;
+    }
+
+    for (int i = 0; config_section_mappings[i].section != NULL; i++) {
+        if (strcmp(config_section_mappings[i].section, section) == 0) {
+            return config_section_mappings[i].group;
+        }
+    }
+
+    return CONFIG_SECTION_UNKNOWN;
+}
+
+const char *config_section_group_name(config_section_group_t group) {
+    switch (group) {
+        case CONFIG_SECTION_RUNTIME:   return "runtime";
+        case CONFIG_SECTION_WEB:       return "web";
+        case CONFIG_SECTION_SECURITY:  return "security";
+        case CONFIG_SECTION_STORAGE:   return "storage";
+        case CONFIG_SECTION_STREAMS:   return "streams";
+        case CONFIG_SECTION_DETECTION: return "detection";
+        case CONFIG_SECTION_UNKNOWN:
+        default:
+            return "unknown";
+    }
+}
+
+bool config_is_known_ini_section(const char *section) {
+    return config_get_section_group(section) != CONFIG_SECTION_UNKNOWN;
+}
+
 // ============================================================================
 // Environment Variable Override Support
 // ============================================================================
@@ -336,7 +398,7 @@ void load_default_config(config_t *config) {
     
     // API detection settings
     snprintf(config->api_detection_url, MAX_URL_LENGTH, "http://localhost:8000/detect");
-    snprintf(config->api_detection_backend, 32, "onnx"); // Default to ONNX backend
+    snprintf(config->api_detection_backend, 32, "onnx"); // Default external detection backend hint
 
     // Global detection defaults
     config->default_detection_threshold = 50;  // 50% confidence threshold

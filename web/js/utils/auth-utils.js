@@ -4,6 +4,9 @@
  */
 
 import { enhancedFetch } from '../fetch-utils.js';
+import { createLogger } from './logger.js';
+
+const log = createLogger('auth');
 
 /**
  * Check if user has authentication credentials stored
@@ -76,7 +79,7 @@ export async function validateSession() {
     return { valid: false };
   } catch (error) {
     // If we get a 401 or other error, session is invalid
-    console.debug('Session validation failed:', error.message);
+    log.debug('Session validation failed:', error.message);
     return { valid: false };
   }
 }
@@ -166,11 +169,11 @@ export function redirectToLogin(reason = null) {
 export function setupSessionValidation(intervalMs = 5 * 60 * 1000) {
   // Don't setup validation on login page
   if (isOnLoginPage()) {
-    console.debug('Skipping session validation setup on login page');
+    log.debug('Skipping session validation setup on login page');
     return null;
   }
 
-  console.log(`Setting up session validation with ${intervalMs}ms interval`);
+  log.debug(`Setting up session validation with ${intervalMs}ms interval`);
 
   // Validate immediately on page load by calling the server
   // This handles auth-enabled, auth-disabled, and demo mode cases:
@@ -180,19 +183,19 @@ export function setupSessionValidation(intervalMs = 5 * 60 * 1000) {
   // - If auth is enabled and session is invalid, we redirect to login
   validateSession().then(session => {
     if (!session.valid) {
-      console.warn('Initial session validation failed, redirecting to login');
+      log.warn('Initial session validation failed, redirecting to login');
       clearAuthState();
       redirectToLogin('session_expired');
     } else {
-      console.debug('Initial session validation passed for user:', session.username);
+      log.debug('Initial session validation passed');
       // If auth is disabled on the server, store that fact to avoid unnecessary checks
       if (session.auth_enabled === false) {
-        console.debug('Authentication is disabled on the server, skipping periodic validation');
+        log.debug('Authentication is disabled on the server, skipping periodic validation');
         window._authDisabled = true;
       }
       // If demo mode is enabled, log it
       if (session.demo_mode) {
-        console.debug('Demo mode enabled, viewer access granted without authentication');
+        log.debug('Demo mode enabled, viewer access granted without authentication');
       }
     }
   });
@@ -201,35 +204,34 @@ export function setupSessionValidation(intervalMs = 5 * 60 * 1000) {
   const intervalId = setInterval(async () => {
     // Skip periodic validation if auth is disabled on the server
     if (window._authDisabled) {
-      console.debug('Session validation skipped - auth disabled on server');
+      log.debug('Session validation skipped - auth disabled on server');
       return;
     }
 
     // Skip periodic validation if in demo mode with no credentials
     // Demo mode users don't need periodic validation - they have persistent viewer access
     if (window._demoMode && !hasAuthCredentials()) {
-      console.debug('Session validation skipped - demo mode with no credentials');
+      log.debug('Session validation skipped - demo mode with no credentials');
       return;
     }
 
     // Check credentials still exist before validating (only for authenticated users)
     if (!hasAuthCredentials() && !window._demoMode) {
-      console.debug('Session validation skipped - no credentials');
+      log.debug('Session validation skipped - no credentials');
       return;
     }
 
-    console.debug('Running periodic session validation');
+    log.debug('Running periodic session validation');
     const session = await validateSession();
 
     if (!session.valid) {
-      console.warn('Periodic session validation failed, redirecting to login');
+      log.warn('Periodic session validation failed, redirecting to login');
       clearAuthState();
       redirectToLogin('session_expired');
     } else {
-      console.debug('Session validation passed for user:', session.username);
+      log.debug('Session validation passed');
     }
   }, intervalMs);
 
   return intervalId;
 }
-

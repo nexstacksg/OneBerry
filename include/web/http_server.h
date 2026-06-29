@@ -26,9 +26,9 @@ typedef struct {
     char allowed_origins[256];      // CORS allowed origins
     char allowed_methods[256];      // CORS allowed methods
     char allowed_headers[256];      // CORS allowed headers
-    bool ssl_enabled;               // SSL/TLS enabled
-    char cert_path[256];            // SSL/TLS certificate path
-    char key_path[256];             // SSL/TLS key path
+    bool ssl_enabled;               // Reserved; built-in HTTPS is not implemented
+    char cert_path[256];            // Reserved SSL/TLS certificate path
+    char key_path[256];             // Reserved SSL/TLS key path
     int max_connections;            // Maximum number of connections
     int connection_timeout;         // Connection timeout in seconds
     bool daemon_mode;               // Daemon mode
@@ -143,6 +143,9 @@ int http_server_set_cors(http_server_handle_t server, bool enabled,
 
 /**
  * @brief Set SSL/TLS settings
+ *
+ * Built-in web HTTPS is not implemented. Terminate TLS at a trusted reverse
+ * proxy and forward HTTP to LightNVR instead.
  * 
  * @param server Server handle
  * @param enabled SSL/TLS enabled

@@ -46,20 +46,171 @@ static int get_ptz_stream_config(const char *stream_name, stream_config_t *confi
  *   - Port mapping: 554 → 80, 322 → 443 (when onvif_port not explicitly set)
  *   - Credential stripping
  */
-static int build_ptz_url(const stream_config_t *config, char *ptz_url, size_t url_size) {
+static int build_onvif_service_url(const stream_config_t *config, const char *service_path,
+                                   char *ptz_url, size_t url_size) {
     // codeql[cpp/non-https-url] - Local ONVIF cameras use HTTP; HTTPS only when rtsps:// detected
     return url_build_onvif_service_url(config->url, config->onvif_port,
-                                       "/onvif/ptz_service", ptz_url, url_size);
+                                       service_path, ptz_url, url_size);
 }
 
 /**
- * Helper to get profile token (use first profile or default)
+ * Helper to get profile token.
  */
 static const char* get_profile_token(const stream_config_t *config) {
-    // For now, use a default profile token
-    // TODO: Store profile token in stream config or query from device
-    (void)config;  // Unused for now
+    if (config && config->onvif_profile[0] != '\0') {
+        return config->onvif_profile;
+    }
+
     return "Profile_1";
+}
+
+typedef int (*ptz_url_command_fn)(const char *ptz_url, const char *profile_token,
+                                  const stream_config_t *config, void *ctx);
+
+static int execute_ptz_with_service_fallback(const stream_config_t *config,
+                                             const char *operation,
+                                             ptz_url_command_fn command,
+                                             void *ctx) {
+    static const char *service_paths[] = {
+        "/onvif/ptz_service",
+        "/onvif/device_service",
+        "/onvif/services",
+        "/onvif/service",
+        "/onvif/device",
+        "/device_service",
+        NULL
+    };
+    const char *profile_token = get_profile_token(config);
+
+    for (int i = 0; service_paths[i]; i++) {
+        char ptz_url[512];
+        if (build_onvif_service_url(config, service_paths[i], ptz_url, sizeof(ptz_url)) != 0) {
+            continue;
+        }
+
+        char safe_ptz_url[512];
+        if (url_redact_for_logging(ptz_url, safe_ptz_url, sizeof(safe_ptz_url)) != 0) {
+            strncpy(safe_ptz_url, "[invalid-url]", sizeof(safe_ptz_url) - 1);
+            safe_ptz_url[sizeof(safe_ptz_url) - 1] = '\0';
+        }
+
+        log_info("Trying PTZ %s via %s (profile=%s)", operation, safe_ptz_url, profile_token);
+        if (command(ptz_url, profile_token, config, ctx) == 0) {
+            return 0;
+        }
+    }
+
+    return -1;
+}
+
+typedef struct {
+    float pan;
+    float tilt;
+    float zoom;
+} ptz_move_ctx_t;
+
+static int execute_continuous_move_at_url(const char *ptz_url, const char *profile_token,
+                                          const stream_config_t *config, void *ctx) {
+    const ptz_move_ctx_t *move = (const ptz_move_ctx_t *)ctx;
+    return onvif_ptz_continuous_move(ptz_url, profile_token,
+                                     config->onvif_username, config->onvif_password,
+                                     move->pan, move->tilt, move->zoom);
+}
+
+static int execute_stop_at_url(const char *ptz_url, const char *profile_token,
+                               const stream_config_t *config, void *ctx) {
+    (void)ctx;
+    return onvif_ptz_stop(ptz_url, profile_token,
+                          config->onvif_username, config->onvif_password,
+                          true, true);
+}
+
+static int execute_absolute_move_at_url(const char *ptz_url, const char *profile_token,
+                                        const stream_config_t *config, void *ctx) {
+    const ptz_move_ctx_t *move = (const ptz_move_ctx_t *)ctx;
+    return onvif_ptz_absolute_move(ptz_url, profile_token,
+                                   config->onvif_username, config->onvif_password,
+                                   move->pan, move->tilt, move->zoom);
+}
+
+static int execute_relative_move_at_url(const char *ptz_url, const char *profile_token,
+                                        const stream_config_t *config, void *ctx) {
+    const ptz_move_ctx_t *move = (const ptz_move_ctx_t *)ctx;
+    return onvif_ptz_relative_move(ptz_url, profile_token,
+                                   config->onvif_username, config->onvif_password,
+                                   move->pan, move->tilt, move->zoom);
+}
+
+static int execute_goto_home_at_url(const char *ptz_url, const char *profile_token,
+                                    const stream_config_t *config, void *ctx) {
+    (void)ctx;
+    return onvif_ptz_goto_home(ptz_url, profile_token,
+                               config->onvif_username, config->onvif_password);
+}
+
+static int execute_set_home_at_url(const char *ptz_url, const char *profile_token,
+                                   const stream_config_t *config, void *ctx) {
+    (void)ctx;
+    return onvif_ptz_set_home(ptz_url, profile_token,
+                              config->onvif_username, config->onvif_password);
+}
+
+typedef struct {
+    onvif_ptz_preset_t *presets;
+    int max_presets;
+    int count;
+} ptz_get_presets_ctx_t;
+
+static int execute_get_presets_at_url(const char *ptz_url, const char *profile_token,
+                                      const stream_config_t *config, void *ctx) {
+    ptz_get_presets_ctx_t *presets_ctx = (ptz_get_presets_ctx_t *)ctx;
+    int count = onvif_ptz_get_presets(ptz_url, profile_token,
+                                      config->onvif_username, config->onvif_password,
+                                      presets_ctx->presets, presets_ctx->max_presets);
+    if (count < 0) {
+        return -1;
+    }
+    presets_ctx->count = count;
+    return 0;
+}
+
+typedef struct {
+    const char *preset_token;
+} ptz_goto_preset_ctx_t;
+
+static int execute_goto_preset_at_url(const char *ptz_url, const char *profile_token,
+                                      const stream_config_t *config, void *ctx) {
+    const ptz_goto_preset_ctx_t *preset = (const ptz_goto_preset_ctx_t *)ctx;
+    return onvif_ptz_goto_preset(ptz_url, profile_token,
+                                 config->onvif_username, config->onvif_password,
+                                 preset->preset_token);
+}
+
+typedef struct {
+    const char *preset_name;
+    char *preset_token;
+    size_t token_size;
+} ptz_set_preset_ctx_t;
+
+static int execute_set_preset_at_url(const char *ptz_url, const char *profile_token,
+                                     const stream_config_t *config, void *ctx) {
+    ptz_set_preset_ctx_t *preset = (ptz_set_preset_ctx_t *)ctx;
+    return onvif_ptz_set_preset(ptz_url, profile_token,
+                                config->onvif_username, config->onvif_password,
+                                preset->preset_name, preset->preset_token,
+                                preset->token_size);
+}
+
+typedef struct {
+    onvif_ptz_capabilities_t *capabilities;
+} ptz_capabilities_ctx_t;
+
+static int execute_get_capabilities_at_url(const char *ptz_url, const char *profile_token,
+                                           const stream_config_t *config, void *ctx) {
+    ptz_capabilities_ctx_t *caps = (ptz_capabilities_ctx_t *)ctx;
+    return onvif_ptz_get_capabilities(ptz_url, profile_token,
+                                      config->onvif_username, config->onvif_password,
+                                      caps->capabilities);
 }
 
 /**
@@ -118,17 +269,10 @@ void handle_ptz_move(const http_request_t *req, http_response_t *res) {
     
     cJSON_Delete(body);
     
-    // Build PTZ URL and execute move
-    char ptz_url[512];
-    if (build_ptz_url(&config, ptz_url, sizeof(ptz_url)) != 0) {
-        http_response_set_json_error(res, 500, "Failed to build PTZ URL");
-        return;
-    }
-    
-    const char *profile_token = get_profile_token(&config);
-    rc = onvif_ptz_continuous_move(ptz_url, profile_token, 
-                                   config.onvif_username, config.onvif_password,
-                                   pan, tilt, zoom);
+    ptz_move_ctx_t move = { pan, tilt, zoom };
+    rc = execute_ptz_with_service_fallback(&config, "move",
+                                           execute_continuous_move_at_url,
+                                           &move);
     
     if (rc != 0) {
         http_response_set_json_error(res, 500, "PTZ move failed");
@@ -165,14 +309,9 @@ void handle_ptz_stop(const http_request_t *req, http_response_t *res) {
         return;
     }
 
-    char ptz_url[512];
-    if (build_ptz_url(&config, ptz_url, sizeof(ptz_url)) != 0) {
-        http_response_set_json_error(res, 500, "Failed to build PTZ URL");
-        return;
-    }
-
-    const char *profile_token = get_profile_token(&config);
-    rc = onvif_ptz_stop(ptz_url, profile_token, config.onvif_username, config.onvif_password, true, true);
+    rc = execute_ptz_with_service_fallback(&config, "stop",
+                                           execute_stop_at_url,
+                                           NULL);
 
     if (rc != 0) {
         http_response_set_json_error(res, 500, "PTZ stop failed");
@@ -226,14 +365,9 @@ void handle_ptz_absolute(const http_request_t *req, http_response_t *res) {
 
     cJSON_Delete(body);
 
-    char ptz_url[512];
-    if (build_ptz_url(&config, ptz_url, sizeof(ptz_url)) != 0) {
-        http_response_set_json_error(res, 500, "Failed to build PTZ URL");
-        return;
-    }
-
-    const char *profile_token = get_profile_token(&config);
-    rc = onvif_ptz_absolute_move(ptz_url, profile_token, config.onvif_username, config.onvif_password, pan, tilt, zoom);
+    ptz_move_ctx_t move = { pan, tilt, zoom };
+    rc = execute_ptz_with_service_fallback(&config, "absolute move",
+                                           execute_absolute_move_at_url, &move);
 
     if (rc != 0) {
         http_response_set_json_error(res, 500, "PTZ absolute move failed");
@@ -287,14 +421,9 @@ void handle_ptz_relative(const http_request_t *req, http_response_t *res) {
 
     cJSON_Delete(body);
 
-    char ptz_url[512];
-    if (build_ptz_url(&config, ptz_url, sizeof(ptz_url)) != 0) {
-        http_response_set_json_error(res, 500, "Failed to build PTZ URL");
-        return;
-    }
-
-    const char *profile_token = get_profile_token(&config);
-    rc = onvif_ptz_relative_move(ptz_url, profile_token, config.onvif_username, config.onvif_password, pan, tilt, zoom);
+    ptz_move_ctx_t move = { pan, tilt, zoom };
+    rc = execute_ptz_with_service_fallback(&config, "relative move",
+                                           execute_relative_move_at_url, &move);
 
     if (rc != 0) {
         http_response_set_json_error(res, 500, "PTZ relative move failed");
@@ -331,14 +460,8 @@ void handle_ptz_home(const http_request_t *req, http_response_t *res) {
         return;
     }
 
-    char ptz_url[512];
-    if (build_ptz_url(&config, ptz_url, sizeof(ptz_url)) != 0) {
-        http_response_set_json_error(res, 500, "Failed to build PTZ URL");
-        return;
-    }
-
-    const char *profile_token = get_profile_token(&config);
-    rc = onvif_ptz_goto_home(ptz_url, profile_token, config.onvif_username, config.onvif_password);
+    rc = execute_ptz_with_service_fallback(&config, "go to home",
+                                           execute_goto_home_at_url, NULL);
 
     if (rc != 0) {
         http_response_set_json_error(res, 500, "PTZ go to home failed");
@@ -375,14 +498,8 @@ void handle_ptz_set_home(const http_request_t *req, http_response_t *res) {
         return;
     }
 
-    char ptz_url[512];
-    if (build_ptz_url(&config, ptz_url, sizeof(ptz_url)) != 0) {
-        http_response_set_json_error(res, 500, "Failed to build PTZ URL");
-        return;
-    }
-
-    const char *profile_token = get_profile_token(&config);
-    rc = onvif_ptz_set_home(ptz_url, profile_token, config.onvif_username, config.onvif_password);
+    rc = execute_ptz_with_service_fallback(&config, "set home",
+                                           execute_set_home_at_url, NULL);
 
     if (rc != 0) {
         http_response_set_json_error(res, 500, "PTZ set home failed");
@@ -419,15 +536,15 @@ void handle_ptz_get_presets(const http_request_t *req, http_response_t *res) {
         return;
     }
 
-    char ptz_url[512];
-    if (build_ptz_url(&config, ptz_url, sizeof(ptz_url)) != 0) {
-        http_response_set_json_error(res, 500, "Failed to build PTZ URL");
+    onvif_ptz_preset_t presets[32];
+    ptz_get_presets_ctx_t presets_ctx = { presets, 32, 0 };
+    rc = execute_ptz_with_service_fallback(&config, "get presets",
+                                           execute_get_presets_at_url, &presets_ctx);
+    if (rc != 0) {
+        http_response_set_json_error(res, 500, "PTZ get presets failed");
         return;
     }
-
-    const char *profile_token = get_profile_token(&config);
-    onvif_ptz_preset_t presets[32];
-    int count = onvif_ptz_get_presets(ptz_url, profile_token, config.onvif_username, config.onvif_password, presets, 32);
+    int count = presets_ctx.count;
 
     cJSON *response = cJSON_CreateObject();
     cJSON *presets_array = cJSON_CreateArray();
@@ -487,14 +604,9 @@ void handle_ptz_goto_preset(const http_request_t *req, http_response_t *res) {
         return;
     }
 
-    char ptz_url[512];
-    if (build_ptz_url(&config, ptz_url, sizeof(ptz_url)) != 0) {
-        http_response_set_json_error(res, 500, "Failed to build PTZ URL");
-        return;
-    }
-
-    const char *profile_token = get_profile_token(&config);
-    rc = onvif_ptz_goto_preset(ptz_url, profile_token, config.onvif_username, config.onvif_password, preset_token);
+    ptz_goto_preset_ctx_t preset_ctx = { preset_token };
+    rc = execute_ptz_with_service_fallback(&config, "go to preset",
+                                           execute_goto_preset_at_url, &preset_ctx);
 
     if (rc != 0) {
         http_response_set_json_error(res, 500, "PTZ go to preset failed");
@@ -543,17 +655,10 @@ void handle_ptz_set_preset(const http_request_t *req, http_response_t *res) {
         preset_name = name_json->valuestring;
     }
 
-    char ptz_url[512];
-    if (build_ptz_url(&config, ptz_url, sizeof(ptz_url)) != 0) {
-        cJSON_Delete(body);
-        http_response_set_json_error(res, 500, "Failed to build PTZ URL");
-        return;
-    }
-
-    const char *profile_token = get_profile_token(&config);
     char new_token[64] = {0};
-    rc = onvif_ptz_set_preset(ptz_url, profile_token, config.onvif_username, config.onvif_password,
-                              preset_name, new_token, sizeof(new_token));
+    ptz_set_preset_ctx_t preset_ctx = { preset_name, new_token, sizeof(new_token) };
+    rc = execute_ptz_with_service_fallback(&config, "set preset",
+                                           execute_set_preset_at_url, &preset_ctx);
 
     cJSON_Delete(body);
 
@@ -593,15 +698,14 @@ void handle_ptz_capabilities(const http_request_t *req, http_response_t *res) {
         return;
     }
 
-    char ptz_url[512];
-    if (build_ptz_url(&config, ptz_url, sizeof(ptz_url)) != 0) {
-        http_response_set_json_error(res, 500, "Failed to build PTZ URL");
+    onvif_ptz_capabilities_t caps = {0};
+    ptz_capabilities_ctx_t caps_ctx = { &caps };
+    rc = execute_ptz_with_service_fallback(&config, "get capabilities",
+                                           execute_get_capabilities_at_url, &caps_ctx);
+    if (rc != 0) {
+        http_response_set_json_error(res, 500, "PTZ capabilities request failed");
         return;
     }
-
-    const char *profile_token = get_profile_token(&config);
-    onvif_ptz_capabilities_t caps;
-    onvif_ptz_get_capabilities(ptz_url, profile_token, config.onvif_username, config.onvif_password, &caps);
 
     cJSON *response = cJSON_CreateObject();
     cJSON_AddBoolToObject(response, "ptz_enabled", config.ptz_enabled);

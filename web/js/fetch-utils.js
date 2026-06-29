@@ -3,12 +3,16 @@
  * Enhanced fetch API with timeout, cancellation, and retry capabilities
  */
 
+import { createLogger } from './utils/logger.js';
+
+const log = createLogger('fetch');
+
 /**
  * Clear authentication state and redirect to login
  * @param {string} reason - Reason for redirect (optional)
  */
 function handleAuthenticationFailure(reason = 'Session expired') {
-  console.warn(`Authentication failure: ${reason}`);
+  log.warn(`Authentication failure: ${reason}`);
 
   // Clear all auth-related storage
   localStorage.removeItem('auth');
@@ -19,7 +23,7 @@ function handleAuthenticationFailure(reason = 'Session expired') {
 
   // Only redirect if we're not already on the login page
   if (!window.location.pathname.includes('login.html')) {
-    console.log('Redirecting to login page due to authentication failure');
+    log.info('Redirecting to login page due to authentication failure');
     window.location.href = '/login.html?auth_required=true&reason=session_expired';
   }
 }
@@ -61,55 +65,61 @@ export async function enhancedFetch(url, options = {}) {
     skipAuthRedirect = false, // Allow callers to opt-out of auto-redirect (e.g., login page)
     ...fetchOptions
   } = options;
+  const maxRetries = normalizeRetryCount(retries);
+  const retryDelayMs = normalizeDelay(retryDelay);
+  const timeoutMs = normalizeDelay(timeout);
 
   // Log the request details
-  console.log(`enhancedFetch: ${fetchOptions.method || 'GET'} ${url}`);
-  console.debug('enhancedFetch options:', {
-    timeout,
-    retries,
-    retryDelay,
+  log.debug(`enhancedFetch: ${fetchOptions.method || 'GET'} ${url}`);
+  log.debug('enhancedFetch options:', {
+    timeout: timeoutMs,
+    retries: maxRetries,
+    retryDelay: retryDelayMs,
     skipAuthRedirect,
     ...fetchOptions
   });
 
-  // Create a timeout controller if timeout is specified
-  const timeoutController = new AbortController();
-  let timeoutId;
-
-  if (timeout) {
-    timeoutId = setTimeout(() => {
-      console.warn(`enhancedFetch: Timeout reached for ${url}, aborting request`);
-      timeoutController.abort();
-    }, timeout);
-  }
-
-  // Create a combined signal if an external signal is provided
-  const signal = externalSignal
-    ? combineSignals(externalSignal, timeoutController.signal)
-    : timeoutController.signal;
-
-  // Add the signal and credentials to fetch options
-  const optionsWithSignal = {
-    credentials: 'same-origin', // Include cookies in same-origin requests
-    ...fetchOptions,
-    signal
-  };
-
   let lastError;
   let attempt = 0;
 
-  while (attempt <= retries) {
+  while (attempt <= maxRetries) {
+    let didTimeout = false;
+    let timeoutId = null;
+    const timeoutController = timeoutMs > 0 ? new AbortController() : null;
+    const attemptSignal = createAttemptSignal(externalSignal, timeoutController?.signal);
+
+    if (timeoutController) {
+      timeoutId = setTimeout(() => {
+        didTimeout = true;
+        log.warn(`enhancedFetch: Timeout reached for ${url}, aborting request`);
+        timeoutController.abort();
+      }, timeoutMs);
+    }
+
+    // Add the signal and credentials to fetch options
+    const optionsWithSignal = {
+      credentials: 'same-origin', // Include cookies in same-origin requests
+      ...fetchOptions,
+      signal: attemptSignal.signal
+    };
+
     try {
-      console.debug(`enhancedFetch: Attempt ${attempt + 1}/${retries + 1} for ${url}`);
+      if (externalSignal?.aborted) {
+        throw new Error('Request was cancelled');
+      }
+
+      log.debug(`enhancedFetch: Attempt ${attempt + 1}/${maxRetries + 1} for ${url}`);
       const response = await fetch(url, optionsWithSignal);
 
       // Clear the timeout
       if (timeoutId) {
         clearTimeout(timeoutId);
+        timeoutId = null;
       }
+      attemptSignal.cleanup();
 
       // Log the response
-      console.log(`enhancedFetch response: ${response.status} ${response.statusText} for ${url}`);
+      log.debug(`enhancedFetch response: ${response.status} ${response.statusText} for ${url}`);
 
       // Handle 401 Unauthorized - don't retry, just redirect
       // Skip redirect if auth is disabled or demo mode is enabled on the server
@@ -135,7 +145,7 @@ export async function enhancedFetch(url, options = {}) {
           }
         } catch (parseError) {
           // If we can't parse the response, just use the status text
-          console.debug('Could not parse error response body:', parseError);
+          log.debug('Could not parse error response body:', parseError);
         }
         throw new HTTPError(response.status, response.statusText, errorMessage);
       }
@@ -148,51 +158,44 @@ export async function enhancedFetch(url, options = {}) {
       if (timeoutId) {
         clearTimeout(timeoutId);
       }
+      attemptSignal.cleanup();
 
       // Log the error
-      console.error(`enhancedFetch error (attempt ${attempt + 1}/${retries + 1}):`, error);
+      log.error(`enhancedFetch error (attempt ${attempt + 1}/${maxRetries + 1}):`, error);
 
       // If this is an authentication error, don't retry - just fail immediately
       if (isAuthenticationError(error)) {
-        console.warn(`enhancedFetch: Authentication error detected, not retrying`);
+        log.warn('enhancedFetch: Authentication error detected, not retrying');
         throw error;
       }
 
       // If this is a client error (4xx), don't retry - it will fail the same way
       if (error.status && error.status >= 400 && error.status < 500) {
-        console.warn(`enhancedFetch: Client error ${error.status} detected, not retrying`);
+        log.warn(`enhancedFetch: Client error ${error.status} detected, not retrying`);
         throw error;
       }
 
       // If the request was aborted, don't retry
-      if (error.name === 'AbortError') {
-        if (externalSignal && externalSignal.aborted) {
-          console.warn(`enhancedFetch: Request was cancelled by external signal for ${url}`);
+      if (error.name === 'AbortError' || externalSignal?.aborted || didTimeout) {
+        if (externalSignal?.aborted) {
+          log.warn(`enhancedFetch: Request was cancelled by external signal for ${url}`);
           throw new Error('Request was cancelled');
-        } else {
-          console.warn(`enhancedFetch: Request timed out for ${url}`);
+        } else if (didTimeout || timeoutController?.signal.aborted) {
+          log.warn(`enhancedFetch: Request timed out for ${url}`);
           throw new Error('Request timed out');
         }
+        throw error;
       }
 
       // If this was the last retry, throw the error
-      if (attempt >= retries) {
-        console.error(`enhancedFetch: All ${retries + 1} attempts failed for ${url}`);
+      if (attempt >= maxRetries) {
+        log.error(`enhancedFetch: All ${maxRetries + 1} attempts failed for ${url}`);
         break;
       }
 
       // Wait before retrying
-      console.log(`enhancedFetch: Waiting ${retryDelay}ms before retry ${attempt + 1} for ${url}`);
-      await new Promise(resolve => setTimeout(resolve, retryDelay));
-
-      // Reset the timeout for the next attempt
-      if (timeout) {
-        timeoutController.abort(); // Abort the previous timeout
-        const newTimeoutController = new AbortController();
-        timeoutId = setTimeout(() => {
-          newTimeoutController.abort();
-        }, timeout);
-      }
+      log.debug(`enhancedFetch: Waiting ${retryDelayMs}ms before retry ${attempt + 1} for ${url}`);
+      await delayWithCancellation(retryDelayMs, externalSignal);
 
       attempt++;
     }
@@ -202,21 +205,33 @@ export async function enhancedFetch(url, options = {}) {
 }
 
 /**
- * Combine multiple AbortSignals into one
+ * Combine multiple AbortSignals into one and expose cleanup for listeners.
  * @param {...AbortSignal} signals - Signals to combine
- * @returns {AbortSignal} - Combined signal
+ * @returns {{signal: AbortSignal|undefined, cleanup: Function}} - Combined signal and cleanup
  */
-function combineSignals(...signals) {
+function createAttemptSignal(...signals) {
+  const activeSignals = signals.filter(Boolean);
+  if (activeSignals.length === 0) {
+    return { signal: undefined, cleanup: () => {} };
+  }
+
+  if (activeSignals.length === 1) {
+    return { signal: activeSignals[0], cleanup: () => {} };
+  }
+
   const controller = new AbortController();
-  
-  const onAbort = () => {
-    controller.abort();
-    signals.forEach(signal => {
+  const cleanup = () => {
+    activeSignals.forEach(signal => {
       signal.removeEventListener('abort', onAbort);
     });
   };
   
-  signals.forEach(signal => {
+  const onAbort = () => {
+    controller.abort();
+    cleanup();
+  };
+  
+  activeSignals.forEach(signal => {
     if (signal.aborted) {
       onAbort();
     } else {
@@ -224,7 +239,43 @@ function combineSignals(...signals) {
     }
   });
   
-  return controller.signal;
+  return { signal: controller.signal, cleanup };
+}
+
+function normalizeRetryCount(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 0;
+}
+
+function normalizeDelay(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 0;
+}
+
+function delayWithCancellation(delayMs, signal) {
+  if (delayMs <= 0) {
+    return signal?.aborted ? Promise.reject(new Error('Request was cancelled')) : Promise.resolve();
+  }
+
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new Error('Request was cancelled'));
+      return;
+    }
+
+    const timeoutId = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, delayMs);
+
+    const onAbort = () => {
+      clearTimeout(timeoutId);
+      signal?.removeEventListener('abort', onAbort);
+      reject(new Error('Request was cancelled'));
+    };
+
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
 }
 
 /**
@@ -250,11 +301,11 @@ export function createRequestController() {
 export async function fetchJSON(url, options = {}) {
   try {
     const response = await enhancedFetch(url, options);
-    console.log('fetchJSON: Parsing JSON response from', url);
+    log.debug('fetchJSON: Parsing JSON response from', url);
     const data = await response.json();
     return data;
   } catch (error) {
-    console.error('fetchJSON: Error fetching or parsing JSON from', url, ':', error);
+    log.error('fetchJSON: Error fetching or parsing JSON from', url, ':', error);
     throw error;
   }
 }

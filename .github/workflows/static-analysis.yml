@@ -1,8 +1,27 @@
 name: Static Analysis
 
 on:
+  pull_request:
+    paths:
+      - ".github/workflows/static-analysis.yml"
+      - "CMakeLists.txt"
+      - "include/**/*.h"
+      - "src/**/*.c"
+      - "src/**/*.h"
+      - "tests/**/*.c"
+      - "tests/**/*.h"
+      - "config/**/*.ini"
   push:
     branches: [main]
+    paths:
+      - ".github/workflows/static-analysis.yml"
+      - "CMakeLists.txt"
+      - "include/**/*.h"
+      - "src/**/*.c"
+      - "src/**/*.h"
+      - "tests/**/*.c"
+      - "tests/**/*.h"
+      - "config/**/*.ini"
   workflow_dispatch:
 
 permissions:
@@ -47,6 +66,7 @@ jobs:
           echo "::group::clang-tidy version"
           clang-tidy --version
           echo "::endgroup::"
+          echo "clang-tidy is currently advisory. This job records findings without failing the PR."
 
           # Find all C source files under src/, excluding third-party code
           find src/ -name '*.c' -not -path '*/sod/*' -not -path '*/ezxml/*' | sort > /tmp/source_files.txt
@@ -65,6 +85,7 @@ jobs:
           WARNINGS=$(grep -c "warning:" clang-tidy-report.txt || true)
           ERRORS=$(grep -c "error:" clang-tidy-report.txt || true)
           echo "## clang-tidy Results" >> $GITHUB_STEP_SUMMARY
+          echo "_Advisory only: findings are reported but do not currently fail the workflow._" >> $GITHUB_STEP_SUMMARY
           echo "- **Warnings**: ${WARNINGS}" >> $GITHUB_STEP_SUMMARY
           echo "- **Errors**: ${ERRORS}" >> $GITHUB_STEP_SUMMARY
 
@@ -97,6 +118,7 @@ jobs:
           echo "::group::cppcheck version"
           cppcheck --version
           echo "::endgroup::"
+          echo "cppcheck is currently advisory. This job records findings without failing the PR."
 
           # Run cppcheck with XML output (non-blocking: --error-exitcode=0)
           cppcheck \
@@ -105,6 +127,8 @@ jobs:
             --suppress=unusedFunction \
             --inline-suppr \
             --error-exitcode=0 \
+            -i src/sod \
+            -i src/ezxml \
             --xml \
             --xml-version=2 \
             -I include/ \
@@ -118,6 +142,8 @@ jobs:
             --suppress=unusedFunction \
             --inline-suppr \
             --error-exitcode=0 \
+            -i src/sod \
+            -i src/ezxml \
             --template='{file}:{line}: {severity}: {message} [{id}]' \
             -I include/ \
             src/ \
@@ -129,6 +155,7 @@ jobs:
           STYLE=$(grep -c 'severity="style"' cppcheck-report.xml || true)
           PERF=$(grep -c 'severity="performance"' cppcheck-report.xml || true)
           echo "## cppcheck Results" >> $GITHUB_STEP_SUMMARY
+          echo "_Advisory only: findings are reported but do not currently fail the workflow._" >> $GITHUB_STEP_SUMMARY
           echo "- **Errors**: ${ERRORS}" >> $GITHUB_STEP_SUMMARY
           echo "- **Warnings**: ${WARNINGS}" >> $GITHUB_STEP_SUMMARY
           echo "- **Style**: ${STYLE}" >> $GITHUB_STEP_SUMMARY
@@ -143,4 +170,3 @@ jobs:
             cppcheck-report.xml
             cppcheck-report.txt
           retention-days: 30
-

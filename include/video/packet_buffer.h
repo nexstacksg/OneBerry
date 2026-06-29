@@ -33,8 +33,8 @@
 // Buffer storage modes
 typedef enum {
     BUFFER_MODE_MEMORY = 0,     // Store packets in memory (default)
-    BUFFER_MODE_DISK = 1,       // Store packets on disk (for low-memory systems)
-    BUFFER_MODE_HYBRID = 2      // Use memory with disk fallback
+    BUFFER_MODE_DISK = 1,       // Reserved; current implementation falls back to memory
+    BUFFER_MODE_HYBRID = 2      // Reserved; disk fallback is not implemented
 } buffer_mode_t;
 
 // Buffered packet structure
@@ -258,7 +258,10 @@ int packet_buffer_set_memory_limit(packet_buffer_t *buffer, size_t limit_mb);
 size_t packet_buffer_get_total_memory_usage(void);
 
 /**
- * Enable/disable disk-based fallback for a buffer
+ * Enable/disable disk-based fallback for a buffer.
+ *
+ * Disk fallback is not implemented. Enabling it returns -1 and leaves the
+ * buffer memory-backed.
  *
  * @param buffer Buffer to configure
  * @param enable true to enable disk fallback, false to disable
@@ -268,4 +271,3 @@ size_t packet_buffer_get_total_memory_usage(void);
 int packet_buffer_set_disk_fallback(packet_buffer_t *buffer, bool enable, const char *disk_path);
 
 #endif /* LIGHTNVR_PACKET_BUFFER_H */
-

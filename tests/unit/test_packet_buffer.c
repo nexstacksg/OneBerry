@@ -90,6 +90,13 @@ void test_create_buffer_null_name_returns_null(void) {
     TEST_ASSERT_NULL(b);
 }
 
+void test_create_buffer_disk_mode_falls_back_to_memory(void) {
+    packet_buffer_t *b = create_packet_buffer("disk_mode_cam", 5, BUFFER_MODE_DISK);
+    TEST_ASSERT_NOT_NULL(b);
+    TEST_ASSERT_EQUAL_INT(BUFFER_MODE_MEMORY, b->mode);
+    destroy_packet_buffer(b);
+}
+
 void test_destroy_null_no_crash(void) {
     destroy_packet_buffer(NULL);
     TEST_PASS();
@@ -246,6 +253,17 @@ void test_flush_null_callback_returns_error(void) {
     destroy_packet_buffer(b);
 }
 
+void test_enable_disk_fallback_returns_error(void) {
+    packet_buffer_t *b = create_packet_buffer("disk_fallback_cam", 5, BUFFER_MODE_MEMORY);
+    TEST_ASSERT_NOT_NULL(b);
+
+    int rc = packet_buffer_set_disk_fallback(b, true, "/tmp/lightnvr-buffer");
+    TEST_ASSERT_EQUAL_INT(-1, rc);
+    TEST_ASSERT_EQUAL_INT(BUFFER_MODE_MEMORY, b->mode);
+
+    destroy_packet_buffer(b);
+}
+
 /* ================================================================
  * clear
  * ================================================================ */
@@ -290,6 +308,7 @@ int main(void) {
     RUN_TEST(test_create_buffer_returns_non_null);
     RUN_TEST(test_create_buffer_invalid_seconds_returns_null);
     RUN_TEST(test_create_buffer_null_name_returns_null);
+    RUN_TEST(test_create_buffer_disk_mode_falls_back_to_memory);
     RUN_TEST(test_destroy_null_no_crash);
     RUN_TEST(test_get_packet_buffer_finds_created);
     RUN_TEST(test_get_packet_buffer_missing_returns_null);
@@ -300,8 +319,8 @@ int main(void) {
     RUN_TEST(test_get_stats_after_add);
     RUN_TEST(test_flush_calls_callback_for_each_packet);
     RUN_TEST(test_flush_null_callback_returns_error);
+    RUN_TEST(test_enable_disk_fallback_returns_error);
     RUN_TEST(test_clear_empties_buffer);
     RUN_TEST(test_estimate_packet_count_positive);
     return UNITY_END();
 }
-

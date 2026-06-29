@@ -29,6 +29,99 @@ static const char* strategy_names[] = {
     [BUFFER_STRATEGY_AUTO] = "auto",
 };
 
+static uint32_t capability_for_flush_mode(flush_mode_t flush_mode) {
+    switch (flush_mode) {
+        case FLUSH_MODE_TO_FILE:
+            return PRE_BUFFER_CAP_FLUSH_TO_FILE;
+        case FLUSH_MODE_TO_WRITER:
+            return PRE_BUFFER_CAP_FLUSH_TO_WRITER;
+        case FLUSH_MODE_TO_CALLBACK:
+            return PRE_BUFFER_CAP_FLUSH_TO_CALLBACK;
+        default:
+            return 0;
+    }
+}
+
+uint32_t buffer_strategy_type_capabilities(buffer_strategy_type_t type) {
+    switch (type) {
+        case BUFFER_STRATEGY_GO2RTC_NATIVE:
+            return PRE_BUFFER_CAP_FLUSH_TO_FILE;
+
+        case BUFFER_STRATEGY_HLS_SEGMENT:
+            return PRE_BUFFER_CAP_ADD_SEGMENT |
+                   PRE_BUFFER_CAP_PROTECT_SEGMENT |
+                   PRE_BUFFER_CAP_FLUSH_TO_FILE |
+                   PRE_BUFFER_CAP_GET_SEGMENTS;
+
+        case BUFFER_STRATEGY_MEMORY_PACKET:
+            return PRE_BUFFER_CAP_ADD_PACKET |
+                   PRE_BUFFER_CAP_FLUSH_TO_FILE |
+                   PRE_BUFFER_CAP_FLUSH_TO_CALLBACK;
+
+        case BUFFER_STRATEGY_MMAP_HYBRID:
+            return PRE_BUFFER_CAP_ADD_PACKET |
+                   PRE_BUFFER_CAP_FLUSH_TO_CALLBACK;
+
+        case BUFFER_STRATEGY_AUTO:
+            return buffer_strategy_type_capabilities(get_recommended_strategy_type());
+
+        case BUFFER_STRATEGY_NONE:
+        case BUFFER_STRATEGY_COUNT:
+        default:
+            return 0;
+    }
+}
+
+uint32_t pre_buffer_strategy_get_capabilities(const pre_buffer_strategy_t *strategy) {
+    if (!strategy) {
+        return 0;
+    }
+
+    uint32_t capabilities = 0;
+
+    if (strategy->add_packet) {
+        capabilities |= PRE_BUFFER_CAP_ADD_PACKET;
+    }
+    if (strategy->add_segment) {
+        capabilities |= PRE_BUFFER_CAP_ADD_SEGMENT;
+    }
+    if (strategy->protect_segment && strategy->unprotect_segment) {
+        capabilities |= PRE_BUFFER_CAP_PROTECT_SEGMENT;
+    }
+    if (strategy->flush_to_file) {
+        capabilities |= PRE_BUFFER_CAP_FLUSH_TO_FILE;
+    }
+    if (strategy->flush_to_writer) {
+        capabilities |= PRE_BUFFER_CAP_FLUSH_TO_WRITER;
+    }
+    if (strategy->flush_to_callback) {
+        capabilities |= PRE_BUFFER_CAP_FLUSH_TO_CALLBACK;
+    }
+    if (strategy->get_segments) {
+        capabilities |= PRE_BUFFER_CAP_GET_SEGMENTS;
+    }
+
+    return capabilities;
+}
+
+bool buffer_strategy_type_supports_flush_mode(buffer_strategy_type_t type,
+                                             flush_mode_t flush_mode) {
+    uint32_t required = capability_for_flush_mode(flush_mode);
+    if (required == 0) {
+        return false;
+    }
+    return (buffer_strategy_type_capabilities(type) & required) != 0;
+}
+
+bool pre_buffer_strategy_supports_flush_mode(const pre_buffer_strategy_t *strategy,
+                                             flush_mode_t flush_mode) {
+    uint32_t required = capability_for_flush_mode(flush_mode);
+    if (required == 0) {
+        return false;
+    }
+    return (pre_buffer_strategy_get_capabilities(strategy) & required) != 0;
+}
+
 /**
  * Get the default/recommended strategy type based on system resources
  */
@@ -147,6 +240,27 @@ pre_buffer_strategy_t* create_buffer_strategy(buffer_strategy_type_t type,
     return strategy;
 }
 
+pre_buffer_strategy_t* create_buffer_strategy_for_flush(buffer_strategy_type_t type,
+                                                        const char *stream_name,
+                                                        const buffer_config_t *config,
+                                                        flush_mode_t required_flush_mode) {
+    pre_buffer_strategy_t *strategy = create_buffer_strategy(type, stream_name, config);
+    if (!strategy) {
+        return NULL;
+    }
+
+    if (!pre_buffer_strategy_supports_flush_mode(strategy, required_flush_mode)) {
+        log_warn("Buffer strategy %s for stream %s does not support required flush mode %d; disabling pre-buffer strategy",
+                 strategy->name ? strategy->name : "unknown",
+                 stream_name ? stream_name : "unknown",
+                 (int)required_flush_mode);
+        destroy_buffer_strategy(strategy);
+        return NULL;
+    }
+
+    return strategy;
+}
+
 /**
  * Destroy a buffer strategy and free resources
  */
@@ -164,4 +278,3 @@ void destroy_buffer_strategy(pre_buffer_strategy_t *strategy) {
     
     free(strategy);
 }
-

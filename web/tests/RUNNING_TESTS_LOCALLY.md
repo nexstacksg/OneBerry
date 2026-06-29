@@ -84,8 +84,12 @@ chmod +x install-and-run.sh  # Make sure the script is executable
    npm run test:e2e
    
    # Or run a specific test file
-   npx jest tests/e2e/specs/streams.spec.js
+   npm test -- tests/e2e/specs/streams.spec.js
    ```
+
+   The npm scripts use `tests/run-jest.cjs` to set a stable test timezone on
+   Windows, macOS, Linux, and CI. Prefer `npm test -- <pattern>` over direct
+   `npx jest` so local runs match the repository configuration.
 
 ### Running Tests in Headless Mode
 

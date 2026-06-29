@@ -4,6 +4,10 @@
  * Based on the accounting app's theme system
  */
 
+import { createLogger } from './logger.js';
+
+const log = createLogger('theme');
+
 // Color theme definitions
 export const COLOR_THEMES = {
   default: {
@@ -11,63 +15,63 @@ export const COLOR_THEMES = {
     nameKey: 'theme.default',
     light: { hue: 357, saturation: 84 },
     dark: { hue: 357, saturation: 72 },
-    icon: '🍓'
+    icon: 'OB'
   },
   oneberry: {
     name: 'Oneberry Red',
     nameKey: 'theme.oneberry',
     light: { hue: 357, saturation: 84 },
     dark: { hue: 357, saturation: 72 },
-    icon: '🍓'
+    icon: 'OB'
   },
   blue: {
     name: 'Ocean Blue',
     nameKey: 'theme.blue',
     light: { hue: 217, saturation: 32 },
     dark: { hue: 217, saturation: 25 },
-    icon: '🌊'
+    icon: 'B'
   },
   emerald: {
     name: 'Forest Green',
     nameKey: 'theme.emerald',
     light: { hue: 160, saturation: 30 },
     dark: { hue: 160, saturation: 25 },
-    icon: '🌲'
+    icon: 'G'
   },
   purple: {
     name: 'Royal Purple',
     nameKey: 'theme.purple',
     light: { hue: 265, saturation: 28 },
     dark: { hue: 265, saturation: 20 },
-    icon: '👑'
+    icon: 'P'
   },
   rose: {
     name: 'Sunset Rose',
     nameKey: 'theme.rose',
     light: { hue: 350, saturation: 25 },
     dark: { hue: 350, saturation: 18 },
-    icon: '🌹'
+    icon: 'R'
   },
   amber: {
     name: 'Golden Amber',
     nameKey: 'theme.amber',
     light: { hue: 45, saturation: 28 },
     dark: { hue: 45, saturation: 20 },
-    icon: '⚡'
+    icon: 'A'
   },
   slate: {
     name: 'Cool Slate',
     nameKey: 'theme.slate',
     light: { hue: 215, saturation: 8 },
     dark: { hue: 215, saturation: 6 },
-    icon: '🗿'
+    icon: 'S'
   },
   retro80s: {
     name: 'Retro 80s',
     nameKey: 'theme.retro80s',
     light: { hue: 18, saturation: 58 },
     dark: { hue: 18, saturation: 48 },
-    icon: '📼'
+    icon: '80'
   }
 };
 
@@ -233,7 +237,7 @@ export function initTheme() {
     window.__LIGHTNVR_THEME_APPLIED__ = true;
 
   } catch (e) {
-    console.warn('Theme initialization failed:', e);
+    log.warn('Theme initialization failed:', e);
     document.documentElement.classList.remove('dark');
     applyStoredSidebarLayout();
   }
@@ -354,7 +358,6 @@ export function getThemeInitScript() {
     
     window.__LIGHTNVR_THEME_APPLIED__ = true;
   } catch (e) {
-    console.warn('Theme script failed:', e);
     if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
       document.documentElement.classList.add('dark');
     }

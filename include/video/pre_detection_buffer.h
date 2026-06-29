@@ -49,6 +49,23 @@ typedef enum {
 } flush_mode_t;
 
 /**
+ * Strategy capability flags.
+ *
+ * Use these before selecting a strategy for a recording path. Some strategies
+ * are intentionally partial and should fail safely when a required ingestion or
+ * flush mode is missing.
+ */
+typedef enum {
+    PRE_BUFFER_CAP_ADD_PACKET       = 1u << 0,
+    PRE_BUFFER_CAP_ADD_SEGMENT      = 1u << 1,
+    PRE_BUFFER_CAP_PROTECT_SEGMENT  = 1u << 2,
+    PRE_BUFFER_CAP_FLUSH_TO_FILE    = 1u << 3,
+    PRE_BUFFER_CAP_FLUSH_TO_WRITER  = 1u << 4,
+    PRE_BUFFER_CAP_FLUSH_TO_CALLBACK = 1u << 5,
+    PRE_BUFFER_CAP_GET_SEGMENTS     = 1u << 6,
+} pre_buffer_capability_t;
+
+/**
  * Segment information for HLS-based strategies
  */
 typedef struct {
@@ -154,6 +171,18 @@ pre_buffer_strategy_t* create_buffer_strategy(buffer_strategy_type_t type,
                                                const buffer_config_t *config);
 
 /**
+ * Create a strategy only when it supports the requested flush mode.
+ *
+ * Returns NULL after logging a warning when the selected strategy is partial
+ * for that flush path. This lets guarded callers disable pre-buffer flush
+ * safely instead of dereferencing a missing function pointer later.
+ */
+pre_buffer_strategy_t* create_buffer_strategy_for_flush(buffer_strategy_type_t type,
+                                                        const char *stream_name,
+                                                        const buffer_config_t *config,
+                                                        flush_mode_t required_flush_mode);
+
+/**
  * Destroy a buffer strategy and free resources
  */
 void destroy_buffer_strategy(pre_buffer_strategy_t *strategy);
@@ -173,5 +202,26 @@ const char* buffer_strategy_type_to_string(buffer_strategy_type_t type);
  */
 buffer_strategy_type_t buffer_strategy_type_from_string(const char *name);
 
-#endif /* LIGHTNVR_PRE_DETECTION_BUFFER_H */
+/**
+ * Return compile-time capability flags for a strategy type.
+ */
+uint32_t buffer_strategy_type_capabilities(buffer_strategy_type_t type);
 
+/**
+ * Return capability flags for a concrete strategy instance.
+ */
+uint32_t pre_buffer_strategy_get_capabilities(const pre_buffer_strategy_t *strategy);
+
+/**
+ * Check whether a strategy type supports a flush mode.
+ */
+bool buffer_strategy_type_supports_flush_mode(buffer_strategy_type_t type,
+                                             flush_mode_t flush_mode);
+
+/**
+ * Check whether a concrete strategy supports a flush mode.
+ */
+bool pre_buffer_strategy_supports_flush_mode(const pre_buffer_strategy_t *strategy,
+                                             flush_mode_t flush_mode);
+
+#endif /* LIGHTNVR_PRE_DETECTION_BUFFER_H */

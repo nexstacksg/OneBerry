@@ -10,7 +10,6 @@
 #include <unistd.h>
 #include <pthread.h>
 #include <time.h>
-#include <sys/stat.h>
 #include <errno.h>
 
 #include "video/packet_buffer.h"
@@ -204,6 +203,12 @@ packet_buffer_t* create_packet_buffer(const char *stream_name, int buffer_second
         log_error("Invalid parameters for create_packet_buffer");
         return NULL;
     }
+
+    if (mode != BUFFER_MODE_MEMORY) {
+        log_warn("Packet buffer mode %d requested for stream %s, but disk/hybrid storage is not implemented; using memory mode",
+                 (int)mode, stream_name);
+        mode = BUFFER_MODE_MEMORY;
+    }
     
     pthread_mutex_lock(&buffer_pool.pool_mutex);
 
@@ -256,16 +261,6 @@ packet_buffer_t* create_packet_buffer(const char *stream_name, int buffer_second
     buffer->tail = 0;
     buffer->count = 0;
     buffer->active = true;
-
-    // Initialize disk buffer path if needed
-    if (mode == BUFFER_MODE_DISK || mode == BUFFER_MODE_HYBRID) {
-        const config_t *config = get_streaming_config();
-        if (config) {
-            snprintf(buffer->disk_buffer_path, sizeof(buffer->disk_buffer_path),
-                    "%s/.packet_buffer_%s", config->storage_path, stream_name);
-            mkdir(buffer->disk_buffer_path, 0755);
-        }
-    }
 
     buffer_pool.active_buffers++;
 
@@ -660,12 +655,11 @@ int packet_buffer_set_disk_fallback(packet_buffer_t *buffer, bool enable, const 
     pthread_mutex_lock(&buffer->mutex);
 
     if (enable) {
-        buffer->mode = BUFFER_MODE_HYBRID;
-        if (disk_path) {
-            strncpy(buffer->disk_buffer_path, disk_path, sizeof(buffer->disk_buffer_path) - 1);
-        }
-        log_info("Enabled disk fallback for buffer: %s (path: %s)",
-                 buffer->stream_name, buffer->disk_buffer_path);
+        (void)disk_path;
+        log_warn("Disk fallback requested for buffer %s, but disk/hybrid packet buffering is not implemented",
+                 buffer->stream_name);
+        pthread_mutex_unlock(&buffer->mutex);
+        return -1;
     } else {
         buffer->mode = BUFFER_MODE_MEMORY;
         log_info("Disabled disk fallback for buffer: %s", buffer->stream_name);
@@ -675,4 +669,3 @@ int packet_buffer_set_disk_fallback(packet_buffer_t *buffer, bool enable, const 
 
     return 0;
 }
-

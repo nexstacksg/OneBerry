@@ -10,6 +10,7 @@ import { useQuery, useMutation, fetchJSON } from '../../query-client.js';
 import { ThemeCustomizer } from './ThemeCustomizer.jsx';
 import { validateSession } from '../../utils/auth-utils.js';
 import { formatLocalDateTime } from '../../utils/date-utils.js';
+import { normalizeApiDetectionBackend } from '../../utils/detection-backends.js';
 import { useI18n } from '../../i18n.js';
 
 /**
@@ -277,7 +278,7 @@ export function SettingsView() {
         swapSize: settingsData.swap_size?.toString() || '',
         detectionModelsPath: settingsData.models_path || '',
         apiDetectionUrl: settingsData.api_detection_url || 'http://localhost:8000/detect',
-        apiDetectionBackend: settingsData.api_detection_backend || 'onnx',
+        apiDetectionBackend: normalizeApiDetectionBackend(settingsData.api_detection_backend || 'onnx'),
         defaultDetectionThreshold: settingsData.default_detection_threshold || 50,
         defaultPreBuffer: settingsData.pre_detection_buffer ?? 5,
         defaultPostBuffer: settingsData.post_detection_buffer ?? 10,
@@ -1216,7 +1217,7 @@ export function SettingsView() {
                 disabled={!canModifySettings}
               >
                 <option value="onnx">{t('settings.apiDetectionBackendOnnx')}</option>
-                <option value="tflite">{t('settings.apiDetectionBackendTflite')}</option>
+                <option value="tflite" disabled>{t('settings.apiDetectionBackendTflite')}</option>
                 <option value="opencv">{t('settings.apiDetectionBackendOpencv')}</option>
               </select>
               <span class="hint text-sm text-muted-foreground block mt-1">{t('settings.apiDetectionBackendHelp')}</span>

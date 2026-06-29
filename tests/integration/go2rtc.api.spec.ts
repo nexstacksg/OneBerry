@@ -98,6 +98,21 @@ test.describe('go2rtc API @go2rtc', () => {
       const data = await listResponse.json();
       expect(data).toHaveProperty(streamName);
     });
+
+    test('decodes an encoded stream name exactly once', async () => {
+      const streamName = 'playwright stream with spaces';
+      const streamSource = encodeURIComponent('ffmpeg:virtual?video&size=480#video=h264');
+
+      const response = await request.put(
+        go2rtcPath(`/api/streams?name=${encodeURIComponent(streamName)}&src=${streamSource}`)
+      );
+      expect(response.ok()).toBeTruthy();
+
+      const listResponse = await request.get(go2rtcPath('/api/streams'));
+      const data = await listResponse.json();
+      expect(data).toHaveProperty(streamName);
+      expect(data).not.toHaveProperty(encodeURIComponent(streamName));
+    });
   });
 
   test.describe('WebRTC API', () => {
@@ -156,4 +171,3 @@ test.describe('go2rtc API @go2rtc', () => {
     });
   });
 });
-

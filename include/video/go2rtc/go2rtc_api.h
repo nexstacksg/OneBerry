@@ -30,7 +30,8 @@ bool go2rtc_api_init(const char *api_host, int api_port);
 /**
  * @brief Add a stream to go2rtc
  *
- * @param stream_id Unique identifier for the stream
+ * @param stream_id Raw, unencoded unique identifier for the stream. This function
+ *                  performs the required query-parameter encoding.
  * @param stream_url URL of the stream source (e.g., RTSP URL)
  * @return true if stream was added successfully, false otherwise
  */
@@ -42,7 +43,8 @@ bool go2rtc_api_add_stream(const char *stream_id, const char *stream_url);
  * This allows registering a stream with both a primary source and an FFmpeg
  * transcoding source for audio conversion (e.g., PCM to AAC).
  *
- * @param stream_id Unique identifier for the stream
+ * @param stream_id Raw, unencoded unique identifier for the stream. This function
+ *                  performs the required query-parameter encoding.
  * @param sources Array of source URLs
  * @param num_sources Number of sources in the array
  * @return true if stream was added successfully, false otherwise

@@ -10,47 +10,58 @@ import { useI18n } from '../../i18n.js';
 /**
  * PTZ API functions
  */
+async function fetchPtzJson(url, options) {
+  const response = await fetch(url, options);
+  let data = null;
+
+  try {
+    data = await response.json();
+  } catch {
+    data = null;
+  }
+
+  if (!response.ok) {
+    throw new Error(data?.error || data?.message || `PTZ request failed (${response.status})`);
+  }
+
+  return data || {};
+}
+
 const ptzApi = {
   async move(streamName, pan, tilt, zoom) {
-    const response = await fetch(`/api/streams/${encodeURIComponent(streamName)}/ptz/move`, {
+    return fetchPtzJson(`/api/streams/${encodeURIComponent(streamName)}/ptz/move`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ pan, tilt, zoom })
     });
-    return response.json();
   },
 
   async stop(streamName) {
-    const response = await fetch(`/api/streams/${encodeURIComponent(streamName)}/ptz/stop`, {
+    return fetchPtzJson(`/api/streams/${encodeURIComponent(streamName)}/ptz/stop`, {
       method: 'POST'
     });
-    return response.json();
   },
 
   async home(streamName) {
-    const response = await fetch(`/api/streams/${encodeURIComponent(streamName)}/ptz/home`, {
+    return fetchPtzJson(`/api/streams/${encodeURIComponent(streamName)}/ptz/home`, {
       method: 'POST'
     });
-    return response.json();
   },
 
   async getPresets(streamName) {
-    const response = await fetch(`/api/streams/${encodeURIComponent(streamName)}/ptz/presets`);
-    return response.json();
+    return fetchPtzJson(`/api/streams/${encodeURIComponent(streamName)}/ptz/presets`);
   },
 
   async gotoPreset(streamName, token) {
-    const response = await fetch(`/api/streams/${encodeURIComponent(streamName)}/ptz/preset`, {
+    return fetchPtzJson(`/api/streams/${encodeURIComponent(streamName)}/ptz/goto-preset`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ token })
     });
-    return response.json();
   },
 
   async getCapabilities(streamName) {
-    const response = await fetch(`/api/streams/${encodeURIComponent(streamName)}/ptz/capabilities`);
-    return response.json();
+    return fetchPtzJson(`/api/streams/${encodeURIComponent(streamName)}/ptz/capabilities`);
   }
 };
 
@@ -59,12 +70,12 @@ const ptzApi = {
  */
 function DirectionButton({ direction, onMouseDown, onMouseUp, onMouseLeave, disabled }) {
   const icons = {
-    up: '▲',
-    down: '▼',
-    left: '◀',
-    right: '▶',
+    up: '^',
+    down: 'v',
+    left: '<',
+    right: '>',
     'zoom-in': '+',
-    'zoom-out': '−'
+    'zoom-out': '-'
   };
 
   return (
@@ -100,7 +111,7 @@ function DirectionButton({ direction, onMouseDown, onMouseUp, onMouseLeave, disa
 /**
  * PTZ Controls component
  */
-export function PTZControls({ stream, isVisible = true, onClose }) {
+export function PTZControls({ stream, isVisible = true, onClose, isFullscreen = false }) {
   const { t } = useI18n();
   const [speed, setSpeed] = useState(0.5);
   const [presets, setPresets] = useState([]);
@@ -125,7 +136,7 @@ export function PTZControls({ stream, isVisible = true, onClose }) {
     ptzApi.move(stream.name, pan * speed, tilt * speed, zoom * speed)
       .catch(err => {
         setIsMoving(false);
-        setError(t('live.ptzMoveFailed'));
+        setError(err.message || t('live.ptzMoveFailed'));
         console.error('PTZ move error:', err);
       });
   }, [stream?.name, speed, t]);
@@ -144,7 +155,7 @@ export function PTZControls({ stream, isVisible = true, onClose }) {
     
     ptzApi.home(stream.name)
       .catch(err => {
-        setError(t('live.ptzHomeFailed'));
+        setError(err.message || t('live.ptzHomeFailed'));
         console.error('PTZ home error:', err);
       });
   }, [stream?.name, t]);
@@ -155,7 +166,7 @@ export function PTZControls({ stream, isVisible = true, onClose }) {
     
     ptzApi.gotoPreset(stream.name, token)
       .catch(err => {
-        setError(t('live.ptzPresetFailed'));
+        setError(err.message || t('live.ptzPresetFailed'));
         console.error('PTZ preset error:', err);
       });
   }, [stream?.name, t]);
@@ -167,12 +178,12 @@ export function PTZControls({ stream, isVisible = true, onClose }) {
       className="ptz-controls"
       style={{
         position: 'absolute',
-        bottom: '60px',
+        bottom: isFullscreen ? 'calc(var(--fullscreen-timeline-dock-height, 0px) + 64px)' : '60px',
         left: '10px',
         backgroundColor: 'rgba(0, 0, 0, 0.75)',
         borderRadius: '8px',
         padding: '12px',
-        zIndex: 10,
+        zIndex: isFullscreen ? 45 : 10,
         display: 'flex',
         flexDirection: 'column',
         gap: '8px',
@@ -194,7 +205,7 @@ export function PTZControls({ stream, isVisible = true, onClose }) {
               padding: '0 4px'
             }}
           >
-            ×
+            x
           </button>
         )}
       </div>
@@ -229,7 +240,7 @@ export function PTZControls({ stream, isVisible = true, onClose }) {
           }}
           title={t('live.goToHomePosition')}
         >
-          ⌂
+          H
         </button>
         <DirectionButton
           direction="right"
@@ -314,4 +325,3 @@ export function PTZControls({ stream, isVisible = true, onClose }) {
     </div>
   );
 }
-

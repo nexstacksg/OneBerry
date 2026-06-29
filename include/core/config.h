@@ -21,6 +21,18 @@ typedef enum {
     STREAM_PROTOCOL_UDP = 1
 } stream_protocol_t;
 
+// Logical config groups used for validation, documentation, and future
+// refactoring. These do not change the external INI section names.
+typedef enum {
+    CONFIG_SECTION_UNKNOWN = 0,
+    CONFIG_SECTION_RUNTIME,
+    CONFIG_SECTION_WEB,
+    CONFIG_SECTION_SECURITY,
+    CONFIG_SECTION_STORAGE,
+    CONFIG_SECTION_STREAMS,
+    CONFIG_SECTION_DETECTION
+} config_section_group_t;
+
 // Stream configuration structure
 typedef struct {
     char name[MAX_STREAM_NAME];
@@ -138,7 +150,7 @@ typedef struct {
     
     // API detection settings
     char api_detection_url[MAX_URL_LENGTH]; // URL for the detection API
-    char api_detection_backend[32];        // Backend to use: onnx, tflite, opencv (default: onnx)
+    char api_detection_backend[32];        // External detection backend hint (default: onnx)
 
     // Global detection defaults (used when per-stream settings are not specified)
     int default_detection_threshold;       // Default confidence threshold for detection (0-100)
@@ -288,6 +300,33 @@ void load_default_config(config_t *config);
  * @return 0 if valid, non-zero if invalid
  */
 int validate_config(config_t *config);
+
+/**
+ * Return the logical group for an INI section name.
+ *
+ * This helper is intentionally additive: unknown sections still remain parser
+ * no-ops unless the caller chooses to warn or validate separately.
+ *
+ * @param section INI section name, without brackets
+ * @return Logical config group, or CONFIG_SECTION_UNKNOWN
+ */
+config_section_group_t config_get_section_group(const char *section);
+
+/**
+ * Return a stable display name for a logical config group.
+ *
+ * @param group Logical config group
+ * @return Static string name
+ */
+const char *config_section_group_name(config_section_group_t group);
+
+/**
+ * Check whether an INI section is known to the current parser.
+ *
+ * @param section INI section name, without brackets
+ * @return true when section is recognized
+ */
+bool config_is_known_ini_section(const char *section);
 
 /**
  * Print configuration to stdout (for debugging)

@@ -66,7 +66,7 @@ static http_server_handle_t libuv_server_init_internal(const http_server_config_
 
     // Set libuv's thread pool size for handler offloading.
     // All HTTP handlers run on the thread pool via uv_queue_work, so the
-    // default of 4 threads is too small — slow handlers (ONVIF discovery,
+    // default of 4 threads is too small - slow handlers (ONVIF discovery,
     // recording sync) would starve fast handlers (config reads, stream CRUD).
     // Must be set before the first uv_loop_init / uv_queue_work call.
     // The value comes from g_config.web_thread_pool_size (default: 2x CPU cores).
@@ -152,10 +152,9 @@ static http_server_handle_t libuv_server_init_internal(const http_server_config_
     server->handler_capacity = INITIAL_HANDLER_CAPACITY;
     server->handler_count = 0;
     
-    // TLS initialization (if enabled)
+    // TLS initialization (reserved; built-in HTTPS is not implemented)
     if (config->ssl_enabled) {
-        // TODO: Initialize TLS context with config->cert_path, config->key_path
-        log_info("libuv_server_init: TLS support requested (not yet implemented)");
+        log_warn("libuv_server_init: TLS support requested but built-in HTTPS is not implemented; use a reverse proxy");
         server->tls_ctx = NULL;
     }
 
@@ -668,4 +667,3 @@ int http_server_register_handler(http_server_handle_t server, const char *path,
 }
 
 #endif /* HTTP_BACKEND_LIBUV */
-

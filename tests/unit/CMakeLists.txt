@@ -160,9 +160,9 @@ endif()
 add_layer3_test(test_stream_manager)
 add_layer3_test(test_stream_state)
 add_layer3_test(test_packet_buffer)
+add_layer3_test(test_pre_detection_buffer)
 add_layer3_test(test_timestamp_manager)
 add_layer3_test(test_api_handlers_system)
 add_layer3_test(test_cross_stream_motion_trigger)
 
 message(STATUS "Building Unity unit tests (Layer 1 + Layer 2 + Layer 3)")
-

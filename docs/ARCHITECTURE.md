@@ -43,7 +43,7 @@ The architecture centers on **go2rtc** as the primary streaming backbone, with L
             │              ▼                        ▼   ▼                   ▼         │
             │  ┌─────────────────┐    ┌─────────────────────┐   ┌────────────────┐    │
             │  │  MP4 Recording  │    │   HLS Streaming     │   │   Detection    │    │
-            │  │   (FFmpeg lib)  │    │   (FFmpeg lib)      │   │   (TFLite/     │    │
+            │  │   (FFmpeg lib)  │    │   (FFmpeg lib)      │   │   (SOD/API     │    │
             │  │                 │    │                     │   │  SOD/API)      │    │
             │  └────────┬────────┘    └──────────┬──────────┘   └───────┬────────┘    │
             │           │                        │                      │             │
@@ -136,7 +136,7 @@ Key files:
 ### Detection Subsystem
 
 The detection subsystem provides object detection and motion detection:
-- **Object Detection**: TensorFlow Lite models, SOD (Simple Object Detection), or external API
+- **Object Detection**: external API detection, SOD (Simple Object Detection), and model-selection hooks. TensorFlow Lite file detection is listed in parts of the UI/API but is not fully implemented in the current C backend.
 - **Motion Detection**: ONVIF-based motion events from cameras
 - **Detection Zones**: Polygon-based regions of interest per stream
 - **Detection-triggered recording**: Start/stop recordings based on detection events
@@ -159,8 +159,8 @@ Key files:
 - `src/video/unified_detection_thread.c`: Unified per-stream detection thread with buffering and annotation mode
 - `src/video/detection.c`: Core detection logic
 - `src/video/detection_config.c`: Detection configuration management
-- `src/video/detection_embedded.c`: Embedded detection (SOD/TFLite)
-- `src/video/detection_integration.c`: Model loading (TFLite/SOD/API)
+- `src/video/detection_embedded.c`: Embedded detection support, primarily SOD-backed paths
+- `src/video/detection_integration.c`: Detection model/API integration and model-selection glue
 - `src/video/detection_model.c`: Detection model management
 - `src/video/detection_stream.c`: Per-stream detection state
 - `src/video/api_detection.c`: External API-based detection
@@ -570,7 +570,7 @@ The frontend is a multi-page application with Preact components, built with Vite
 - **Vite** for build tooling and bundling
 - **WebRTC** for low-latency live viewing (via go2rtc)
 - **HLS.js** for fallback streaming compatibility
-- **@tanstack/query** for data fetching and caching
+- **@preact-signals/query** for data fetching and caching
 
 Key pages (`web/js/pages/`):
 - `index-page.jsx`: Live view entry point

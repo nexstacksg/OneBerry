@@ -2,6 +2,9 @@ import {
   getStoredStreamQuality,
   getStreamQualitySource,
 } from './stream-quality-utils.js';
+import { createLogger } from './logger.js';
+
+const log = createLogger('live-warmup');
 
 const WARMUP_THROTTLE_MS = 5000;
 const WARMUP_TIMEOUT_MS = 3000;
@@ -78,7 +81,7 @@ export function startLiveWarmup({ force = false } = {}) {
   })
     .catch((error) => {
       if (error?.name !== 'AbortError') {
-        console.warn('Live camera warmup failed:', error);
+        log.warn('Live camera warmup failed:', error);
       }
       return null;
     })

@@ -175,6 +175,46 @@ void test_validate_config_clamps_negative_db_backup_values(void) {
 }
 
 /* ================================================================
+ * config section grouping helpers
+ * ================================================================ */
+
+void test_config_section_group_known_sections(void) {
+    TEST_ASSERT_EQUAL_INT(CONFIG_SECTION_WEB, config_get_section_group("web"));
+    TEST_ASSERT_EQUAL_INT(CONFIG_SECTION_STORAGE, config_get_section_group("storage"));
+    TEST_ASSERT_EQUAL_INT(CONFIG_SECTION_STORAGE, config_get_section_group("database"));
+    TEST_ASSERT_EQUAL_INT(CONFIG_SECTION_STREAMS, config_get_section_group("streams"));
+    TEST_ASSERT_EQUAL_INT(CONFIG_SECTION_STREAMS, config_get_section_group("go2rtc"));
+    TEST_ASSERT_EQUAL_INT(CONFIG_SECTION_STREAMS, config_get_section_group("onvif"));
+    TEST_ASSERT_EQUAL_INT(CONFIG_SECTION_DETECTION, config_get_section_group("api_detection"));
+    TEST_ASSERT_EQUAL_INT(CONFIG_SECTION_DETECTION, config_get_section_group("models"));
+    TEST_ASSERT_EQUAL_INT(CONFIG_SECTION_DETECTION, config_get_section_group("mqtt"));
+}
+
+void test_config_section_group_legacy_stream_sections(void) {
+    TEST_ASSERT_EQUAL_INT(CONFIG_SECTION_STREAMS, config_get_section_group("stream.front_door"));
+    TEST_ASSERT_TRUE(config_is_known_ini_section("stream.front_door"));
+}
+
+void test_config_section_group_unknown_sections(void) {
+    TEST_ASSERT_EQUAL_INT(CONFIG_SECTION_UNKNOWN, config_get_section_group(NULL));
+    TEST_ASSERT_EQUAL_INT(CONFIG_SECTION_UNKNOWN, config_get_section_group(""));
+    TEST_ASSERT_EQUAL_INT(CONFIG_SECTION_UNKNOWN, config_get_section_group("does_not_exist"));
+    TEST_ASSERT_EQUAL_INT(CONFIG_SECTION_UNKNOWN, config_get_section_group("security"));
+    TEST_ASSERT_FALSE(config_is_known_ini_section("does_not_exist"));
+    TEST_ASSERT_FALSE(config_is_known_ini_section("security"));
+    TEST_ASSERT_EQUAL_STRING("unknown", config_section_group_name(CONFIG_SECTION_UNKNOWN));
+}
+
+void test_config_section_group_names(void) {
+    TEST_ASSERT_EQUAL_STRING("runtime", config_section_group_name(CONFIG_SECTION_RUNTIME));
+    TEST_ASSERT_EQUAL_STRING("web", config_section_group_name(CONFIG_SECTION_WEB));
+    TEST_ASSERT_EQUAL_STRING("security", config_section_group_name(CONFIG_SECTION_SECURITY));
+    TEST_ASSERT_EQUAL_STRING("storage", config_section_group_name(CONFIG_SECTION_STORAGE));
+    TEST_ASSERT_EQUAL_STRING("streams", config_section_group_name(CONFIG_SECTION_STREAMS));
+    TEST_ASSERT_EQUAL_STRING("detection", config_section_group_name(CONFIG_SECTION_DETECTION));
+}
+
+/* ================================================================
  * additional default field checks
  * ================================================================ */
 
@@ -465,6 +505,10 @@ int main(void) {
     RUN_TEST(test_validate_config_buffer_size_zero);
     RUN_TEST(test_validate_config_clamps_absolute_timeout_to_idle_timeout);
     RUN_TEST(test_validate_config_clamps_negative_db_backup_values);
+    RUN_TEST(test_config_section_group_known_sections);
+    RUN_TEST(test_config_section_group_legacy_stream_sections);
+    RUN_TEST(test_config_section_group_unknown_sections);
+    RUN_TEST(test_config_section_group_names);
 
     RUN_TEST(test_default_config_web_auth_enabled);
     RUN_TEST(test_default_config_username);
@@ -495,4 +539,3 @@ int main(void) {
     shutdown_logger();
     return result;
 }
-

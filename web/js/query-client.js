@@ -1,6 +1,6 @@
 /**
  * LightNVR Web Interface Query Client
- * TanStack Query (Preact Query) integration for Preact
+ * @preact-signals/query integration for Preact
  */
 
 import {
@@ -12,6 +12,9 @@ import {
 } from '@preact-signals/query';
 
 import { fetchJSON, createRequestController } from './fetch-utils.js';
+import { createLogger } from './utils/logger.js';
+
+const log = createLogger('query');
 
 // Export QueryClient class, QueryClientProvider, and fetchJSON
 export { QueryClient, QueryClientProvider, fetchJSON };
@@ -60,7 +63,7 @@ export function useQuery(queryKeyOrOptions, url, options = {}, queryOptions = {}
         try {
           return await fetchJSON(url, fetchOptions);
         } catch (error) {
-          console.error('useQuery error for', url, ':', error);
+          log.error('useQuery error for', url, ':', error);
           throw error;
         }
       },
@@ -105,7 +108,7 @@ export function usePostMutation(url, options = {}, mutationOptions = {}) {
       try {
         return await fetchJSON(url, fetchOptions);
       } catch (error) {
-        console.error(`usePostMutation error for ${url}:`, error);
+        log.error(`usePostMutation error for ${url}:`, error);
         throw error;
       }
     },
@@ -138,7 +141,7 @@ export function usePutMutation(url, options = {}, mutationOptions = {}) {
       try {
         return await fetchJSON(url, fetchOptions);
       } catch (error) {
-        console.error(`usePutMutation error for ${url}:`, error);
+        log.error(`usePutMutation error for ${url}:`, error);
         throw error;
       }
     },
@@ -173,7 +176,7 @@ export function useDeleteMutation(url, options = {}, mutationOptions = {}) {
       try {
         return await fetchJSON(url, fetchOptions);
       } catch (error) {
-        console.error(`useDeleteMutation error for ${url}:`, error);
+        log.error(`useDeleteMutation error for ${url}:`, error);
         throw error;
       }
     },
@@ -205,7 +208,7 @@ export function prefetchQuery(queryKey, url, options = {}, queryOptions = {}) {
       try {
         return await fetchJSON(url, options);
       } catch (error) {
-        console.error(`prefetchQuery error for ${url}:`, error);
+        log.error(`prefetchQuery error for ${url}:`, error);
         throw error;
       }
     },

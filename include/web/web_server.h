@@ -14,6 +14,7 @@ void shutdown_web_server(void);
 int register_request_handler(const char *path, const char *method, request_handler_t handler);
 int set_authentication(bool enabled, const char *username, const char *password);
 int set_cors_settings(bool enabled, const char *allowed_origins, const char *allowed_methods, const char *allowed_headers);
+/* Reserved: built-in web HTTPS is not implemented; terminate TLS at a reverse proxy. */
 int set_ssl_settings(bool enabled, const char *cert_path, const char *key_path);
 int set_max_connections(int max_connections);
 int set_connection_timeout(int timeout_seconds);
