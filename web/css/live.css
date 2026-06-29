@@ -744,6 +744,32 @@
     }
 }
 
+@media (max-width: 480px) {
+    .video-cell .stream-controls {
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        align-items: flex-end;
+        gap: 0.35rem !important;
+        max-width: calc(100% - 0.75rem);
+        padding: 0.375rem !important;
+    }
+
+    .video-cell .stream-controls button {
+        min-width: 40px;
+        min-height: 40px;
+    }
+
+    .video-cell .stream-controls.stream-controls-fullscreen {
+        max-width: calc(100% - 0.75rem);
+        padding: 0.3125rem 0.35rem !important;
+    }
+
+    .video-cell .stream-controls .stream-quality-selector,
+    .video-cell .stream-controls [role="group"] {
+        max-width: 100%;
+    }
+}
+
 /* iOS specific adjustments */
 @supports (-webkit-touch-callout: none) {
     /* iOS-specific styles */
