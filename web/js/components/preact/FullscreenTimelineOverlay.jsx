@@ -80,7 +80,7 @@ function stripHours(hours) {
 const MIN_FULLSCREEN_TIMELINE_VIEW_HOURS = 1 / 3600;
 const PLAYBACK_SPEEDS = [0.25, 0.5, 1, 1.5, 2, 4];
 const SEEK_SETTLE_TOLERANCE_SECONDS = 1.5;
-const CONTINUOUS_SEGMENT_GAP_SECONDS = 5;
+const CONTINUOUS_SEGMENT_GAP_SECONDS = 10;
 
 function formatDurationLabel(seconds) {
   if (!Number.isFinite(seconds) || seconds <= 0) {

@@ -40,6 +40,57 @@
 #include "storage/storage_manager_streams_cache.h"
 #include "telemetry/stream_metrics.h"
 
+static void build_segment_output_path(char *buffer, size_t buffer_size,
+                                      const char *output_dir, time_t timestamp,
+                                      int segment_count) {
+    if (!buffer || buffer_size == 0 || !output_dir) {
+        return;
+    }
+
+    char timestamp_str[32];
+    struct tm tm_buf;
+    const struct tm *tm_info = localtime_r(&timestamp, &tm_buf);
+    if (tm_info) {
+        strftime(timestamp_str, sizeof(timestamp_str), "%Y%m%d_%H%M%S", tm_info);
+    } else {
+        snprintf(timestamp_str, sizeof(timestamp_str), "%ld", (long)timestamp);
+    }
+
+    snprintf(buffer, buffer_size, "%s/recording_%s_%06d.mp4",
+             output_dir, timestamp_str, segment_count);
+}
+
+static void discard_current_recording(mp4_writer_thread_t *thread_ctx,
+                                      const char *stream_name,
+                                      const char *reason) {
+    if (!thread_ctx || !thread_ctx->writer) {
+        return;
+    }
+
+    uint64_t recording_id = thread_ctx->writer->current_recording_id;
+    if (recording_id > 0) {
+        log_warn("Discarding incomplete recording metadata (ID: %llu) for stream %s: %s",
+                 (unsigned long long)recording_id,
+                 stream_name ? stream_name : "unknown",
+                 reason ? reason : "recording failed");
+        delete_recording_metadata(recording_id);
+        thread_ctx->writer->current_recording_id = 0;
+    }
+
+    if (thread_ctx->writer->output_path[0] != '\0') {
+        if (unlink(thread_ctx->writer->output_path) == 0) {
+            log_info("Removed incomplete recording file for stream %s: %s",
+                     stream_name ? stream_name : "unknown",
+                     thread_ctx->writer->output_path);
+        } else if (errno != ENOENT) {
+            log_warn("Failed to remove incomplete recording file for stream %s: %s (%s)",
+                     stream_name ? stream_name : "unknown",
+                     thread_ctx->writer->output_path,
+                     strerror(errno));
+        }
+    }
+}
+
 
 // Callback invoked by record_segment when the first keyframe is detected
 // and the segment officially begins. For normal rotations, use the planned
@@ -55,10 +106,10 @@ static void on_segment_started_cb(void *user_ctx, time_t keyframe_time, int64_t 
     const char *stream_name = thread_ctx->writer->stream_name[0] ? thread_ctx->writer->stream_name : "unknown";
 
     if (thread_ctx->writer->output_path[0] != '\0') {
-        time_t keyframe_time = time(NULL);
-        time_t start_time = keyframe_time;
+        time_t actual_keyframe_time = keyframe_time > 0 ? keyframe_time : time(NULL);
+        time_t start_time = actual_keyframe_time;
         if (thread_ctx->pending_segment_start_time > 0 &&
-            thread_ctx->pending_segment_start_time <= keyframe_time) {
+            thread_ctx->pending_segment_start_time <= actual_keyframe_time) {
             start_time = thread_ctx->pending_segment_start_time;
         }
 
@@ -71,7 +122,7 @@ static void on_segment_started_cb(void *user_ctx, time_t keyframe_time, int64_t 
         metadata.size_bytes = 0;
         metadata.is_complete = false;
         strncpy(metadata.container, "mp4", sizeof(metadata.container) - 1);
-        metadata.first_keyframe_time = keyframe_time > 0 ? keyframe_time : start_time;
+        metadata.first_keyframe_time = actual_keyframe_time > 0 ? actual_keyframe_time : start_time;
         metadata.first_pts = keyframe_pts;
         metadata.last_pts = INT64_MIN;
         strncpy(metadata.trigger_type, thread_ctx->writer->trigger_type, sizeof(metadata.trigger_type) - 1);
@@ -297,16 +348,12 @@ static void *mp4_writer_rtsp_thread(void *arg) {
                 log_info("Time to create new segment for stream %s (elapsed time: %ld seconds, segment duration: %d seconds)",
                          stream_name, (long)elapsed_time, segment_duration);
 
-                // Create timestamp for new MP4 filename
-                char timestamp_str[32];
-                struct tm tm_buf;
-                const struct tm *tm_info = localtime_r(&current_time, &tm_buf);
-                strftime(timestamp_str, sizeof(timestamp_str), "%Y%m%d_%H%M%S", tm_info);
-
                 // Create new output path
                 char new_path[MAX_PATH_LENGTH];
-                snprintf(new_path, MAX_PATH_LENGTH, "%s/recording_%s.mp4",
-                         thread_ctx->writer->output_dir, timestamp_str);
+                build_segment_output_path(new_path, sizeof(new_path),
+                                          thread_ctx->writer->output_dir,
+                                          current_time,
+                                          thread_ctx->segment_count + 1);
 
                 // Get the current output path before closing
                 char current_path[MAX_PATH_LENGTH];
@@ -470,6 +517,8 @@ static void *mp4_writer_rtsp_thread(void *arg) {
             log_error("Failed to record segment for stream %s (error: %d), implementing retry strategy...",
                      stream_name, ret);
 
+            discard_current_recording(thread_ctx, stream_name, "segment recording failed before completion");
+
             // Tiered backoff: give the stream progressively more time to heal.
             // Exponential for the first few retries (1 s → 16 s), then hold at
             // 30 s, and finally 60 s once the failure is clearly persistent.
@@ -539,11 +588,11 @@ static void *mp4_writer_rtsp_thread(void *arg) {
                 struct tm retry_tm_buf;
                 const struct tm *retry_tm = localtime_r(&retry_ts, &retry_tm_buf);
                 if (retry_tm) {
-                    char retry_ts_str[32];
-                    strftime(retry_ts_str, sizeof(retry_ts_str), "%Y%m%d_%H%M%S", retry_tm);
-                    snprintf(thread_ctx->writer->output_path, MAX_PATH_LENGTH,
-                             "%s/recording_%s.mp4",
-                             thread_ctx->writer->output_dir, retry_ts_str);
+                    build_segment_output_path(thread_ctx->writer->output_path,
+                                              MAX_PATH_LENGTH,
+                                              thread_ctx->writer->output_dir,
+                                              retry_ts,
+                                              thread_ctx->segment_count + thread_ctx->retry_count + 1);
                     log_debug("Updated output path for retry attempt: %s",
                               thread_ctx->writer->output_path);
                 }

@@ -865,6 +865,9 @@ int record_segment(const char *rtsp_url, const char *output_file, int duration, 
     bool waiting_for_final_keyframe = false;
     // Flag to track if shutdown was detected
     bool shutdown_detected = false;
+    // If the RTSP/go2rtc input ends before we intentionally reached the
+    // segment boundary, this is a source failure rather than a valid segment.
+    bool premature_stream_end = false;
 
     // CRITICAL FIX: Ensure input_ctx is valid before entering the main loop
     if (!input_ctx) {
@@ -922,6 +925,11 @@ int record_segment(const char *rtsp_url, const char *output_file, int duration, 
 		if (ret < 0) {
 			if (ret == AVERROR_EOF) {
 				log_info("End of stream reached for %s", output_file);
+                if (!waiting_for_final_keyframe && !shutdown_detected) {
+                    premature_stream_end = true;
+                    log_warn("Stream ended before segment boundary for %s; treating segment as failed",
+                             output_file);
+                }
 				break;
 			} else if (ret == AVERROR_EXIT) {
 				// AVERROR_EXIT means the interrupt callback returned 1.
@@ -929,12 +937,20 @@ int record_segment(const char *rtsp_url, const char *output_file, int duration, 
 				// dead-recording cleanup) or during global shutdown.
 				log_warn("RTSP read interrupted (AVERROR_EXIT) for %s — "
 				         "recording thread is being stopped", output_file);
+                if (!waiting_for_final_keyframe && !shutdown_detected) {
+                    premature_stream_end = true;
+                }
 				break;
 			} else if (ret != AVERROR(EAGAIN)) {
 				char err_buf[AV_ERROR_MAX_STRING_SIZE] = {0};
 				av_strerror(ret, err_buf, sizeof(err_buf));
 				log_error("Error reading frame for %s: %d (%s)",
 				          output_file, ret, err_buf);
+                if (!waiting_for_final_keyframe && !shutdown_detected) {
+                    premature_stream_end = true;
+                    log_warn("Read failed before segment boundary for %s; treating segment as failed",
+                             output_file);
+                }
 				break;
 			}
 			// EAGAIN means try again, so we continue
@@ -1561,6 +1577,14 @@ int record_segment(const char *rtsp_url, const char *output_file, int duration, 
         // Ensure the caller's pointer is also NULL so it opens a fresh connection.
         // input_ctx_ptr was validated at function entry.
         *input_ctx_ptr = NULL;
+        ret = -1;
+        goto cleanup;
+    }
+
+    if (premature_stream_end) {
+        log_warn("Segment ended after only %d video packets before the configured boundary; "
+                 "discarding partial segment so it is not marked complete",
+                 video_packet_count);
         ret = -1;
         goto cleanup;
     }

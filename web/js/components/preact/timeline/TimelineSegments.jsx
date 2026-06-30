@@ -13,6 +13,8 @@ import {
 } from './timelineUtils.js';
 import { formatLocalTime } from '../../../utils/date-utils.js';
 
+const CONTINUOUS_SEGMENT_GAP_SECONDS = 10;
+
 /**
  * TimelineSegments component
  * @param {Object} props Component props
@@ -152,7 +154,7 @@ export function TimelineSegments({ segments: propSegments, interactive = true })
     });
   };
 
-  // ── Merge adjacent segments (gap ≤ 1 s) and render ──
+  // ── Merge adjacent segments and render ──
   const renderSegments = () => {
     if (!segments || segments.length === 0) {
       return (
@@ -165,14 +167,15 @@ export function TimelineSegments({ segments: propSegments, interactive = true })
     const hourRange = endHour - startHour;
     if (hourRange <= 0) return null;
 
-    // Sort + merge adjacent segments
+    // Sort + merge adjacent segments.  Recorder boundaries can have a small
+    // keyframe/timestamp gap even though playback should be treated as continuous.
     const sorted = [...segments].sort((a, b) => a.start_timestamp - b.start_timestamp);
     const merged = [];
     let cur = { ...sorted[0] };
 
     for (let i = 1; i < sorted.length; i++) {
       const seg = sorted[i];
-      if (seg.start_timestamp - cur.end_timestamp <= 1) {
+      if (seg.start_timestamp - cur.end_timestamp <= CONTINUOUS_SEGMENT_GAP_SECONDS) {
         // extend current merged segment
         cur.end_timestamp = Math.max(cur.end_timestamp, seg.end_timestamp);
         if (seg.has_detection) cur.has_detection = true;

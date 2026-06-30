@@ -15,8 +15,20 @@ import { drawDetectionBoxes } from '../detection-overlay-utils.js';
 
 // Timeout for cleaning up preloaded temporary video elements (in milliseconds).
 const PRELOAD_CLEANUP_TIMEOUT_MS = 15000;
+const NEXT_SEGMENT_PRELOAD_REMAINING_SECONDS = 8;
+const SEAMLESS_ADVANCE_REMAINING_SECONDS = 0.25;
+const SEAMLESS_ADVANCE_MAX_GAP_SECONDS = 10;
 const DETECTION_TIME_WINDOW_SECONDS = 2; // Time window (seconds) for filtering visible detections around current playback time
 const DETECTION_SCALE_BASE = 400; // Baseline display dimension (px) for detection overlay scaling
+
+function getSegmentRecordingUrl(segment) {
+  if (!segment?.id) {
+    return '';
+  }
+
+  const segmentVersion = `${segment.id}-${segment.start_timestamp}-${segment.end_timestamp}`;
+  return `/api/recordings/play/${segment.id}?v=${encodeURIComponent(segmentVersion)}`;
+}
 
 function ControlIcon({ type, className = 'h-3.5 w-3.5' }) {
   const common = {
@@ -105,6 +117,8 @@ export function TimelinePlayer({ videoElementRef = null, autoFullscreen = false 
   const lastSegmentIdRef = useRef(null);
   const lastDetectionSegmentIdRef = useRef(null);
   const preloadedVideoCleanupRef = useRef(null);
+  const preloadedSegmentIdRef = useRef(null);
+  const advancingSegmentIdRef = useRef(null);
   const pendingAutoplayRef = useRef(false);
 
   const setVideoRefs = useCallback((node) => {
@@ -122,15 +136,6 @@ export function TimelinePlayer({ videoElementRef = null, autoFullscreen = false 
     videoElementRef.current = node;
   }, [videoElementRef]);
 
-  const releaseDirectVideoControl = useCallback(() => {
-    if (!timelineState.directVideoControl) {
-      return;
-    }
-
-    timelineState.directVideoControl = false;
-    timelineState.setState({});
-  }, []);
-
   const cleanupPreloadedVideo = useCallback(() => {
     if (typeof preloadedVideoCleanupRef.current !== 'function') {
       return;
@@ -138,7 +143,51 @@ export function TimelinePlayer({ videoElementRef = null, autoFullscreen = false 
 
     preloadedVideoCleanupRef.current();
     preloadedVideoCleanupRef.current = null;
+    preloadedSegmentIdRef.current = null;
   }, []);
+
+  const preloadSegment = useCallback((segment) => {
+    if (!segment?.id || preloadedSegmentIdRef.current === segment.id) {
+      return;
+    }
+
+    const recordingUrl = getSegmentRecordingUrl(segment);
+    if (!recordingUrl) {
+      return;
+    }
+
+    cleanupPreloadedVideo();
+
+    const tempVideo = document.createElement('video');
+    tempVideo.preload = 'auto';
+    tempVideo.muted = true;
+    tempVideo.playsInline = true;
+    tempVideo.src = recordingUrl;
+
+    let tempCleanupTimeoutId = null;
+    const cleanupTempVideo = () => {
+      tempVideo.removeEventListener('error', cleanupTempVideo);
+      try { tempVideo.pause(); } catch (e) { /* ignore */ }
+      tempVideo.removeAttribute('src');
+      try { tempVideo.load(); } catch (e) { /* ignore */ }
+      if (tempCleanupTimeoutId !== null) {
+        clearTimeout(tempCleanupTimeoutId);
+        tempCleanupTimeoutId = null;
+      }
+      if (preloadedVideoCleanupRef.current === cleanupTempVideo) {
+        preloadedVideoCleanupRef.current = null;
+      }
+      if (preloadedSegmentIdRef.current === segment.id) {
+        preloadedSegmentIdRef.current = null;
+      }
+    };
+
+    preloadedSegmentIdRef.current = segment.id;
+    preloadedVideoCleanupRef.current = cleanupTempVideo;
+    tempVideo.addEventListener('error', cleanupTempVideo);
+    tempCleanupTimeoutId = setTimeout(cleanupTempVideo, PRELOAD_CLEANUP_TIMEOUT_MS);
+    tempVideo.load();
+  }, [cleanupPreloadedVideo]);
 
   const requestVideoPlay = useCallback((video) => {
     if (!video) {
@@ -212,6 +261,7 @@ export function TimelinePlayer({ videoElementRef = null, autoFullscreen = false 
     // Update last segment ID
     if (segmentChanged) {
       lastSegmentIdRef.current = segment.id;
+      advancingSegmentIdRef.current = null;
     }
 
     // Handle playback
@@ -239,8 +289,6 @@ export function TimelinePlayer({ videoElementRef = null, autoFullscreen = false 
       video.playbackRate = state.playbackSpeed;
     }
   }, [
-    cleanupPreloadedVideo,
-    releaseDirectVideoControl,
     requestVideoPlay,
   ]);
 
@@ -288,8 +336,7 @@ export function TimelinePlayer({ videoElementRef = null, autoFullscreen = false 
     video.pause();
 
     // Set new source using a deterministic version to allow caching of identical segments
-    const segmentVersion = `${segment.id}-${segment.start_timestamp}-${segment.end_timestamp}`;
-    const recordingUrl = `/api/recordings/play/${segment.id}?v=${encodeURIComponent(segmentVersion)}`;
+    const recordingUrl = getSegmentRecordingUrl(segment);
 
     // Set up event listeners for the new video
     const onLoadedMetadata = () => {
@@ -343,6 +390,13 @@ export function TimelinePlayer({ videoElementRef = null, autoFullscreen = false 
       // Set playback speed
       video.playbackRate = playbackSpeed;
 
+      const allSegments = timelineState.timelineSegments || [];
+      const currentIndex = allSegments.findIndex(candidate => candidate?.id === segment.id);
+      const nextSegment = currentIndex !== -1 ? allSegments[currentIndex + 1] : null;
+      if (nextSegment) {
+        preloadSegment(nextSegment);
+      }
+
       // Play if needed
       if (autoplay) {
         requestVideoPlay(video).then((played) => {
@@ -377,7 +431,7 @@ export function TimelinePlayer({ videoElementRef = null, autoFullscreen = false 
     // Set new source
     video.src = recordingUrl;
     video.load();
-  }, [playbackSpeed, requestVideoPlay]);
+  }, [playbackSpeed, preloadSegment, requestVideoPlay]);
 
   // Handle video ended event
   const handleEnded = () => {
@@ -391,36 +445,6 @@ export function TimelinePlayer({ videoElementRef = null, autoFullscreen = false 
     if (currentIdx < allSegments.length - 1) {
       const nextIndex = currentIdx + 1;
       const nextSegment = allSegments[nextIndex];
-
-      // Warm the browser cache for the next segment in the background using a
-      // temporary video element.  The actual loading and seeking is handled by
-      // handleVideoPlayback → loadSegment once we update the state below.
-      cleanupPreloadedVideo();
-      const nextVideoUrl = `/api/recordings/play/${nextSegment.id}`;
-      const tempVideo = document.createElement('video');
-      tempVideo.preload = 'auto';
-      tempVideo.src = nextVideoUrl;
-
-      let tempCleanupTimeoutId = null;
-      const cleanupTempVideo = () => {
-        tempVideo.removeEventListener('loadeddata', cleanupTempVideo);
-        tempVideo.removeEventListener('error', cleanupTempVideo);
-        try { tempVideo.pause(); } catch (e) { /* ignore */ }
-        tempVideo.removeAttribute('src');
-        try { tempVideo.load(); } catch (e) { /* ignore */ }
-        if (tempCleanupTimeoutId !== null) {
-          clearTimeout(tempCleanupTimeoutId);
-          tempCleanupTimeoutId = null;
-        }
-        if (preloadedVideoCleanupRef.current === cleanupTempVideo) {
-          preloadedVideoCleanupRef.current = null;
-        }
-      };
-      preloadedVideoCleanupRef.current = cleanupTempVideo;
-      tempVideo.addEventListener('loadeddata', cleanupTempVideo);
-      tempVideo.addEventListener('error', cleanupTempVideo);
-      tempCleanupTimeoutId = setTimeout(cleanupTempVideo, PRELOAD_CLEANUP_TIMEOUT_MS);
-      tempVideo.load();
 
       // Update state — handleVideoPlayback detects the new segment ID and calls
       // loadSegment(nextSegment, 0, true), which handles the actual video work.
@@ -479,6 +503,46 @@ export function TimelinePlayer({ videoElementRef = null, autoFullscreen = false 
 
     const segment = globalSegments[globalSegmentIndex];
     if (!segment) return;
+
+    const nextSegment = globalSegmentIndex < globalSegments.length - 1
+      ? globalSegments[globalSegmentIndex + 1]
+      : null;
+    const segmentDuration = Number.isFinite(video.duration) && video.duration > 0
+      ? video.duration
+      : Math.max(segment.end_timestamp - segment.start_timestamp, 0);
+    const remainingSeconds = segmentDuration - video.currentTime;
+
+    if (
+      nextSegment &&
+      timelineState.isPlaying &&
+      Number.isFinite(remainingSeconds) &&
+      remainingSeconds <= NEXT_SEGMENT_PRELOAD_REMAINING_SECONDS
+    ) {
+      preloadSegment(nextSegment);
+    }
+
+    const nextGapSeconds = nextSegment
+      ? Number(nextSegment.start_timestamp) - Number(segment.end_timestamp)
+      : Infinity;
+    if (
+      nextSegment &&
+      timelineState.isPlaying &&
+      !timelineState.userControllingCursor &&
+      !timelineState.cursorPositionLocked &&
+      Number.isFinite(remainingSeconds) &&
+      remainingSeconds <= SEAMLESS_ADVANCE_REMAINING_SECONDS &&
+      nextGapSeconds <= SEAMLESS_ADVANCE_MAX_GAP_SECONDS &&
+      advancingSegmentIdRef.current !== nextSegment.id
+    ) {
+      advancingSegmentIdRef.current = nextSegment.id;
+      timelineState.setState({
+        currentSegmentIndex: globalSegmentIndex + 1,
+        currentTime: nextSegment.start_timestamp,
+        prevCurrentTime: timelineState.currentTime,
+        isPlaying: true
+      });
+      return;
+    }
 
     const desiredTime = timelineState.currentTime;
     const isInitialPausedSyncEvent =
