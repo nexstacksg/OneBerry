@@ -114,10 +114,12 @@ static void populate_user_from_stmt(sqlite3_stmt *stmt, user_t *user) {
     user->password_change_locked = sqlite3_column_int(stmt, 9) != 0;
     user->totp_enabled = sqlite3_column_int(stmt, 10) != 0;
 
-    const char *allowed_tags = (const char *)sqlite3_column_text(stmt, 11);
-    if (allowed_tags && allowed_tags[0] != '\0') {
-        strncpy(user->allowed_tags, allowed_tags, sizeof(user->allowed_tags) - 1);
-        user->allowed_tags[sizeof(user->allowed_tags) - 1] = '\0';
+    if (sqlite3_column_type(stmt, 11) != SQLITE_NULL) {
+        const char *allowed_tags = (const char *)sqlite3_column_text(stmt, 11);
+        if (allowed_tags) {
+            strncpy(user->allowed_tags, allowed_tags, sizeof(user->allowed_tags) - 1);
+            user->allowed_tags[sizeof(user->allowed_tags) - 1] = '\0';
+        }
         user->has_tag_restriction = true;
     }
 
@@ -439,9 +441,13 @@ void handle_users_create(const http_request_t *req, http_response_t *res) {
         return;
     }
 
-    // Set allowed_tags if provided
+    // Set allowed_tags if provided. New non-admin users default to no camera access
+    // until an administrator assigns at least one camera group.
     if (has_at_create) {
-        db_auth_set_allowed_tags(user_id, at_create_is_null ? NULL : allowed_tags_buf);
+        db_auth_set_allowed_tags(user_id,
+                                 at_create_is_null && role == USER_ROLE_ADMIN ? NULL : allowed_tags_buf);
+    } else if (role != USER_ROLE_ADMIN) {
+        db_auth_set_allowed_tags(user_id, "");
     }
 
     if (has_cidr_create && db_auth_set_allowed_login_cidrs(user_id, cidr_create_is_null ? NULL : allowed_login_cidrs_buf) != 0) {
@@ -622,11 +628,13 @@ void handle_users_update(const http_request_t *req, http_response_t *res) {
     }
 
     if (rc == 0 && allowed_tags_json) {
-        // allowed_tags: JSON null removes restriction; string sets it
+        // Admin users may be unrestricted. Non-admin users with no camera groups
+        // keep an empty restriction, which matches no streams.
         const char *at = NULL;
         bool set_tags = false;
+        int final_role = role == -1 ? (int)user.role : role;
         if (cJSON_IsNull(allowed_tags_json)) {
-            at = NULL;    // Remove restriction
+            at = final_role == USER_ROLE_ADMIN ? NULL : "";
             set_tags = true;
         } else if (cJSON_IsString(allowed_tags_json)) {
             at = allowed_tags_json->valuestring;
@@ -1062,4 +1070,3 @@ void handle_users_clear_login_lockout(const http_request_t *req, http_response_t
     log_info("Cleared login lockout for user: %s (ID: %lld, existed: %d)",
              user.username, (long long)user_id, cleared ? 1 : 0);
 }
-

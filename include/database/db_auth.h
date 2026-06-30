@@ -38,7 +38,7 @@ typedef struct {
     bool is_active;          /**< Whether the user is active */
     bool password_change_locked; /**< Whether password changes are locked (for demo accounts) */
     bool totp_enabled;       /**< Whether TOTP MFA is enabled */
-    char allowed_tags[USER_ALLOWED_TAGS_MAX];  /**< Comma-separated tag whitelist for RBAC (empty = no restriction) */
+    char allowed_tags[USER_ALLOWED_TAGS_MAX];  /**< Comma-separated tag whitelist for RBAC (empty + restricted = no matches) */
     bool has_tag_restriction; /**< Whether allowed_tags is set (true) or NULL/unrestricted (false) */
     char allowed_login_cidrs[USER_ALLOWED_LOGIN_CIDRS_MAX]; /**< Newline-separated CIDR whitelist for login/auth IPs */
     bool has_login_cidr_restriction; /**< Whether allowed_login_cidrs is set (true) or NULL/unrestricted (false) */

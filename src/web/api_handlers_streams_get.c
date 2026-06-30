@@ -58,11 +58,56 @@ static bool is_live_warmup_request(const http_request_t *req) {
            (strcmp(value, "1") == 0 || strcasecmp(value, "true") == 0);
 }
 
+static bool get_streams_request_user(const http_request_t *req, http_response_t *res,
+                                     user_t *auth_user, bool *have_auth_user) {
+    if (!auth_user || !have_auth_user) {
+        http_response_set_json_error(res, 500, "Internal error");
+        return false;
+    }
+
+    memset(auth_user, 0, sizeof(*auth_user));
+    *have_auth_user = false;
+
+    if (!g_config.web_auth_enabled) {
+        return true;
+    }
+
+    if (g_config.demo_mode) {
+        if (!httpd_check_viewer_access(req, auth_user)) {
+            log_error("Authentication failed for streams request");
+            http_response_set_json_error(res, 401, "Unauthorized");
+            return false;
+        }
+    } else if (!httpd_get_authenticated_user(req, auth_user)) {
+        log_error("Authentication failed for streams request");
+        http_response_set_json_error(res, 401, "Unauthorized");
+        return false;
+    }
+
+    *have_auth_user = true;
+    return true;
+}
+
+static bool stream_config_allowed_for_user(const stream_config_t *config,
+                                           const user_t *auth_user,
+                                           bool have_auth_user) {
+    if (!config) {
+        return false;
+    }
+
+    if (have_auth_user && auth_user && auth_user->has_tag_restriction) {
+        return db_auth_stream_allowed_for_user(auth_user, config->tags);
+    }
+
+    return true;
+}
+
 static void get_stream_api_credentials(const stream_config_t *config,
                                        char *safe_url, size_t safe_url_size,
                                        char *safe_secondary_url, size_t safe_secondary_url_size,
                                        char *onvif_username, size_t onvif_username_size,
-                                       char *onvif_password, size_t onvif_password_size) {
+                                       char *onvif_password, size_t onvif_password_size,
+                                       bool include_url_credentials) {
     char extracted_username[128] = {0};
     char extracted_password[128] = {0};
     bool use_separate_credentials;
@@ -102,15 +147,34 @@ static void get_stream_api_credentials(const stream_config_t *config,
         }
     }
 
-    if (url_strip_credentials(config->url, safe_url, safe_url_size) != 0) {
+    if (include_url_credentials && onvif_username[0] != '\0') {
+        if (url_apply_credentials(config->url,
+                                  onvif_username,
+                                  onvif_password[0] != '\0' ? onvif_password : NULL,
+                                  safe_url,
+                                  safe_url_size) != 0) {
+            strncpy(safe_url, config->url, safe_url_size - 1);
+            safe_url[safe_url_size - 1] = '\0';
+        }
+    } else if (url_strip_credentials(config->url, safe_url, safe_url_size) != 0) {
         strncpy(safe_url, config->url, safe_url_size - 1);
         safe_url[safe_url_size - 1] = '\0';
     }
 
-    if (config->secondary_url[0] != '\0' &&
-        url_strip_credentials(config->secondary_url, safe_secondary_url, safe_secondary_url_size) != 0) {
-        strncpy(safe_secondary_url, config->secondary_url, safe_secondary_url_size - 1);
-        safe_secondary_url[safe_secondary_url_size - 1] = '\0';
+    if (config->secondary_url[0] != '\0') {
+        if (include_url_credentials && onvif_username[0] != '\0') {
+            if (url_apply_credentials(config->secondary_url,
+                                      onvif_username,
+                                      onvif_password[0] != '\0' ? onvif_password : NULL,
+                                      safe_secondary_url,
+                                      safe_secondary_url_size) != 0) {
+                strncpy(safe_secondary_url, config->secondary_url, safe_secondary_url_size - 1);
+                safe_secondary_url[safe_secondary_url_size - 1] = '\0';
+            }
+        } else if (url_strip_credentials(config->secondary_url, safe_secondary_url, safe_secondary_url_size) != 0) {
+            strncpy(safe_secondary_url, config->secondary_url, safe_secondary_url_size - 1);
+            safe_secondary_url[safe_secondary_url_size - 1] = '\0';
+        }
     }
 }
 
@@ -122,31 +186,11 @@ void handle_get_streams(const http_request_t *req, http_response_t *res) {
 
 	// Capture the authenticated user so we can apply tag-based RBAC filtering
 	user_t auth_user;
-	memset(&auth_user, 0, sizeof(auth_user));
 	bool have_auth_user = false;
 
-	// When web authentication is enabled, require a valid authenticated user
-	// for access to the streams list. In demo mode, unauthenticated users
-	// get viewer access.
-	if (g_config.web_auth_enabled) {
-		// In demo mode, allow unauthenticated viewer access
-		if (g_config.demo_mode) {
-			if (!httpd_check_viewer_access(req, &auth_user)) {
-				log_error("Authentication failed for GET /api/streams request");
-				http_response_set_json_error(res, 401, "Unauthorized");
-				return;
-			}
-			have_auth_user = true;
-		} else {
-			// Normal mode: require authentication
-			if (!httpd_get_authenticated_user(req, &auth_user)) {
-				log_error("Authentication failed for GET /api/streams request");
-				http_response_set_json_error(res, 401, "Unauthorized");
-				return;
-			}
-			have_auth_user = true;
-		}
-	}
+    if (!get_streams_request_user(req, res, &auth_user, &have_auth_user)) {
+        return;
+    }
 
     // Get all stream configurations from database (heap-allocated)
     stream_config_t *db_streams = calloc(g_config.max_streams, sizeof(stream_config_t));
@@ -183,12 +227,10 @@ void handle_get_streams(const http_request_t *req, http_response_t *res) {
     // Add each stream to the array, applying tag-based RBAC if user has a restriction
     for (int i = 0; i < count; i++) {
         // Skip streams that don't match the user's allowed_tags restriction
-        if (have_auth_user && auth_user.has_tag_restriction) {
-            if (!db_auth_stream_allowed_for_user(&auth_user, db_streams[i].tags)) {
-                log_debug("Stream '%s' hidden from user '%s' (tag restriction)",
-                          db_streams[i].name, auth_user.username);
-                continue;
-            }
+        if (!stream_config_allowed_for_user(&db_streams[i], &auth_user, have_auth_user)) {
+            log_debug("Stream '%s' hidden from user '%s' (tag restriction)",
+                      db_streams[i].name, auth_user.username);
+            continue;
         }
 
         cJSON *stream_obj = cJSON_CreateObject();
@@ -203,10 +245,13 @@ void handle_get_streams(const http_request_t *req, http_response_t *res) {
         char safe_secondary_url[MAX_URL_LENGTH];
         char api_onvif_username[sizeof(db_streams[i].onvif_username)];
         char api_onvif_password[sizeof(db_streams[i].onvif_password)];
+        bool include_url_credentials = !g_config.demo_mode &&
+            (!have_auth_user || auth_user.role != USER_ROLE_VIEWER);
         get_stream_api_credentials(&db_streams[i], safe_url, sizeof(safe_url),
                                    safe_secondary_url, sizeof(safe_secondary_url),
                                    api_onvif_username, sizeof(api_onvif_username),
-                                   api_onvif_password, sizeof(api_onvif_password));
+                                   api_onvif_password, sizeof(api_onvif_password),
+                                   include_url_credentials);
 
         // Add stream properties
         cJSON_AddStringToObject(stream_obj, "name", db_streams[i].name);
@@ -352,6 +397,18 @@ void handle_get_stream(const http_request_t *req, http_response_t *res) {
         return;
     }
 
+    user_t auth_user;
+    bool have_auth_user = false;
+    if (!get_streams_request_user(req, res, &auth_user, &have_auth_user)) {
+        return;
+    }
+    if (!stream_config_allowed_for_user(&config, &auth_user, have_auth_user)) {
+        log_debug("Stream '%s' hidden from user '%s' (tag restriction)",
+                  config.name, auth_user.username);
+        http_response_set_json_error(res, 404, "Stream not found");
+        return;
+    }
+
     // Create JSON object
     cJSON *stream_obj = cJSON_CreateObject();
     if (!stream_obj) {
@@ -364,10 +421,13 @@ void handle_get_stream(const http_request_t *req, http_response_t *res) {
     char safe_secondary_url[MAX_URL_LENGTH];
     char api_onvif_username[sizeof(config.onvif_username)];
     char api_onvif_password[sizeof(config.onvif_password)];
+    bool include_url_credentials = !g_config.demo_mode &&
+        (!have_auth_user || auth_user.role != USER_ROLE_VIEWER);
     get_stream_api_credentials(&config, safe_url, sizeof(safe_url),
                                safe_secondary_url, sizeof(safe_secondary_url),
                                api_onvif_username, sizeof(api_onvif_username),
-                               api_onvif_password, sizeof(api_onvif_password));
+                               api_onvif_password, sizeof(api_onvif_password),
+                               include_url_credentials);
 
     // Add stream properties
     cJSON_AddStringToObject(stream_obj, "name", config.name);
@@ -511,6 +571,18 @@ void handle_get_stream_full(const http_request_t *req, http_response_t *res) {
         return;
     }
 
+    user_t auth_user;
+    bool have_auth_user = false;
+    if (!get_streams_request_user(req, res, &auth_user, &have_auth_user)) {
+        return;
+    }
+    if (!stream_config_allowed_for_user(&config, &auth_user, have_auth_user)) {
+        log_debug("Stream '%s' hidden from user '%s' (tag restriction)",
+                  config.name, auth_user.username);
+        http_response_set_json_error(res, 404, "Stream not found");
+        return;
+    }
+
     // Build stream JSON object (same as handle_get_stream)
     cJSON *stream_obj = cJSON_CreateObject();
     if (!stream_obj) {
@@ -523,10 +595,13 @@ void handle_get_stream_full(const http_request_t *req, http_response_t *res) {
     char safe_secondary_url_full[MAX_URL_LENGTH];
     char api_onvif_username_full[sizeof(config.onvif_username)];
     char api_onvif_password_full[sizeof(config.onvif_password)];
+    bool include_url_credentials = !g_config.demo_mode &&
+        (!have_auth_user || auth_user.role != USER_ROLE_VIEWER);
     get_stream_api_credentials(&config, safe_url_full, sizeof(safe_url_full),
                                safe_secondary_url_full, sizeof(safe_secondary_url_full),
                                api_onvif_username_full, sizeof(api_onvif_username_full),
-                               api_onvif_password_full, sizeof(api_onvif_password_full));
+                               api_onvif_password_full, sizeof(api_onvif_password_full),
+                               include_url_credentials);
 
     cJSON_AddStringToObject(stream_obj, "name", config.name);
     cJSON_AddStringToObject(stream_obj, "url", safe_url_full);

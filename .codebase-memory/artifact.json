@@ -1,0 +1,11 @@
+{
+    "schema_version": 1,
+    "commit": "f76bf8c48bb99583219dce8bd2596255d00a72c3",
+    "indexed_at": "2026-06-24T08:48:47Z",
+    "project": "home-oneberry-Documents-oneberry-vms",
+    "nodes": 14978,
+    "edges": 31416,
+    "original_size": 36438016,
+    "compressed_size": 6929802,
+    "compression_level": 3
+}

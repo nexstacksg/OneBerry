@@ -343,7 +343,7 @@ static void *mp4_writer_rtsp_thread(void *arg) {
                     segment_duration,
                     (db_config_result == 0 && db_stream_config.segment_duration > 0) ? "database" : "writer context");
         } else {
-            segment_duration = 30;
+            segment_duration = 60;
             log_info("No segment duration configured, using default: %d seconds", segment_duration);
         }
 

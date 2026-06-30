@@ -45,7 +45,7 @@ function buildStreamFormState(stream, motion, {
     codec: stream.codec || 'h264',
     protocol: (stream.protocol != null ? stream.protocol : 0).toString(),
     priority: (stream.priority != null ? stream.priority : 5).toString(),
-    segment: stream.segment_duration || 30,
+    segment: stream.segment_duration || 60,
     detectionThreshold: stream.detection_threshold || 50,
     detectionInterval: stream.detection_interval || 10,
     preBuffer: stream.pre_detection_buffer || 10,
@@ -87,6 +87,101 @@ function buildStreamFormState(stream, motion, {
     tags: stream.tags || '',
     motionTriggerSource: stream.motion_trigger_source || ''
   };
+}
+
+function applyCredentialsToStreamUrl(url, username, password) {
+  const rawUrl = String(url || '').trim();
+  const user = String(username || '').trim();
+  const pass = String(password || '');
+  if (!rawUrl || (!user && !pass)) {
+    return rawUrl;
+  }
+
+  try {
+    const parsed = new URL(rawUrl);
+    if (user) parsed.username = user;
+    if (pass) parsed.password = pass;
+    return parsed.toString();
+  } catch {
+    const protocolMatch = rawUrl.match(/^([a-z][a-z0-9+.-]*:\/\/)(.*)$/i);
+    if (!protocolMatch) return rawUrl;
+    const credential = `${encodeURIComponent(user)}${pass ? `:${encodeURIComponent(pass)}` : ''}@`;
+    const withoutExistingCredentials = protocolMatch[2].replace(/^[^/@]+@/, '');
+    return `${protocolMatch[1]}${credential}${withoutExistingCredentials}`;
+  }
+}
+
+function getDiscoveryProfileSortScore(profile) {
+  if (!profile) {
+    return 0;
+  }
+
+  const name = String(profile.name || '').toLowerCase();
+  const width = Number(profile.width) || 0;
+  const height = Number(profile.height) || 0;
+  const fps = Number(profile.fps) || 0;
+  const bitrate = Number(profile.bitrate) || 0;
+  let score = (width * height) + (bitrate * 8) + (fps * 250);
+
+  if (/(main|primary|high|stream[\s_-]*1|\b1\b)/.test(name)) {
+    score += 100000000;
+  }
+
+  if (/(sub|secondary|low|stream[\s_-]*2|\b2\b)/.test(name)) {
+    score -= 50000000;
+  }
+
+  return score;
+}
+
+function getDiscoveryProfileRole(profile, index) {
+  const backendRole = String(profile?.stream_role || '').toLowerCase();
+  if (backendRole === 'primary' || backendRole === 'secondary' || backendRole === 'additional') {
+    return backendRole;
+  }
+
+  const name = String(profile?.name || '').toLowerCase();
+  if (/(main|primary|high|stream[\s_-]*1|\b1\b)/.test(name)) {
+    return 'primary';
+  }
+  if (/(sub|secondary|low|stream[\s_-]*2|\b2\b)/.test(name)) {
+    return 'secondary';
+  }
+
+  if (index === 0) return 'primary';
+  if (index === 1) return 'secondary';
+  return 'additional';
+}
+
+function getDiscoveryProfileRoleLabel(role) {
+  if (role === 'primary') return 'Primary stream';
+  if (role === 'secondary') return 'Secondary stream';
+  return 'Additional stream';
+}
+
+function getDiscoveryProfileStreamName(device, profile, role) {
+  const deviceName = String(device?.name || device?.ip_address || 'camera').trim();
+  const safeDeviceName = deviceName.replace(/\s+/g, '_');
+  const profileName = String(profile?.name || 'stream').trim().replace(/\s+/g, '_');
+
+  if (role === 'primary') {
+    return `${safeDeviceName}_main`;
+  }
+
+  if (role === 'secondary') {
+    return `${safeDeviceName}_sub`;
+  }
+
+  return `${safeDeviceName}_${profileName}`;
+}
+
+function buildDiscoveryPairName(device, primaryProfile, secondaryProfile) {
+  const primaryName = getDiscoveryProfileStreamName(device, primaryProfile, 'primary');
+  if (!secondaryProfile) {
+    return primaryName;
+  }
+
+  return `${primaryName}_sub`;
 }
 
 /**
@@ -142,6 +237,7 @@ export function StreamsView() {
   const [deviceProfiles, setDeviceProfiles] = useState([]);
   const [selectedDevice, setSelectedDevice] = useState(null);
   const [selectedProfile, setSelectedProfile] = useState(null);
+  const [selectedSecondaryProfile, setSelectedSecondaryProfile] = useState(null);
   const [customStreamName, setCustomStreamName] = useState('');
   const [onvifCredentials, setOnvifCredentials] = useState({ username: '', password: '' });
   const [isDiscovering, setIsDiscovering] = useState(false);
@@ -304,7 +400,7 @@ export function StreamsView() {
     codec: 'h264',
     protocol: '0',
     priority: '5',
-    segment: 30,
+    segment: 60,
     record: true,
     recordAudio: false,
     backchannelEnabled: false,
@@ -369,11 +465,15 @@ export function StreamsView() {
   // Unified mutation that internally decides between create and update
   const saveStreamMutation = useMutation({
     mutationFn: async (streamData) => {
-      if (isEditing) {
+      const forcedMode = streamData?.__mode;
+      const shouldUpdate = forcedMode === 'update' || (forcedMode !== 'create' && isEditing);
+      const { __mode, ...payload } = streamData || {};
+
+      if (shouldUpdate) {
         // Update existing stream via PUT
-        const url = `/api/streams/${encodeURIComponent(streamData.name)}`;
+        const url = `/api/streams/${encodeURIComponent(payload.name)}`;
         // `name` is used as the stream identifier in the URL path and must not be included in the request body
-        const { name, ...rest } = streamData;
+        const { name, ...rest } = payload;
         return await fetchJSON(url, {
           method: 'PUT',
           headers: {
@@ -394,14 +494,16 @@ export function StreamsView() {
         headers: {
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify(streamData),
+        body: JSON.stringify(payload),
         timeout: 45000,
         retries: 1,
         retryDelay: 1000
       });
     },
     onSuccess: (data, variables) => {
-      if (isEditing) {
+      const forcedMode = variables?.__mode;
+      const didUpdate = forcedMode === 'update' || (forcedMode !== 'create' && isEditing);
+      if (didUpdate) {
         showStatusMessage(
           t('streams.streamUpdatedSuccessfully', { name: variables?.name }),
           'success',
@@ -415,7 +517,9 @@ export function StreamsView() {
       queryClient.invalidateQueries({ queryKey: ['streams'] });
     },
     onError: (error, variables) => {
-      if (!isEditing) {
+      const forcedMode = variables?.__mode;
+      const didUpdate = forcedMode === 'update' || (forcedMode !== 'create' && isEditing);
+      if (!didUpdate) {
         const isStreamLimitError = error?.status === 409 &&
           typeof error?.message === 'string' &&
           error.message.includes('Max streams limit reached');
@@ -836,7 +940,7 @@ export function StreamsView() {
       codec: 'h264',
       protocol: '0',
       priority: '5',
-      segment: 30,
+      segment: 60,
       record: true,
       recordAudio: false,
       backchannelEnabled: false,
@@ -945,6 +1049,7 @@ export function StreamsView() {
   // Close modal
   const closeModal = () => {
     setModalVisible(false);
+    setIsEditing(false);
     setIsCloning(false);
   };
 
@@ -958,23 +1063,33 @@ export function StreamsView() {
     setDeviceProfiles([]);
     setSelectedDevice(null);
     setSelectedProfile(null);
+    setSelectedSecondaryProfile(null);
     setCustomStreamName('');
     setShowCustomNameInput(false);
     setOnvifResolution('');
     setOnvifFps('');
+    setIsEditing(false);
+    setIsCloning(false);
+    let discoveryNetwork = 'auto';
     // Fetch the configured default network from settings
     try {
       const settings = await fetchJSON('/api/settings', { timeout: 5000 });
       if (settings && settings.onvif_discovery_network) {
-        setOnvifNetworkOverride(settings.onvif_discovery_network);
+        discoveryNetwork = settings.onvif_discovery_network;
       } else {
-        setOnvifNetworkOverride('auto');
+        discoveryNetwork = 'auto';
       }
     } catch (e) {
       console.warn('Could not fetch ONVIF discovery network setting, using auto', e);
-      setOnvifNetworkOverride('auto');
+      discoveryNetwork = 'auto';
     }
+    setOnvifNetworkOverride(discoveryNetwork);
     setOnvifModalVisible(true);
+    onvifDiscoveryMutation.mutate({
+      network: discoveryNetwork,
+      include_onvif: true,
+      include_rtsp: true
+    });
   };
 
   // Handle form input change
@@ -1060,24 +1175,110 @@ export function StreamsView() {
     queryClient.invalidateQueries({ queryKey: ['detectionModels'] });
   };
 
-  // ONVIF discovery mutation
+  // Universal ONVIF + RTSP discovery mutation
   const onvifDiscoveryMutation = usePostMutation(
-    '/api/onvif/discover',
+    '/api/discovery/cameras',
     {
-      timeout: 120000,
+      timeout: 15000,
       retries: 0
     },
     {
       onMutate: () => {
         setIsDiscovering(true);
+        setDiscoveredDevices([]);
+        setSelectedDevice(null);
+        setSelectedProfile(null);
+        setSelectedSecondaryProfile(null);
+        setDeviceProfiles([]);
+        setShowCustomNameInput(false);
       },
       onSuccess: (data) => {
         setDiscoveredDevices(data.devices || []);
-        setIsDiscovering(false);
+        setIsDiscovering(data.running === true);
       },
       onError: (error) => {
         showStatusMessage(t('streams.errorDiscoveringOnvifDevices', { message: error.message }), 'error', 5000);
         setIsDiscovering(false);
+      }
+    }
+  );
+
+  useEffect(() => {
+    if (!onvifModalVisible || !isDiscovering) {
+      return undefined;
+    }
+
+    let cancelled = false;
+    const pollDiscoveryStatus = async () => {
+      try {
+        const data = await fetchJSON('/api/discovery/cameras/status', {
+          timeout: 5000,
+          retries: 0
+        });
+        if (cancelled) {
+          return;
+        }
+        setDiscoveredDevices(data.devices || []);
+        if (data.error) {
+          showStatusMessage(t('streams.errorDiscoveringOnvifDevices', { message: data.error }), 'error', 5000);
+          setIsDiscovering(false);
+          return;
+        }
+        if (!data.running || data.completed) {
+          setIsDiscovering(false);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          console.warn('Unable to poll camera discovery status:', error);
+        }
+      }
+    };
+
+    pollDiscoveryStatus();
+    const intervalId = window.setInterval(pollDiscoveryStatus, 800);
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [onvifModalVisible, isDiscovering, t]);
+
+  const validateRtspDeviceMutation = usePostMutation(
+    '/api/discovery/rtsp/validate',
+    {
+      timeout: 60000,
+      retries: 0
+    },
+    {
+      onMutate: () => {
+        setIsLoadingProfiles(true);
+      },
+      onSuccess: (data, variables) => {
+        setIsLoadingProfiles(false);
+        const validatedDevice = variables?.device || selectedDevice;
+        if (data.success && validatedDevice) {
+          const info = data.info || {};
+          setDeviceProfiles([{
+            token: `rtsp-${validatedDevice.ip_address}`,
+            name: 'RTSP Main Stream',
+            stream_uri: data.url,
+            width: info.width || 0,
+            height: info.height || 0,
+            encoding: info.codec || 'unknown',
+            fps: info.fps || 0,
+            isRtsp: true
+          }]);
+          showStatusMessage(t('streams.connectionSuccessful'), 'success', 3000);
+        } else {
+          showStatusMessage(
+            data.message || t('streams.connectionFailed', { message: 'No common RTSP stream opened successfully' }),
+            'error',
+            5000
+          );
+        }
+      },
+      onError: (error) => {
+        setIsLoadingProfiles(false);
+        showStatusMessage(t('streams.errorTestingConnection', { message: error.message }), 'error', 5000);
       }
     }
   );
@@ -1232,6 +1433,19 @@ export function StreamsView() {
     setIsAddingStream(true);
     const { width, height } = parseResolutionValue(onvifResolution);
     const fps = parseFpsValue(onvifFps);
+    const isOnvifProfile = !selectedProfile.isRtsp;
+    const streamUrl = applyCredentialsToStreamUrl(
+      selectedProfile.stream_uri,
+      onvifCredentials.username,
+      onvifCredentials.password
+    );
+    const secondaryStreamUrl = selectedSecondaryProfile?.stream_uri
+      ? applyCredentialsToStreamUrl(
+          selectedSecondaryProfile.stream_uri,
+          onvifCredentials.username,
+          onvifCredentials.password
+        )
+      : '';
 
     // Prepare stream data
     const streamData = {
@@ -1240,8 +1454,8 @@ export function StreamsView() {
       // backend `Stream` model expects this value under the generic `url` field.
       // This mapping intentionally translates the ONVIF profile shape to the
       // stream configuration shape expected by the API.
-      url: selectedProfile.stream_uri,
-      secondary_url: '',
+      url: streamUrl,
+      secondary_url: secondaryStreamUrl,
       enabled: true,
       streaming_enabled: true,
       width,
@@ -1249,21 +1463,26 @@ export function StreamsView() {
       fps,
       protocol: '0', // TCP
       priority: '5', // Medium
-      segment_duration: 30,
+      segment_duration: 60,
       record: true,
       record_audio: false,
       backchannel_enabled: false,
       // Backend expects camelCase key 'isOnvif'
-      isOnvif: true
+      isOnvif: isOnvifProfile,
+      onvif_username: isOnvifProfile ? onvifCredentials.username : '',
+      onvif_password: isOnvifProfile ? onvifCredentials.password : '',
+      onvif_profile: isOnvifProfile ? (selectedProfile.token || selectedProfile.name || '') : '',
+      onvif_port: 0
     };
 
     // Use mutation to save stream
-    saveStreamMutation.mutate(streamData, {
+    saveStreamMutation.mutate({ ...streamData, __mode: 'create' }, {
       onSuccess: () => {
         setIsAddingStream(false);
         setShowCustomNameInput(false);
         setOnvifModalVisible(false);
         setSelectedProfile(null);
+        setSelectedSecondaryProfile(null);
         setSelectedDevice(null);
         setCustomStreamName('');
         setOnvifResolution('');
@@ -1275,28 +1494,54 @@ export function StreamsView() {
     });
   };
 
-  // Start ONVIF discovery
-  const startOnvifDiscovery = () => {
-    onvifDiscoveryMutation.mutate({ network: onvifNetworkOverride || 'auto' });
-  };
-
   // Get ONVIF device profiles
   const getDeviceProfiles = (device) => {
     setSelectedDevice(device);
     setDeviceProfiles([]);
+    setSelectedProfile(null);
+    setSelectedSecondaryProfile(null);
     getDeviceProfilesMutation.mutate({
       device,
       credentials: onvifCredentials
     });
   };
 
-  // Add ONVIF device as stream with selected profile
-  const addOnvifDeviceAsStream = (profile) => {
-    setSelectedProfile(profile);
-    setCustomStreamName(`${selectedDevice.name || t('streams.onvifDefaultName')}_${profile.name || t('streams.defaultStreamName')}`);
-    setOnvifResolution(formatResolutionValue(profile.width, profile.height));
-    setOnvifFps(formatFpsValue(profile.fps));
+  const openSelectedDiscoveryStream = () => {
+    if (!selectedDevice || !selectedProfile) {
+      showStatusMessage(t('streams.missingRequiredInformation'), 'error', 5000);
+      return;
+    }
+
+    setCustomStreamName(buildDiscoveryPairName(selectedDevice, selectedProfile, selectedSecondaryProfile));
+    setOnvifResolution(formatResolutionValue(selectedProfile.width, selectedProfile.height));
+    setOnvifFps(formatFpsValue(selectedProfile.fps));
     setShowCustomNameInput(true);
+  };
+
+  // Select ONVIF device profile for the new stream
+  const addOnvifDeviceAsStream = (profile, role = 'additional') => {
+    const normalizedProfile = { ...profile, isOnvif: true };
+    if (role === 'secondary') {
+      setSelectedSecondaryProfile(normalizedProfile);
+      return;
+    }
+
+    setSelectedProfile(normalizedProfile);
+    if (selectedSecondaryProfile?.token === normalizedProfile.token) {
+      setSelectedSecondaryProfile(null);
+    }
+  };
+
+  const addRtspDeviceAsStream = (profile, role = 'additional') => {
+    if (role === 'secondary') {
+      setSelectedSecondaryProfile(profile);
+      return;
+    }
+
+    setSelectedProfile(profile);
+    if (selectedSecondaryProfile?.token === profile.token) {
+      setSelectedSecondaryProfile(null);
+    }
   };
 
   // Check if a discovered ONVIF device is already added as a stream
@@ -1349,6 +1594,20 @@ export function StreamsView() {
   const testOnvifConnection = (device) => {
     // Store the selected device first
     setSelectedDevice(device);
+    setDeviceProfiles([]);
+    setSelectedSecondaryProfile(null);
+
+    if (device.rtsp && !device.onvif) {
+      const ports = Array.isArray(device.rtsp_ports) ? device.rtsp_ports : [];
+      validateRtspDeviceMutation.mutate({
+        device,
+        ip_address: device.ip_address,
+        port: ports[0] || 554,
+        username: onvifCredentials.username,
+        password: onvifCredentials.password
+      });
+      return;
+    }
 
     // Build the device_service URL (using discovery data or ip_address fallback)
     const deviceUrl = buildOnvifDeviceUrl(device);
@@ -1364,6 +1623,87 @@ export function StreamsView() {
       password: onvifCredentials.password,
       insecure: isInsecure
     });
+  };
+
+  const getDiscoveryDeviceType = (device) => {
+    if (device?.onvif && device?.rtsp) return 'ONVIF + RTSP';
+    if (device?.onvif) return 'ONVIF';
+    return 'RTSP';
+  };
+
+  const getDiscoveryStatusClass = (device) => {
+    const status = String(device?.status || '').toLowerCase();
+    if (status.includes('valid')) return 'bg-emerald-50 text-emerald-700 border-emerald-200';
+    if (status.includes('rtsp')) return 'bg-blue-50 text-blue-700 border-blue-200';
+    if (status.includes('discover')) return 'bg-green-50 text-green-700 border-green-200';
+    return 'bg-muted text-muted-foreground border-border';
+  };
+
+  const rankedDeviceProfiles = [...deviceProfiles].sort((a, b) => getDiscoveryProfileSortScore(b) - getDiscoveryProfileSortScore(a));
+  const selectedDeviceAlreadyAdded = selectedDevice ? isDeviceAlreadyAdded(selectedDevice) : false;
+  const renderDiscoveredProfileCard = (profile, index, variant = 'default') => {
+    if (!profile) {
+      return null;
+    }
+
+    const role = getDiscoveryProfileRole(profile, index);
+    const roleLabel = getDiscoveryProfileRoleLabel(role);
+    const isRtsp = !!profile.isRtsp;
+    const isPrimaryVariant = variant === 'primary';
+    const isSecondaryVariant = variant === 'secondary';
+    const isPrimarySelected = selectedProfile?.token === profile.token;
+    const isSecondarySelected = selectedSecondaryProfile?.token === profile.token;
+
+    return (
+      <div
+        key={profile.token || `${profile.name || 'profile'}-${index}`}
+        className={`rounded-md border p-3 ${
+          isPrimaryVariant
+            ? 'border-emerald-200 bg-emerald-50/40'
+            : isSecondaryVariant
+              ? 'border-blue-200 bg-blue-50/40'
+              : 'border-border bg-background'
+        }`}
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="font-medium text-sm">{profile.name}</div>
+              <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium ${
+                role === 'primary'
+                  ? 'border-emerald-200 bg-emerald-100 text-emerald-700'
+                  : role === 'secondary'
+                    ? 'border-blue-200 bg-blue-100 text-blue-700'
+                    : 'border-border bg-muted text-muted-foreground'
+              }`}>
+                {roleLabel}
+              </span>
+            </div>
+            <div className="mt-1 text-xs text-muted-foreground">
+              {profile.width || 0}x{profile.height || 0} · {profile.encoding || t('common.unknown')} · {profile.fps || 0} {t('streams.fps')}
+            </div>
+          </div>
+        </div>
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          <button
+            className={isPrimarySelected ? 'btn-secondary focus:outline-none focus:ring-2 focus:ring-primary' : 'btn-primary focus:outline-none focus:ring-2 focus:ring-primary'}
+            onClick={() => (isRtsp ? addRtspDeviceAsStream(profile, 'primary') : addOnvifDeviceAsStream(profile, 'primary'))}
+            type="button"
+            disabled={isSecondarySelected}
+          >
+            {isPrimarySelected ? 'Primary selected' : 'Use as primary'}
+          </button>
+          <button
+            className={isSecondarySelected ? 'btn-secondary focus:outline-none focus:ring-2 focus:ring-primary' : 'btn-primary focus:outline-none focus:ring-2 focus:ring-primary'}
+            onClick={() => (isRtsp ? addRtspDeviceAsStream(profile, 'secondary') : addOnvifDeviceAsStream(profile, 'secondary'))}
+            type="button"
+            disabled={isPrimarySelected}
+          >
+            {isSecondarySelected ? 'Secondary selected' : 'Use as secondary'}
+          </button>
+        </div>
+      </div>
+    );
   };
 
   return (
@@ -1864,204 +2204,301 @@ export function StreamsView() {
       )}
 
       {onvifModalVisible && (
-        <div id="onvif-modal" className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 transition-opacity duration-300">
-          <div className="bg-card text-card-foreground rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
-            <div className="flex justify-between items-center p-4 border-b border-border">
-              <h3 className="text-lg font-medium">{t('streams.onvifCameraDiscovery')}</h3>
-              <span className="text-2xl cursor-pointer" onClick={() => setOnvifModalVisible(false)}>×</span>
+        <div id="onvif-modal" className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 transition-opacity duration-300 p-4">
+          <div className="bg-card text-card-foreground rounded-lg shadow-xl w-[min(96vw,1440px)] max-h-[94vh] overflow-hidden flex flex-col">
+            <div className="flex items-start justify-between gap-4 p-5 border-b border-border">
+              <div>
+                <h3 className="text-lg font-semibold">{t('streams.cameraDiscovery')}</h3>
+                <p className="mt-1 text-sm text-muted-foreground">{t('streams.cameraDiscoveryHelp')}</p>
+              </div>
+              <button
+                type="button"
+                className="text-2xl leading-none text-muted-foreground hover:text-foreground"
+                onClick={() => {
+                  setOnvifModalVisible(false);
+                  setIsDiscovering(false);
+                }}
+                aria-label={t('common.close')}
+              >
+                ×
+              </button>
             </div>
-            <div className="p-4">
-              <div className="mb-4 p-3 bg-muted/50 rounded-lg">
-                <div className="flex items-center gap-3">
-                  <label htmlFor="onvif-network-override" className="text-sm font-medium whitespace-nowrap">
+
+            <div className="p-5 border-b border-border bg-muted/20">
+              <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+                <div>
+                  <label htmlFor="onvif-network-override" className="block text-sm font-medium mb-1">
                     {t('streams.discoveryNetwork')}
                   </label>
-                  <input
-                    type="text"
-                    id="onvif-network-override"
-                    className="p-2 border border-input rounded bg-background text-foreground w-full max-w-xs text-sm"
-                    value={onvifNetworkOverride}
-                    onChange={(e) => setOnvifNetworkOverride(e.target.value)}
-                    disabled={isDiscovering}
-                    placeholder={t('streams.auto')}
-                  />
-                  <span className="text-xs text-muted-foreground whitespace-nowrap">
-                    {t('streams.discoveryNetworkHelp')}
-                  </span>
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                    <input
+                      type="text"
+                      id="onvif-network-override"
+                      className="px-3 py-2 border border-input rounded-md bg-background text-foreground w-full max-w-sm text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                      value={onvifNetworkOverride}
+                      onChange={(e) => setOnvifNetworkOverride(e.target.value)}
+                      disabled
+                      placeholder={t('streams.auto')}
+                    />
+                    <span className="text-xs text-muted-foreground">
+                      {t('streams.discoveryNetworkHelp')}
+                    </span>
+                  </div>
                 </div>
-              </div>
-              <div className="mb-4 flex justify-between items-center">
-                <h4 className="text-md font-medium">{t('streams.discoveredDevices')}</h4>
-                <button
-                    id="discover-btn"
-                    className="btn-primary focus:outline-none focus:ring-2 focus:ring-primary"
-                    onClick={startOnvifDiscovery}
-                    disabled={isDiscovering}
-                    type="button"
-                >
+                <div className={`inline-flex h-10 items-center rounded-md border px-3 text-sm font-medium ${
+                  isDiscovering
+                    ? 'border-primary/25 bg-primary/10 text-primary'
+                    : 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                }`}>
                   {isDiscovering ? (
                     <span className="flex items-center">
                       {t('streams.discovering')}
                       <span className="ml-1 flex space-x-1">
-                        <span className="animate-pulse delay-0 h-1.5 w-1.5 bg-white rounded-full"></span>
-                        <span className="animate-pulse delay-150 h-1.5 w-1.5 bg-white rounded-full"></span>
-                        <span className="animate-pulse delay-300 h-1.5 w-1.5 bg-white rounded-full"></span>
+                        <span className="animate-pulse delay-0 h-1.5 w-1.5 bg-current rounded-full"></span>
+                        <span className="animate-pulse delay-150 h-1.5 w-1.5 bg-current rounded-full"></span>
+                        <span className="animate-pulse delay-300 h-1.5 w-1.5 bg-current rounded-full"></span>
                       </span>
                     </span>
-                  ) : t('streams.startDiscovery')}
-                </button>
-              </div>
-
-              <div className="overflow-x-auto">
-                <table className="min-w-full divide-y divide-border">
-                  <thead className="bg-muted">
-                  <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">{t('streams.ipAddress')}</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">{t('streams.manufacturer')}</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">{t('streams.model')}</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">{t('common.actions')}</th>
-                  </tr>
-                  </thead>
-                  <tbody className="bg-card divide-y divide-border">
-                  {discoveredDevices.length === 0 ? (
-                    <tr>
-                      <td colSpan="4" className="px-6 py-4 text-center text-muted-foreground">
-                        {isDiscovering ? (
-                          <div className="flex items-center justify-center">
-                            <span>{t('streams.discoveringDevices')}</span>
-                            <span className="ml-1 flex space-x-1">
-                                <span className="animate-pulse delay-0 h-1.5 w-1.5 bg-muted-foreground rounded-full"></span>
-                                <span className="animate-pulse delay-150 h-1.5 w-1.5 bg-muted-foreground rounded-full"></span>
-                                <span className="animate-pulse delay-300 h-1.5 w-1.5 bg-muted-foreground rounded-full"></span>
-                              </span>
-                          </div>
-                        ) : t('streams.noDevicesDiscoveredYet')}
-                      </td>
-                    </tr>
-                  ) : discoveredDevices.map(device => {
-                    const alreadyAdded = isDeviceAlreadyAdded(device);
-                    const isConnecting = isLoadingProfiles && selectedDevice && selectedDevice.ip_address === device.ip_address;
-                    const baseRowClass = 'hover:bg-muted/50 transition-opacity';
-                    const rowClassName = alreadyAdded ? `${baseRowClass} opacity-60` : baseRowClass;
-                    return (
-                      <tr key={device.ip_address} className={rowClassName}>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <span>{device.ip_address}</span>
-                          {alreadyAdded && (
-                            <span className="ml-2 inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-full bg-muted text-muted-foreground border border-border">
-                              {t('streams.alreadyAdded')}
-                            </span>
-                          )}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap">{device.manufacturer || t('common.unknown')}</td>
-                        <td className="px-6 py-4 whitespace-nowrap">{device.model || t('common.unknown')}</td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <button
-                              className={alreadyAdded ? 'btn-secondary focus:outline-none' : 'btn-primary focus:outline-none'}
-                              onClick={() => testOnvifConnection(device)}
-                              disabled={isConnecting}
-                              type="button"
-                              title={alreadyAdded ? t('streams.deviceAlreadyInUseTitle') : undefined}
-                          >
-                            {isConnecting ? (
-                              <span className="flex items-center">
-                                  {t('common.loading')}
-                                  <span className="ml-1 flex space-x-1">
-                                    <span className="animate-pulse delay-0 h-1.5 w-1.5 bg-current rounded-full"></span>
-                                    <span className="animate-pulse delay-150 h-1.5 w-1.5 bg-current rounded-full"></span>
-                                    <span className="animate-pulse delay-300 h-1.5 w-1.5 bg-current rounded-full"></span>
-                                  </span>
-                                </span>
-                            ) : alreadyAdded ? t('streams.connectAnyway') : t('streams.connect')}
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                  </tbody>
-                </table>
-              </div>
-
-              <div className="mt-6 mb-4">
-                <h4 className="text-md font-medium mb-2">{t('streams.authentication')}</h4>
-                <p className="text-sm text-muted-foreground mb-3">
-                  {t('streams.onvifAuthenticationHelp')}
-                </p>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="form-group">
-                    <label htmlFor="onvif-username" className="block text-sm font-medium mb-1">{t('auth.username')}</label>
-                    <input
-                        type="text"
-                        id="onvif-username"
-                        name="username"
-                        className="w-full px-3 py-2 border border-input rounded-md shadow-sm focus:outline-none bg-background text-foreground"
-                        placeholder="admin"
-                        value={onvifCredentials.username}
-                        onChange={handleCredentialChange}
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label htmlFor="onvif-password" className="block text-sm font-medium mb-1">{t('auth.password')}</label>
-                    <input
-                        type="password"
-                        id="onvif-password"
-                        name="password"
-                        className="w-full px-3 py-2 border border-input rounded-md shadow-sm focus:outline-none bg-background text-foreground"
-                        placeholder="password"
-                        value={onvifCredentials.password}
-                        onChange={handleCredentialChange}
-                    />
-                  </div>
+                  ) : 'Discovery complete'}
                 </div>
               </div>
-
-              {selectedDevice && deviceProfiles.length > 0 && (
-                <div className="mt-6">
-                  <h4 className="text-md font-medium mb-2">{t('streams.availableProfilesFor', { ip: selectedDevice.ip_address })}</h4>
-                  <div className="overflow-x-auto">
-                    <table className="min-w-full divide-y divide-border">
-                      <thead className="bg-muted">
-                      <tr>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">{t('common.name')}</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">{t('streams.resolution')}</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">{t('streams.encoding')}</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">{t('streams.fps')}</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">{t('common.actions')}</th>
-                      </tr>
-                      </thead>
-                      <tbody className="bg-card divide-y divide-border">
-                      {deviceProfiles.map(profile => (
-                        <tr key={profile.token} className="hover:bg-muted/50">
-                          <td className="px-6 py-4 whitespace-nowrap">{profile.name}</td>
-                          <td className="px-6 py-4 whitespace-nowrap">{profile.width}x{profile.height}</td>
-                          <td className="px-6 py-4 whitespace-nowrap">{profile.encoding}</td>
-                          <td className="px-6 py-4 whitespace-nowrap">{profile.fps}</td>
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <button
-                                className="btn-primary focus:outline-none focus:ring-2 focus:ring-primary"
-                                onClick={() => addOnvifDeviceAsStream(profile)}
-                                type="button"
-                            >
-                              {t('streams.addAsStream')}
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-            )}
             </div>
+
+            <div className="grid min-h-0 flex-1 lg:grid-cols-[minmax(0,1fr)_380px]">
+              <div className="min-h-0 overflow-y-auto p-5">
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <div>
+                    <h4 className="text-base font-semibold">{t('streams.discoveredDevices')}</h4>
+                    <p className="text-xs text-muted-foreground">
+                      {discoveredDevices.length > 0
+                        ? t('streams.discoveredDeviceCount', { count: discoveredDevices.length })
+                        : t('streams.discoveryDeviceListHelp')}
+                    </p>
+                  </div>
+                </div>
+
+                {discoveredDevices.length === 0 ? (
+                  <div className="rounded-lg border border-dashed border-border bg-muted/20 p-8 text-center text-muted-foreground">
+                    {isDiscovering ? (
+                      <div className="flex items-center justify-center">
+                        <span>{t('streams.discoveringDevices')}</span>
+                        <span className="ml-1 flex space-x-1">
+                          <span className="animate-pulse delay-0 h-1.5 w-1.5 bg-muted-foreground rounded-full"></span>
+                          <span className="animate-pulse delay-150 h-1.5 w-1.5 bg-muted-foreground rounded-full"></span>
+                          <span className="animate-pulse delay-300 h-1.5 w-1.5 bg-muted-foreground rounded-full"></span>
+                        </span>
+                      </div>
+                    ) : t('streams.noDevicesDiscoveredYet')}
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {discoveredDevices.map(device => {
+                      const alreadyAdded = isDeviceAlreadyAdded(device);
+                      const isSelected = selectedDevice && selectedDevice.ip_address === device.ip_address;
+                      const ports = Array.isArray(device.rtsp_ports) ? device.rtsp_ports : [];
+                      return (
+                        <div
+                          key={device.ip_address}
+                          role="button"
+                          tabIndex={0}
+                          className={`w-full rounded-lg border p-4 text-left transition-colors ${
+                            isSelected
+                              ? 'border-primary bg-primary/5'
+                              : 'border-border bg-background hover:bg-muted/40'
+                          }`}
+                          onClick={() => {
+                            setSelectedDevice(device);
+                            setSelectedProfile(null);
+                            setSelectedSecondaryProfile(null);
+                            setDeviceProfiles([]);
+                            setShowCustomNameInput(false);
+                          }}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter' || event.key === ' ') {
+                              event.preventDefault();
+                              setSelectedDevice(device);
+                              setSelectedProfile(null);
+                              setSelectedSecondaryProfile(null);
+                              setDeviceProfiles([]);
+                              setShowCustomNameInput(false);
+                            }
+                          }}
+                        >
+                          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                            <div className="min-w-0">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="font-mono text-base font-semibold text-foreground">{device.ip_address}</span>
+                                <span className="inline-flex items-center rounded-full border border-primary/20 bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
+                                  {getDiscoveryDeviceType(device)}
+                                </span>
+                                {alreadyAdded && (
+                                  <span className="inline-flex items-center rounded-full border border-border bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
+                                    {t('streams.alreadyAdded')}
+                                  </span>
+                                )}
+                              </div>
+                              <div className="mt-2 grid gap-1 text-sm text-muted-foreground md:grid-cols-3">
+                                <span>{t('streams.manufacturer')}: <span className="text-foreground">{device.manufacturer || t('common.unknown')}</span></span>
+                                <span>{t('streams.model')}: <span className="text-foreground">{device.model || t('common.unknown')}</span></span>
+                                <span>{t('streams.rtspPorts')}: <span className="text-foreground">{ports.length ? ports.join(', ') : t('common.unknown')}</span></span>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2 sm:flex-shrink-0">
+                              <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${getDiscoveryStatusClass(device)}`}>
+                                {device.status || (device.rtsp ? 'RTSP Found' : 'Discovered')}
+                              </span>
+                              <button
+                                className={isSelected || alreadyAdded ? 'btn-secondary focus:outline-none' : 'btn-primary focus:outline-none'}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  setSelectedDevice(device);
+                                  setSelectedProfile(null);
+                                  setSelectedSecondaryProfile(null);
+                                  setDeviceProfiles([]);
+                                  setShowCustomNameInput(false);
+                                }}
+                                type="button"
+                                title={alreadyAdded ? t('streams.deviceAlreadyInUseTitle') : undefined}
+                              >
+                                {isSelected ? 'Selected' : alreadyAdded ? t('streams.connectAnyway') : t('streams.connect')}
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              <aside className="min-h-0 overflow-y-auto border-t border-border bg-muted/15 p-5 lg:border-l lg:border-t-0">
+                <div className="space-y-5">
+                  <div className="rounded-lg border border-border bg-background p-4">
+                    <h4 className="text-sm font-semibold">{t('streams.selectedDevice')}</h4>
+                    {selectedDevice ? (
+                      <div className="mt-3 space-y-4 text-sm">
+                        <div className="flex justify-between gap-3">
+                          <span className="text-muted-foreground">{t('streams.ipAddress')}</span>
+                          <span className="font-mono text-foreground">{selectedDevice.ip_address}</span>
+                        </div>
+                        <div className="flex justify-between gap-3">
+                          <span className="text-muted-foreground">{t('streams.deviceType')}</span>
+                          <span className="text-foreground">{getDiscoveryDeviceType(selectedDevice)}</span>
+                        </div>
+                        <div className="flex justify-between gap-3">
+                          <span className="text-muted-foreground">{t('common.status')}</span>
+                          <span className="text-foreground">{selectedDevice.status || (selectedDevice.rtsp ? 'RTSP Found' : 'Discovered')}</span>
+                        </div>
+                        {selectedDeviceAlreadyAdded && (
+                          <p className="rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+                            {t('streams.deviceAlreadyInUseTitle')}
+                          </p>
+                        )}
+                        <div className="border-t border-border pt-4">
+                          <h4 className="text-base font-semibold">{t('streams.authentication')}</h4>
+                          <p className="mt-1 text-sm text-muted-foreground">{t('streams.onvifAuthenticationHelp')}</p>
+                          <div className="mt-4 space-y-3">
+                            <div className="form-group">
+                              <label htmlFor="onvif-username" className="block text-sm font-medium mb-1">{t('auth.username')}</label>
+                              <input
+                                type="text"
+                                id="onvif-username"
+                                name="username"
+                                className="w-full px-3 py-2 border border-input rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-primary bg-background text-foreground"
+                                placeholder="admin"
+                                value={onvifCredentials.username}
+                                onChange={handleCredentialChange}
+                              />
+                            </div>
+                            <div className="form-group">
+                              <label htmlFor="onvif-password" className="block text-sm font-medium mb-1">{t('auth.password')}</label>
+                              <input
+                                type="password"
+                                id="onvif-password"
+                                name="password"
+                                className="w-full px-3 py-2 border border-input rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-primary bg-background text-foreground"
+                                placeholder="password"
+                                value={onvifCredentials.password}
+                                onChange={handleCredentialChange}
+                              />
+                            </div>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          className="btn-primary w-full focus:outline-none focus:ring-2 focus:ring-primary"
+                          disabled={isLoadingProfiles}
+                          onClick={() => testOnvifConnection(selectedDevice)}
+                        >
+                          {isLoadingProfiles ? t('common.loading') : t('streams.connect')}
+                        </button>
+
+                        <div className="rounded-lg border border-border bg-muted/25 p-4">
+                          <h4 className="text-sm font-semibold">Selected stream pair</h4>
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            Choose a primary stream and optional secondary stream from the same camera, then continue once.
+                          </p>
+                          <div className="mt-3 space-y-2 text-sm">
+                            <div className="flex items-start justify-between gap-3">
+                              <span className="text-muted-foreground">Primary</span>
+                              <span className="text-right text-foreground">
+                                {selectedProfile ? selectedProfile.name : 'Not selected'}
+                              </span>
+                            </div>
+                            <div className="flex items-start justify-between gap-3">
+                              <span className="text-muted-foreground">Secondary</span>
+                              <span className="text-right text-foreground">
+                                {selectedSecondaryProfile ? selectedSecondaryProfile.name : 'Optional'}
+                              </span>
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            className="btn-primary mt-4 w-full focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-50"
+                            disabled={!selectedProfile}
+                            onClick={openSelectedDiscoveryStream}
+                          >
+                            Continue
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="mt-2 text-sm text-muted-foreground">{t('streams.selectDeviceHelp')}</p>
+                    )}
+                  </div>
+
+                  {selectedDevice && rankedDeviceProfiles.length > 0 && (
+                    <div className="rounded-lg border border-border bg-background p-4">
+                      <h4 className="text-sm font-semibold">{t('streams.availableProfilesFor', { ip: selectedDevice.ip_address })}</h4>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Primary and secondary streams are shown first so you can add both from the same camera.
+                      </p>
+                      <div className="mt-3 space-y-2">
+                        {rankedDeviceProfiles[0] && renderDiscoveredProfileCard(rankedDeviceProfiles[0], 0, 'primary')}
+                        {rankedDeviceProfiles[1] && renderDiscoveredProfileCard(rankedDeviceProfiles[1], 1, 'secondary')}
+                        {rankedDeviceProfiles.length > 2 && (
+                          <div className="space-y-2 pt-1">
+                            <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Additional profiles</div>
+                            {rankedDeviceProfiles.slice(2).map((profile, index) => renderDiscoveredProfileCard(profile, index + 2))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </aside>
+            </div>
+
             <div className="flex justify-end p-4 border-t border-border">
               <button
-                  id="onvif-close-btn"
-                  className="px-4 py-2 bg-secondary text-secondary-foreground rounded hover:bg-secondary/80 transition-colors"
-                  onClick={() => {
-                    setOnvifModalVisible(false);
-                    setShowCustomNameInput(false);
-                  }}
-                  type="button"
+                id="onvif-close-btn"
+                className="px-4 py-2 bg-secondary text-secondary-foreground rounded hover:bg-secondary/80 transition-colors"
+                onClick={() => {
+                  setOnvifModalVisible(false);
+                  setIsDiscovering(false);
+                  setShowCustomNameInput(false);
+                }}
+                type="button"
               >
                 {t('common.close')}
               </button>
@@ -2075,7 +2512,16 @@ export function StreamsView() {
           <div className="bg-card text-card-foreground rounded-lg shadow-xl max-w-md w-full">
             <div className="flex justify-between items-center p-4 border-b border-border">
               <h3 className="text-lg font-medium">{t('streams.streamName')}</h3>
-              <span className="text-2xl cursor-pointer" onClick={() => setShowCustomNameInput(false)}>×</span>
+              <span
+                className="text-2xl cursor-pointer"
+                onClick={() => {
+                  setShowCustomNameInput(false);
+                  setSelectedProfile(null);
+                  setSelectedSecondaryProfile(null);
+                }}
+              >
+                ×
+              </span>
             </div>
             <div className="p-4">
               <div className="mb-4">
@@ -2132,6 +2578,7 @@ export function StreamsView() {
                   onClick={() => {
                     setShowCustomNameInput(false);
                     setSelectedProfile(null);
+                    setSelectedSecondaryProfile(null);
                   }}
                   type="button"
               >

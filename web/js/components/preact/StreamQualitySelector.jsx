@@ -11,18 +11,18 @@ export function StreamQualitySelector({ value, onChange, disabled = false }) {
 
   return (
     <div
+      className="stream-quality-selector"
       role="group"
       aria-label={t('live.streamQuality')}
       title={t('live.streamQuality')}
       style={{
         display: 'inline-flex',
         alignItems: 'center',
-        height: '30px',
-        padding: '2px',
-        borderRadius: '4px',
-        backgroundColor: 'rgba(0, 0, 0, 0.7)',
-        border: '1px solid rgba(255, 255, 255, 0.2)',
-        boxShadow: '0 2px 4px rgba(0, 0, 0, 0.3)',
+        height: '26px',
+        padding: '1px',
+        borderRadius: '5px',
+        backgroundColor: 'rgba(255, 255, 255, 0.08)',
+        border: '1px solid rgba(255, 255, 255, 0.12)',
         overflow: 'hidden',
         flexShrink: 0,
       }}
@@ -39,17 +39,17 @@ export function StreamQualitySelector({ value, onChange, disabled = false }) {
             onClick={() => onChange?.(quality.value)}
             title={t(quality.titleKey)}
             style={{
-              minWidth: '42px',
-              height: '24px',
-              padding: '0 8px',
+              minWidth: '32px',
+              height: '22px',
+              padding: '0 6px',
               border: 'none',
-              borderRadius: '3px',
+              borderRadius: '4px',
               backgroundColor: active ? '#2563eb' : 'transparent',
               color: 'white',
               cursor: disabled ? 'not-allowed' : 'pointer',
-              fontSize: '12px',
-              fontWeight: active ? '700' : '600',
-              lineHeight: '24px',
+              fontSize: '11px',
+              fontWeight: active ? '700' : '500',
+              lineHeight: '22px',
               opacity: disabled ? 0.6 : 1,
               transition: 'background-color 0.15s ease',
             }}
