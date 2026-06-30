@@ -528,7 +528,7 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
   useEffect(() => {
     if (!workspaceAutoGrid || workspaceTiles.length === 0) return;
 
-    const targetCells = Math.min(MAX_GRID_CELLS, Math.max(4, workspaceTiles.length + 1));
+    const targetCells = Math.min(MAX_GRID_CELLS, Math.max(1, workspaceTiles.length));
     const [optCols, optRows] = computeOptimalGrid(targetCells);
     setCols(optCols);
     setRows(optRows);
@@ -537,7 +537,7 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
   useEffect(() => {
     if (!workspaceStarted || workspaceTiles.length <= 2 || rows > 1 || cols <= 3) return;
 
-    const targetCells = Math.min(MAX_GRID_CELLS, Math.max(4, workspaceTiles.length + 1));
+    const targetCells = Math.min(MAX_GRID_CELLS, Math.max(1, workspaceTiles.length));
     const [optCols, optRows] = computeOptimalGrid(targetCells);
     setCols(optCols);
     setRows(optRows);
