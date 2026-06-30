@@ -60,6 +60,9 @@ typedef struct {
     time_t last_segment_time; // Time when the last segment was created
     time_t pending_segment_start_time; // Planned start time for the next normal rotation
     time_t pending_segment_boundary_time; // Matching end time of the previous rotated segment
+    time_t scheduled_segment_start_time; // Wall-clock aligned start of the current recording slot
+    time_t scheduled_segment_end_time;   // Wall-clock aligned end of the current recording slot
+    time_t last_integrity_check_time;    // Last expected boundary audited for missing slots
 
     // Self-management fields
     int retry_count;          // Number of consecutive failures
