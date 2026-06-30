@@ -881,7 +881,7 @@ export function FullscreenTimelineOverlay({
                   renderTrackContent={() => (
                     <div
                       ref={trackRef}
-                      className={`relative cursor-pointer overflow-hidden rounded-xl border border-white/10 bg-gradient-to-b from-[#121417] via-[#0d0f12] to-[#07080a] shadow-inner ${isDocked ? 'h-6' : 'h-11'}`}
+                      className={`relative cursor-pointer overflow-visible rounded-xl border border-white/10 bg-gradient-to-b from-[#121417] via-[#0d0f12] to-[#07080a] shadow-inner ${isDocked ? 'h-6' : 'h-11'}`}
                       onPointerDown={handleTrackPointerDown}
                       onPointerMove={handleTrackPointerMove}
                       onPointerUp={endTrackScrub}
@@ -901,8 +901,14 @@ export function FullscreenTimelineOverlay({
                       />
 
                       {visibleSegments.map((segment, index) => {
-                        const left = ((segment.startHour - startHour) / visibleRange) * 100;
-                        const width = Math.max(((segment.endHour - segment.startHour) / visibleRange) * 100, 0.12);
+                        const visibleStart = Math.max(segment.startHour, startHour);
+                        const visibleEnd = Math.min(segment.endHour, endHour);
+                        if (visibleEnd <= startHour || visibleStart >= endHour) {
+                          return null;
+                        }
+
+                        const left = ((visibleStart - startHour) / visibleRange) * 100;
+                        const width = Math.max(((visibleEnd - visibleStart) / visibleRange) * 100, 0.12);
 
                         return (
                           <div
@@ -930,7 +936,7 @@ export function FullscreenTimelineOverlay({
                           }}
                         >
                           <div className={isDocked ? 'mx-auto h-2.5 w-[2px] rounded-full bg-amber-400 shadow-[0_0_10px_rgba(251,191,36,0.75)]' : 'mx-auto h-4 w-[2px] rounded-full bg-amber-400 shadow-[0_0_10px_rgba(251,191,36,0.75)]'} />
-                          <div className={`mt-0.5 -translate-x-1/2 rounded-sm border border-amber-300/30 bg-amber-500/90 px-1 py-0.5 font-semibold tracking-[0.12em] text-black shadow-lg ${isDocked ? 'text-[7px]' : 'text-[9px]'}`}>
+                          <div className={`mt-0.5 rounded-sm border border-amber-300/30 bg-amber-500/90 px-1 py-0.5 font-semibold tracking-[0.12em] text-black shadow-lg ${isDocked ? 'text-[7px]' : 'text-[9px]'}`}>
                             {formatClockLabel(activeCursorTimestamp)}
                           </div>
                         </div>

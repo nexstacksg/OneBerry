@@ -11,6 +11,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <string.h>
 #include <unistd.h>
 #include <time.h>
@@ -966,7 +967,15 @@ int record_segment(const char *rtsp_url, const char *output_file, int duration, 
 
                     // Notify caller that segment has officially started (aligned to keyframe)
                     if (!started_cb_called && started_cb) {
-                        started_cb(cb_ctx);
+                        int64_t keyframe_pts = pkt->pts != AV_NOPTS_VALUE
+                            ? pkt->pts
+                            : (pkt->dts != AV_NOPTS_VALUE ? pkt->dts : INT64_MIN);
+                        time_t keyframe_time = time(NULL);
+                        segment_info_ptr->first_keyframe_wall_time = keyframe_time;
+                        segment_info_ptr->first_keyframe_pts = keyframe_pts;
+                        segment_info_ptr->last_keyframe_wall_time = keyframe_time;
+                        segment_info_ptr->last_keyframe_pts = keyframe_pts;
+                        started_cb(cb_ctx, keyframe_time, keyframe_pts);
                         started_cb_called = true;
                     }
 
@@ -993,7 +1002,7 @@ int record_segment(const char *rtsp_url, const char *output_file, int duration, 
                 int64_t wait_time = (av_gettime() - waiting_start_time) / 1000000;
                 // Prefer ending on a keyframe to avoid gaps in the next segment.
                 // In normal operation we keep waiting so the boundary keyframe can be
-                // duplicated into the next segment. Cutting on a non-keyframe creates
+                // carried into the next segment. Cutting on a non-keyframe creates
                 // a real recording gap because the next MP4 must skip packets until
                 // the next keyframe arrives.
                 if (is_keyframe ||
@@ -1004,12 +1013,12 @@ int record_segment(const char *rtsp_url, const char *output_file, int duration, 
                     // exit can fall through to the else branch regardless of is_keyframe's value.
                     if (is_keyframe) {
                         log_info("Found final key frame, ending recording");
-                        // Set flag to indicate the last frame was a key frame
+                        // Route this boundary keyframe to the next segment only.
                         segment_info_ptr->last_frame_was_key = true;
-                        log_debug("Last frame was a key frame, next segment can start immediately (overlap mode)");
+                        log_debug("Boundary keyframe will start the next segment without duplication");
 
-                        // Overlap mode: store a copy of this boundary keyframe so the next segment
-                        // can begin with it immediately (duplicate keyframe is OK; gaps are not).
+                        // Store a copy of this boundary keyframe so the next segment
+                        // can begin with it immediately without writing it to this segment.
                         if (!segment_info_ptr->pending_video_keyframe) {
                             segment_info_ptr->pending_video_keyframe = av_packet_alloc();
                         }
@@ -1026,6 +1035,9 @@ int record_segment(const char *rtsp_url, const char *output_file, int duration, 
                         } else {
                             log_warn("Failed to allocate pending keyframe packet for overlap mode");
                         }
+
+                        av_packet_unref(pkt);
+                        break;
                     } else {
                         log_info("Shutdown: waited %lld seconds for key frame, ending recording with non-key frame",
                                  (long long)wait_time);
@@ -1148,6 +1160,13 @@ int record_segment(const char *rtsp_url, const char *output_file, int duration, 
                     av_packet_unref(pkt);
                     break;
                 }
+            }
+
+            if (is_keyframe) {
+                segment_info_ptr->last_keyframe_wall_time = time(NULL);
+                segment_info_ptr->last_keyframe_pts = pkt->pts != AV_NOPTS_VALUE
+                    ? pkt->pts
+                    : (pkt->dts != AV_NOPTS_VALUE ? pkt->dts : INT64_MIN);
             }
 
             // Initialize first DTS if not set

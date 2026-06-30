@@ -17,6 +17,12 @@ typedef struct {
     int height;
     int fps;
     char codec[16];
+    char container[16];
+    uint64_t duration_ms;
+    time_t first_keyframe_time;
+    time_t last_keyframe_time;
+    int64_t first_pts;
+    int64_t last_pts;
     bool is_complete;
     char trigger_type[16];  // 'scheduled', 'detection', 'motion', 'manual'
     bool protected;         // If true, recording is protected from automatic deletion
@@ -50,6 +56,18 @@ uint64_t add_recording_metadata(const recording_metadata_t *metadata);
  */
 int update_recording_metadata(uint64_t id, time_t end_time, 
                              uint64_t size_bytes, bool is_complete);
+
+/**
+ * Update archive-specific segment metadata used for timeline and playback optimization.
+ *
+ * Pass 0 for *_time values or INT64_MIN for *_pts values to leave that field unchanged.
+ */
+int update_recording_archive_metadata(uint64_t id,
+                                      const char *container,
+                                      time_t first_keyframe_time,
+                                      time_t last_keyframe_time,
+                                      int64_t first_pts,
+                                      int64_t last_pts);
 
 /**
  * Get recording metadata from the database

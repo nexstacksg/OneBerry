@@ -17,6 +17,7 @@
 #include <unistd.h>
 #include <time.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <signal.h>
 #include <pthread.h>
 #include <sys/stat.h>
@@ -44,7 +45,7 @@
 // and the segment officially begins. For normal rotations, use the planned
 // boundary time so adjacent DB rows remain continuous; for fresh starts and
 // reconnects, use the actual keyframe time.
-static void on_segment_started_cb(void *user_ctx) {
+static void on_segment_started_cb(void *user_ctx, time_t keyframe_time, int64_t keyframe_pts) {
     mp4_writer_thread_t *thread_ctx = (mp4_writer_thread_t *)user_ctx;
     if (!thread_ctx || !thread_ctx->writer) return;
 
@@ -69,6 +70,10 @@ static void on_segment_started_cb(void *user_ctx) {
         metadata.end_time = 0;
         metadata.size_bytes = 0;
         metadata.is_complete = false;
+        strncpy(metadata.container, "mp4", sizeof(metadata.container) - 1);
+        metadata.first_keyframe_time = keyframe_time > 0 ? keyframe_time : start_time;
+        metadata.first_pts = keyframe_pts;
+        metadata.last_pts = INT64_MIN;
         strncpy(metadata.trigger_type, thread_ctx->writer->trigger_type, sizeof(metadata.trigger_type) - 1);
 
         uint64_t recording_id = add_recording_metadata(&metadata);
@@ -78,6 +83,11 @@ static void on_segment_started_cb(void *user_ctx) {
             log_info("Added recording at segment start (ID: %llu, trigger_type: %s) for file: %s",
                      (unsigned long long)recording_id, metadata.trigger_type, thread_ctx->writer->output_path);
             thread_ctx->writer->current_recording_id = recording_id;
+            update_recording_archive_metadata(recording_id, "mp4",
+                                              metadata.first_keyframe_time,
+                                              0,
+                                              metadata.first_pts,
+                                              INT64_MIN);
         }
 
         thread_ctx->pending_segment_start_time = 0;
@@ -117,6 +127,10 @@ static void *mp4_writer_rtsp_thread(void *arg) {
     thread_ctx->segment_info.has_audio = false;
     thread_ctx->segment_info.last_frame_was_key = false;
     thread_ctx->segment_info.pending_video_keyframe = NULL;
+    thread_ctx->segment_info.first_keyframe_wall_time = 0;
+    thread_ctx->segment_info.last_keyframe_wall_time = 0;
+    thread_ctx->segment_info.first_keyframe_pts = INT64_MIN;
+    thread_ctx->segment_info.last_keyframe_pts = INT64_MIN;
     memset(thread_ctx->segment_info.stream_name, 0, sizeof(thread_ctx->segment_info.stream_name));
     if (thread_ctx->writer && thread_ctx->writer->stream_name[0] != '\0') {
         strncpy(thread_ctx->segment_info.stream_name, thread_ctx->writer->stream_name,
@@ -321,6 +335,12 @@ static void *mp4_writer_rtsp_thread(void *arg) {
                         // segments, causing consistent gaps in continuous recording.
                         time_t end_time = thread_ctx->pending_segment_boundary_time;
 
+                        update_recording_archive_metadata(thread_ctx->writer->current_recording_id,
+                                                          "mp4",
+                                                          0,
+                                                          thread_ctx->segment_info.last_keyframe_wall_time,
+                                                          INT64_MIN,
+                                                          thread_ctx->segment_info.last_keyframe_pts);
                         // Mark the recording as complete with the correct file size and end time
                         update_recording_metadata(thread_ctx->writer->current_recording_id, end_time, size_bytes, true);
                         log_info("Marked previous recording (ID: %llu) as complete for stream %s (size: %llu bytes)",
@@ -332,6 +352,12 @@ static void *mp4_writer_rtsp_thread(void *arg) {
                                 current_path, strerror(errno));
 
                         // Still mark the recording as complete, but with size 0
+                        update_recording_archive_metadata(thread_ctx->writer->current_recording_id,
+                                                          "mp4",
+                                                          0,
+                                                          thread_ctx->segment_info.last_keyframe_wall_time,
+                                                          INT64_MIN,
+                                                          thread_ctx->segment_info.last_keyframe_pts);
                         update_recording_metadata(thread_ctx->writer->current_recording_id, current_time, 0, true);
                         log_info("Marked previous recording (ID: %llu) as complete for stream %s (size unknown)",
                                 (unsigned long long)thread_ctx->writer->current_recording_id, stream_name);
@@ -595,19 +621,6 @@ static void *mp4_writer_rtsp_thread(void *arg) {
 
         // Update the last packet time for activity tracking
         thread_ctx->writer->last_packet_time = time(NULL);
-
-        // Update the recording metadata with the current file size
-        if (thread_ctx->writer->current_recording_id > 0) {
-            struct stat st;
-            if (stat(thread_ctx->writer->output_path, &st) == 0) {
-                uint64_t size_bytes = st.st_size;
-                // Update size but don't mark as complete yet
-                update_recording_metadata(thread_ctx->writer->current_recording_id, 0, size_bytes, false);
-                log_debug("Updated recording metadata for ID: %llu, size: %llu bytes",
-                        (unsigned long long)thread_ctx->writer->current_recording_id,
-                        (unsigned long long)size_bytes);
-            }
-        }
 
         // BUGFIX (#315): Guarantee a new segment is created on the next loop
         // iteration, even when record_segment exits up to 1 second early (the

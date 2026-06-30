@@ -78,7 +78,7 @@ int get_timeline_segments(const char *stream_name, time_t start_time, time_t end
     char sql[2048] = {0};
     const char *base_query =
         "SELECT r.id, r.stream_name, r.file_path, r.start_time, r.end_time, "
-        "r.size_bytes, "
+        "r.size_bytes, r.duration_ms, r.first_keyframe_time, r.last_keyframe_time, "
         "CASE WHEN r.trigger_type = 'detection' THEN 1 "
         "     WHEN EXISTS (SELECT 1 FROM detections d WHERE d.recording_id = r.id) THEN 1 "
         "     ELSE 0 END AS has_detection "
@@ -140,7 +140,12 @@ int get_timeline_segments(const char *stream_name, time_t start_time, time_t end
         segments[count].start_time  = (time_t)sqlite3_column_int64(stmt, 3);
         segments[count].end_time    = (time_t)sqlite3_column_int64(stmt, 4);
         segments[count].size_bytes  = (uint64_t)sqlite3_column_int64(stmt, 5);
-        segments[count].has_detection = sqlite3_column_int(stmt, 6) != 0;
+        segments[count].duration_ms = (uint64_t)sqlite3_column_int64(stmt, 6);
+        segments[count].first_keyframe_time = (sqlite3_column_type(stmt, 7) != SQLITE_NULL)
+            ? (time_t)sqlite3_column_int64(stmt, 7) : 0;
+        segments[count].last_keyframe_time = (sqlite3_column_type(stmt, 8) != SQLITE_NULL)
+            ? (time_t)sqlite3_column_int64(stmt, 8) : 0;
+        segments[count].has_detection = sqlite3_column_int(stmt, 9) != 0;
 
         count++;
     }
@@ -370,6 +375,13 @@ void handle_get_timeline_segments(const http_request_t *req, http_response_t *re
         cJSON_AddNumberToObject(segment, "duration", duration);
         cJSON_AddStringToObject(segment, "size", size_str);
         cJSON_AddBoolToObject(segment, "has_detection", segments[i].has_detection);
+        cJSON_AddNumberToObject(segment, "duration_ms", (double)segments[i].duration_ms);
+        if (segments[i].first_keyframe_time > 0) {
+            cJSON_AddNumberToObject(segment, "first_keyframe_timestamp", (double)segments[i].first_keyframe_time);
+        }
+        if (segments[i].last_keyframe_time > 0) {
+            cJSON_AddNumberToObject(segment, "last_keyframe_timestamp", (double)segments[i].last_keyframe_time);
+        }
         
         // Add Unix timestamps for easier frontend processing
         // Add timestamps adjusted for local timezone
@@ -829,6 +841,13 @@ void handle_get_timeline_segments_by_ids(const http_request_t *req, http_respons
         cJSON_AddNumberToObject(segment, "duration", duration);
         cJSON_AddStringToObject(segment, "size", size_str);
         cJSON_AddBoolToObject(segment, "has_detection", has_det);
+        cJSON_AddNumberToObject(segment, "duration_ms", (double)rec.duration_ms);
+        if (rec.first_keyframe_time > 0) {
+            cJSON_AddNumberToObject(segment, "first_keyframe_timestamp", (double)rec.first_keyframe_time);
+        }
+        if (rec.last_keyframe_time > 0) {
+            cJSON_AddNumberToObject(segment, "last_keyframe_timestamp", (double)rec.last_keyframe_time);
+        }
         cJSON_AddNumberToObject(segment, "start_timestamp", (double)rec.start_time);
         cJSON_AddNumberToObject(segment, "end_timestamp", (double)rec.end_time);
         cJSON_AddNumberToObject(segment, "local_start_timestamp", (double)rec.start_time);
