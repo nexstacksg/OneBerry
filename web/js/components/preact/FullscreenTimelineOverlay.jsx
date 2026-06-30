@@ -80,6 +80,7 @@ function stripHours(hours) {
 const MIN_FULLSCREEN_TIMELINE_VIEW_HOURS = 1 / 3600;
 const PLAYBACK_SPEEDS = [0.25, 0.5, 1, 1.5, 2, 4];
 const SEEK_SETTLE_TOLERANCE_SECONDS = 1.5;
+const CONTINUOUS_SEGMENT_GAP_SECONDS = 5;
 
 function formatDurationLabel(seconds) {
   if (!Number.isFinite(seconds) || seconds <= 0) {
@@ -303,7 +304,27 @@ export function FullscreenTimelineOverlay({
       return [];
     }
 
-    return segments
+    const sorted = [...segments].sort((a, b) => Number(a.start_timestamp) - Number(b.start_timestamp));
+    const merged = [];
+
+    for (const segment of sorted) {
+      const start = Number(segment.start_timestamp);
+      const end = Number(segment.end_timestamp);
+      if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
+        continue;
+      }
+
+      const previous = merged[merged.length - 1];
+      if (previous && start - Number(previous.end_timestamp) <= CONTINUOUS_SEGMENT_GAP_SECONDS) {
+        previous.end_timestamp = Math.max(Number(previous.end_timestamp), end);
+        previous.has_detection = Boolean(previous.has_detection || segment.has_detection);
+        continue;
+      }
+
+      merged.push({ ...segment });
+    }
+
+    return merged
       .map((segment) => {
         const range = getClippedSegmentHourRange(segment, selectedDate);
         if (!range) return null;
@@ -860,7 +881,7 @@ export function FullscreenTimelineOverlay({
                   renderTrackContent={() => (
                     <div
                       ref={trackRef}
-                      className={`relative cursor-default overflow-hidden rounded-xl border border-white/10 bg-gradient-to-b from-[#121417] via-[#0d0f12] to-[#07080a] shadow-inner ${isDocked ? 'h-6' : 'h-11'}`}
+                      className={`relative cursor-pointer overflow-hidden rounded-xl border border-white/10 bg-gradient-to-b from-[#121417] via-[#0d0f12] to-[#07080a] shadow-inner ${isDocked ? 'h-6' : 'h-11'}`}
                       onPointerDown={handleTrackPointerDown}
                       onPointerMove={handleTrackPointerMove}
                       onPointerUp={endTrackScrub}

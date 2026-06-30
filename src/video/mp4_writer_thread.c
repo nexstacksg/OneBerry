@@ -41,8 +41,9 @@
 
 
 // Callback invoked by record_segment when the first keyframe is detected
-// and the segment officially begins. We create the DB metadata here so
-// start_time aligns with the actual playable start.
+// and the segment officially begins. For normal rotations, use the planned
+// boundary time so adjacent DB rows remain continuous; for fresh starts and
+// reconnects, use the actual keyframe time.
 static void on_segment_started_cb(void *user_ctx) {
     mp4_writer_thread_t *thread_ctx = (mp4_writer_thread_t *)user_ctx;
     if (!thread_ctx || !thread_ctx->writer) return;
@@ -53,11 +54,18 @@ static void on_segment_started_cb(void *user_ctx) {
     const char *stream_name = thread_ctx->writer->stream_name[0] ? thread_ctx->writer->stream_name : "unknown";
 
     if (thread_ctx->writer->output_path[0] != '\0') {
+        time_t keyframe_time = time(NULL);
+        time_t start_time = keyframe_time;
+        if (thread_ctx->pending_segment_start_time > 0 &&
+            thread_ctx->pending_segment_start_time <= keyframe_time) {
+            start_time = thread_ctx->pending_segment_start_time;
+        }
+
         recording_metadata_t metadata;
         memset(&metadata, 0, sizeof(recording_metadata_t));
         strncpy(metadata.stream_name, stream_name, sizeof(metadata.stream_name) - 1);
         strncpy(metadata.file_path, thread_ctx->writer->output_path, sizeof(metadata.file_path) - 1);
-        metadata.start_time = time(NULL); // Align to keyframe time
+        metadata.start_time = start_time;
         metadata.end_time = 0;
         metadata.size_bytes = 0;
         metadata.is_complete = false;
@@ -71,6 +79,9 @@ static void on_segment_started_cb(void *user_ctx) {
                      (unsigned long long)recording_id, metadata.trigger_type, thread_ctx->writer->output_path);
             thread_ctx->writer->current_recording_id = recording_id;
         }
+
+        thread_ctx->pending_segment_start_time = 0;
+        thread_ctx->pending_segment_boundary_time = 0;
     }
 }
 
@@ -117,6 +128,8 @@ static void *mp4_writer_rtsp_thread(void *arg) {
     // Initialize self-management fields
     thread_ctx->retry_count = 0;
     thread_ctx->last_retry_time = 0;
+    thread_ctx->pending_segment_start_time = 0;
+    thread_ctx->pending_segment_boundary_time = 0;
 
     // Make a local copy of the stream name for thread safety
     char stream_name[MAX_STREAM_NAME];
@@ -179,6 +192,8 @@ static void *mp4_writer_rtsp_thread(void *arg) {
             // Re-detect video params after reconnect — the stream resolution
             // may have changed (e.g., camera firmware update, stream switch).
             thread_ctx->video_params_detected = false;
+            thread_ctx->pending_segment_start_time = 0;
+            thread_ctx->pending_segment_boundary_time = 0;
 
             // Wait a moment for the upstream to be ready (go2rtc may still be initializing streams)
             // Check for shutdown every 500ms during the wait
@@ -284,8 +299,11 @@ static void *mp4_writer_rtsp_thread(void *arg) {
                 strncpy(current_path, thread_ctx->writer->output_path, MAX_PATH_LENGTH - 1);
                 current_path[MAX_PATH_LENGTH - 1] = '\0';
 
-                // Defer creation of DB metadata for the new file until first keyframe via callback
-                // so that start_time aligns to a playable keyframe.
+                // Defer creation of DB metadata for the new file until first keyframe
+                // via callback, but remember the planned rotation boundary so normal
+                // adjacent segments do not show artificial gaps in the timeline.
+                thread_ctx->pending_segment_start_time = current_time;
+                thread_ctx->pending_segment_boundary_time = current_time;
 
                 // Mark the previous recording as complete
                 if (thread_ctx->writer->current_recording_id > 0) {
@@ -301,7 +319,7 @@ static void *mp4_writer_rtsp_thread(void *arg) {
                         // the MP4 file with avformat_open_input + avformat_find_stream_info.
                         // The probing was taking ~3-4 seconds of blocking I/O between
                         // segments, causing consistent gaps in continuous recording.
-                        time_t end_time = current_time;
+                        time_t end_time = thread_ctx->pending_segment_boundary_time;
 
                         // Mark the recording as complete with the correct file size and end time
                         update_recording_metadata(thread_ctx->writer->current_recording_id, end_time, size_bytes, true);
@@ -455,6 +473,9 @@ static void *mp4_writer_rtsp_thread(void *arg) {
             if (thread_ctx->writer) {
                 thread_ctx->writer->last_packet_time = time(NULL);
             }
+
+            thread_ctx->pending_segment_start_time = 0;
+            thread_ctx->pending_segment_boundary_time = 0;
 
             // Input context is always NULL after a record_segment failure — it is
             // closed and freed on every error path inside record_segment.  This is

@@ -57,13 +57,10 @@
 // Timeout for probing video dimensions from the bitstream, in microseconds.
 #define DIMENSION_PROBE_TIMEOUT_US 60000000LL  // 60 seconds
 
-// Timeout thresholds (in seconds) for waiting on final keyframes.
-// SHUTDOWN_KEYFRAME_WAIT_TIMEOUT_S: how long to wait after shutdown before
-// ending without a keyframe.
-// KEYFRAME_WAIT_TIMEOUT_S: hard cap on how long to wait for a keyframe in
-// normal operation.
+// Timeout threshold (in seconds) for waiting on final keyframes during shutdown.
+// Normal segment rotation must wait for the next keyframe so the boundary frame
+// can be carried into the next segment and recording remains continuous.
 #define SHUTDOWN_KEYFRAME_WAIT_TIMEOUT_S 1
-#define KEYFRAME_WAIT_TIMEOUT_S          5
 
 // Small fixed offset used to maintain timestamp continuity between segments.
 // Expressed in stream time_base units; currently set to 1 (minimum positive
@@ -994,52 +991,44 @@ int record_segment(const char *rtsp_url, const char *output_file, int duration, 
 
                 // Calculate how long we've been waiting for a key frame
                 int64_t wait_time = (av_gettime() - waiting_start_time) / 1000000;
-                bool keyframe_timeout_reached = (wait_time >= KEYFRAME_WAIT_TIMEOUT_S);
-
-				// Prefer ending on a keyframe to avoid gaps in the next segment.
-				// Allow ending without a keyframe on shutdown OR after a 5-second
-				// hard timeout so cameras with long keyframe intervals (e.g. low-FPS
-				// enclosure cameras) cannot push segments past their configured length.
-				if (is_keyframe ||
-				    (shutdown_detected && wait_time > SHUTDOWN_KEYFRAME_WAIT_TIMEOUT_S) ||
-				    keyframe_timeout_reached) {
+                // Prefer ending on a keyframe to avoid gaps in the next segment.
+                // In normal operation we keep waiting so the boundary keyframe can be
+                // duplicated into the next segment. Cutting on a non-keyframe creates
+                // a real recording gap because the next MP4 must skip packets until
+                // the next keyframe arrives.
+                if (is_keyframe ||
+                    (shutdown_detected && wait_time > SHUTDOWN_KEYFRAME_WAIT_TIMEOUT_S)) {
                     // The nested check below determines whether this *specific final* frame is a
                     // keyframe. This influences boundary handling: only a final keyframe triggers
-                    // overlap mode (storing the frame for the next segment). A timeout or shutdown
-                    // exit falls through to the else branch regardless of is_keyframe's value above.
+                    // overlap mode (storing the frame for the next segment). A shutdown
+                    // exit can fall through to the else branch regardless of is_keyframe's value.
                     if (is_keyframe) {
                         log_info("Found final key frame, ending recording");
                         // Set flag to indicate the last frame was a key frame
                         segment_info_ptr->last_frame_was_key = true;
-						log_debug("Last frame was a key frame, next segment can start immediately (overlap mode)");
+                        log_debug("Last frame was a key frame, next segment can start immediately (overlap mode)");
 
-						// Overlap mode: store a copy of this boundary keyframe so the next segment
-						// can begin with it immediately (duplicate keyframe is OK; gaps are not).
-						if (!segment_info_ptr->pending_video_keyframe) {
-							segment_info_ptr->pending_video_keyframe = av_packet_alloc();
-						}
-						if (segment_info_ptr->pending_video_keyframe) {
-							av_packet_unref(segment_info_ptr->pending_video_keyframe);
-							int ref_ret = av_packet_ref(segment_info_ptr->pending_video_keyframe, pkt);
-							if (ref_ret < 0) {
-								log_warn("Failed to store pending keyframe for next segment (ret=%d)", ref_ret);
-								av_packet_free(&segment_info_ptr->pending_video_keyframe);
-								segment_info_ptr->pending_video_keyframe = NULL;
-							} else {
-								log_debug("Stored boundary keyframe for next segment start (overlap mode)");
-							}
-						} else {
-							log_warn("Failed to allocate pending keyframe packet for overlap mode");
-						}
-                    } else {
-	                        if (keyframe_timeout_reached && !shutdown_detected) {
-                            log_warn("Keyframe wait timeout after %lld s — camera has long keyframe interval? "
-                                     "Cutting segment without final keyframe to enforce configured segment length.",
-                                     (long long)wait_time);
-                        } else {
-                            log_info("Shutdown: waited %lld seconds for key frame, ending recording with non-key frame",
-                                     (long long)wait_time);
+                        // Overlap mode: store a copy of this boundary keyframe so the next segment
+                        // can begin with it immediately (duplicate keyframe is OK; gaps are not).
+                        if (!segment_info_ptr->pending_video_keyframe) {
+                            segment_info_ptr->pending_video_keyframe = av_packet_alloc();
                         }
+                        if (segment_info_ptr->pending_video_keyframe) {
+                            av_packet_unref(segment_info_ptr->pending_video_keyframe);
+                            int ref_ret = av_packet_ref(segment_info_ptr->pending_video_keyframe, pkt);
+                            if (ref_ret < 0) {
+                                log_warn("Failed to store pending keyframe for next segment (ret=%d)", ref_ret);
+                                av_packet_free(&segment_info_ptr->pending_video_keyframe);
+                                segment_info_ptr->pending_video_keyframe = NULL;
+                            } else {
+                                log_debug("Stored boundary keyframe for next segment start (overlap mode)");
+                            }
+                        } else {
+                            log_warn("Failed to allocate pending keyframe packet for overlap mode");
+                        }
+                    } else {
+                        log_info("Shutdown: waited %lld seconds for key frame, ending recording with non-key frame",
+                                 (long long)wait_time);
                         // Clear flag since the last frame was not a key frame
                         segment_info_ptr->last_frame_was_key = false;
                         log_debug("Last frame was NOT a key frame, next segment will wait for a keyframe");

@@ -54,6 +54,8 @@ typedef struct {
     mp4_writer_t *writer;     // MP4 writer instance
     int segment_duration;     // Duration of each segment in seconds
     time_t last_segment_time; // Time when the last segment was created
+    time_t pending_segment_start_time; // Planned start time for the next normal rotation
+    time_t pending_segment_boundary_time; // Matching end time of the previous rotated segment
 
     // Self-management fields
     int retry_count;          // Number of consecutive failures
