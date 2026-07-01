@@ -167,6 +167,18 @@ static void update_wallclock_schedule(mp4_writer_thread_t *thread_ctx,
     thread_ctx->writer->last_rotation_time = slot_start;
 }
 
+static void advance_wallclock_schedule_to_slot(mp4_writer_thread_t *thread_ctx,
+                                               time_t slot_start,
+                                               int segment_duration) {
+    if (!thread_ctx || !thread_ctx->writer || segment_duration <= 0) {
+        return;
+    }
+
+    thread_ctx->scheduled_segment_start_time = slot_start;
+    thread_ctx->scheduled_segment_end_time = slot_start + segment_duration;
+    thread_ctx->writer->last_rotation_time = slot_start;
+}
+
 static void discard_current_recording(mp4_writer_thread_t *thread_ctx,
                                       const char *stream_name,
                                       const char *reason) {
@@ -239,6 +251,7 @@ static void on_segment_started_cb(void *user_ctx, time_t keyframe_time, int64_t 
             log_info("Added recording at segment start (ID: %llu, trigger_type: %s) for file: %s",
                      (unsigned long long)recording_id, metadata.trigger_type, thread_ctx->writer->output_path);
             thread_ctx->writer->current_recording_id = recording_id;
+            thread_ctx->writer->last_packet_time = time(NULL);
             update_recording_archive_metadata(recording_id, "mp4",
                                               metadata.first_keyframe_time,
                                               0,
@@ -465,10 +478,7 @@ static void *mp4_writer_rtsp_thread(void *arg) {
 
             if (current_time >= thread_ctx->scheduled_segment_end_time) {
                 time_t scheduled_boundary = thread_ctx->scheduled_segment_end_time;
-                time_t next_slot_start = align_segment_start(current_time, segment_duration);
-                if (next_slot_start < scheduled_boundary) {
-                    next_slot_start = scheduled_boundary;
-                }
+                time_t next_slot_start = scheduled_boundary;
                 long long actual_ms = realtime_epoch_ms();
                 long long scheduled_ms = ((long long)scheduled_boundary) * 1000LL;
                 long long delay_ms = actual_ms - scheduled_ms;
@@ -558,8 +568,9 @@ static void *mp4_writer_rtsp_thread(void *arg) {
 
 
 
-                update_wallclock_schedule(thread_ctx, stream_name, segment_duration,
-                                          current_time, "normal_rotation");
+                advance_wallclock_schedule_to_slot(thread_ctx,
+                                                   next_slot_start,
+                                                   segment_duration);
             }
         }
 
@@ -636,6 +647,10 @@ static void *mp4_writer_rtsp_thread(void *arg) {
             if (seconds_until_boundary <= 0) {
                 seconds_until_boundary = 1;
             }
+        }
+
+        if (thread_ctx->writer) {
+            thread_ctx->writer->last_packet_time = time(NULL);
         }
 
         ret = record_segment(thread_ctx->rtsp_url, thread_ctx->writer->output_path,
@@ -1122,11 +1137,25 @@ int mp4_writer_is_recording(mp4_writer_t *writer) {
         return 1;
     }
 
-    // Check if packets have been written recently
+    // Check if packets have been written recently. The timeout must be longer
+    // than the configured segment duration; otherwise healthy 60-second
+    // recordings are killed near the end of each segment before record_segment()
+    // returns and refreshes last_packet_time.
     long seconds_since_last_packet = (long)(now - last_packet);
-    if (seconds_since_last_packet > 45) {
-        log_debug("MP4 recording for stream %s hasn't written packets in %ld seconds - considering it dead",
-                writer->stream_name, seconds_since_last_packet);
+    int stale_timeout = 45;
+    if (writer->segment_duration > 0) {
+        stale_timeout = writer->segment_duration + 45;
+        if (stale_timeout < 90) {
+            stale_timeout = 90;
+        }
+    }
+    if (seconds_since_last_packet > stale_timeout) {
+        log_debug("MP4 recording for stream %s hasn't reported activity in %ld seconds "
+                  "(timeout=%d, segment_duration=%d) - considering it dead",
+                  writer->stream_name,
+                  seconds_since_last_packet,
+                  stale_timeout,
+                  writer->segment_duration);
         return 0;
     }
 
