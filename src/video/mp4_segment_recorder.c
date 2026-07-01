@@ -63,6 +63,14 @@
 // can be carried into the next segment and recording remains continuous.
 #define SHUTDOWN_KEYFRAME_WAIT_TIMEOUT_S 1
 
+// Maximum time to wait for a final keyframe during normal segment rotation.
+// Waiting indefinitely lets a long camera GOP consume the next wall-clock slot,
+// which creates missing 60-second rows in continuous recording. Enterprise VMS
+// deployments should configure cameras to emit IDR/keyframes at or below the
+// segment duration; this bound keeps the recorder scheduler from falling behind
+// when a camera does not.
+#define NORMAL_KEYFRAME_WAIT_TIMEOUT_S 2
+
 // Small fixed offset used to maintain timestamp continuity between segments.
 // Expressed in stream time_base units; currently set to 1 (minimum positive
 // offset).
@@ -970,8 +978,13 @@ int record_segment(const char *rtsp_url, const char *output_file, int duration, 
 
             // If we're waiting for the first key frame
             if (!found_first_keyframe) {
-                // BUGFIX: Always wait for a keyframe to start recording, regardless of previous segment state
-                if (is_keyframe) {
+                bool allow_non_keyframe_continuation = segment_index > 1;
+
+                // Fresh MP4 files prefer a keyframe start. Once the recorder is
+                // already in a continuous stream, keep writing immediately so
+                // the next minute slot is not skipped while waiting for the
+                // camera's delayed GOP/keyframe.
+                if (is_keyframe || allow_non_keyframe_continuation) {
                     found_first_keyframe = true;
 
                     // Note overlap context before announcing segment start
@@ -979,7 +992,12 @@ int record_segment(const char *rtsp_url, const char *output_file, int duration, 
                         log_info("Previous segment ended with a key frame — starting new segment with overlap keyframe");
                     }
 
-                    log_info("Found first key frame, starting recording");
+                    if (is_keyframe) {
+                        log_info("Found first key frame, starting recording");
+                    } else {
+                        log_warn("Starting continuous segment on non-keyframe to preserve wall-clock rotation; "
+                                 "camera keyframe/GOP interval should be reduced for fully independent MP4 playback");
+                    }
 
                     // Notify caller that segment has officially started (aligned to keyframe)
                     if (!started_cb_called && started_cb) {
@@ -995,8 +1013,10 @@ int record_segment(const char *rtsp_url, const char *output_file, int duration, 
                         started_cb_called = true;
                     }
 
-                    // Reset start time to when we found the first key frame
-                    start_time = av_gettime();
+                    // Do not reset start_time here. The caller passes the
+                    // remaining wall-clock time until the scheduled boundary;
+                    // resetting to the first keyframe lets delayed keyframes
+                    // push this segment into the next minute slot.
                 } else {
                     // Always wait for a key frame
                     // Skip this frame as we're waiting for a key frame
@@ -1016,12 +1036,15 @@ int record_segment(const char *rtsp_url, const char *output_file, int duration, 
 
                 // Calculate how long we've been waiting for a key frame
                 int64_t wait_time = (av_gettime() - waiting_start_time) / 1000000;
+                bool keyframe_wait_timed_out =
+                    !shutdown_detected && wait_time > NORMAL_KEYFRAME_WAIT_TIMEOUT_S;
+
                 // Prefer ending on a keyframe to avoid gaps in the next segment.
-                // In normal operation we keep waiting so the boundary keyframe can be
-                // carried into the next segment. Cutting on a non-keyframe creates
-                // a real recording gap because the next MP4 must skip packets until
-                // the next keyframe arrives.
+                // If the camera does not provide a keyframe quickly, end the
+                // segment anyway so the wall-clock scheduler can create the next
+                // minute slot instead of skipping it entirely.
                 if (is_keyframe ||
+                    keyframe_wait_timed_out ||
                     (shutdown_detected && wait_time > SHUTDOWN_KEYFRAME_WAIT_TIMEOUT_S)) {
                     // The nested check below determines whether this *specific final* frame is a
                     // keyframe. This influences boundary handling: only a final keyframe triggers
@@ -1054,12 +1077,19 @@ int record_segment(const char *rtsp_url, const char *output_file, int duration, 
 
                         av_packet_unref(pkt);
                         break;
-                    } else {
+                    } else if (shutdown_detected) {
                         log_info("Shutdown: waited %lld seconds for key frame, ending recording with non-key frame",
                                  (long long)wait_time);
                         // Clear flag since the last frame was not a key frame
                         segment_info_ptr->last_frame_was_key = false;
                         log_debug("Last frame was NOT a key frame, next segment will wait for a keyframe");
+                    } else {
+                        log_warn("Timed out after %lld seconds waiting for final keyframe; "
+                                 "ending segment to preserve wall-clock rotation. "
+                                 "Camera keyframe/GOP interval is too long for exact %d-second MP4 segments",
+                                 (long long)wait_time,
+                                 duration);
+                        segment_info_ptr->last_frame_was_key = false;
                     }
 
                     // Process this final frame and then break the loop
