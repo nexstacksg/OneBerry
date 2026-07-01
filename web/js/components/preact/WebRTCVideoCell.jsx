@@ -541,10 +541,15 @@ export function WebRTCVideoCell({
 
     const nextRequestId = fullscreenPlaybackRequestRef.current + 1;
     fullscreenPlaybackRequestRef.current = nextRequestId;
+    fullscreenPlaybackCoverRequestRef.current = nextRequestId;
     warmFullscreenPlaybackUrl(sample.playbackUrl);
 
     const playbackVideo = playbackVideoRef.current;
-    const transitionFrame = captureVideoFrame(playbackVideo) || captureVideoFrame(videoRef.current);
+    const transitionFrame =
+      captureVideoFrame(playbackVideo) ||
+      captureVideoFrame(videoRef.current) ||
+      fullscreenPlaybackCoverFrameRef.current ||
+      sample.thumbUrl;
     setIsFullscreenPlaybackFrameReady(false);
     if (transitionFrame) {
       fullscreenPlaybackCoverFrameRef.current = transitionFrame;
@@ -607,6 +612,7 @@ export function WebRTCVideoCell({
     setIsFullscreenPlaybackFrameReady(false);
     fullscreenPlaybackTimestampRef.current = null;
     fullscreenPlaybackSeekTargetRef.current = null;
+    fullscreenPlaybackCoverRequestRef.current += 1;
     fullscreenPlaybackCoverFrameRef.current = null;
     setFullscreenPlaybackCoverFrame(null);
   };
@@ -671,6 +677,7 @@ export function WebRTCVideoCell({
   const fullscreenPlaybackTimestampRef = useRef(null);
   const fullscreenPlaybackSeekTargetRef = useRef(null);
   const fullscreenPlaybackCoverFrameRef = useRef(null);
+  const fullscreenPlaybackCoverRequestRef = useRef(0);
 
   useEffect(() => {
     const syncFullscreenState = () => {
@@ -778,10 +785,17 @@ export function WebRTCVideoCell({
     }
 
     fullscreenPlaybackSeekTargetRef.current = null;
-    requestFullscreenPlaybackCoverRelease(video);
+    requestFullscreenPlaybackCoverRelease(video, fullscreenPlaybackCoverRequestRef.current);
   };
 
-  const releaseFullscreenPlaybackCoverIfReady = (video = playbackVideoRef.current) => {
+  const releaseFullscreenPlaybackCoverIfReady = (
+    video = playbackVideoRef.current,
+    requestId = fullscreenPlaybackCoverRequestRef.current
+  ) => {
+    if (requestId !== fullscreenPlaybackCoverRequestRef.current) {
+      return;
+    }
+
     if (!fullscreenPlayback || !video || video.readyState < 2) {
       return;
     }
@@ -798,17 +812,20 @@ export function WebRTCVideoCell({
     setFullscreenPlaybackCoverFrame(null);
   };
 
-  const requestFullscreenPlaybackCoverRelease = (video = playbackVideoRef.current) => {
+  const requestFullscreenPlaybackCoverRelease = (
+    video = playbackVideoRef.current,
+    requestId = fullscreenPlaybackCoverRequestRef.current
+  ) => {
     if (!video) {
       return;
     }
 
     if (typeof video.requestVideoFrameCallback === 'function') {
-      video.requestVideoFrameCallback(() => releaseFullscreenPlaybackCoverIfReady(video));
+      video.requestVideoFrameCallback(() => releaseFullscreenPlaybackCoverIfReady(video, requestId));
       return;
     }
 
-    requestAnimationFrame(() => releaseFullscreenPlaybackCoverIfReady(video));
+    requestAnimationFrame(() => releaseFullscreenPlaybackCoverIfReady(video, requestId));
   };
 
   useEffect(() => {

@@ -99,9 +99,10 @@ uint64_t add_recording_metadata(const recording_metadata_t *metadata) {
     pthread_mutex_lock(db_mutex);
 
     const char *sql = "INSERT INTO recordings (stream_name, file_path, start_time, end_time, "
-                      "size_bytes, width, height, fps, codec, is_complete, trigger_type, "
-                      "retention_tier, disk_pressure_eligible) "
-                      "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);";
+                      "size_bytes, width, height, fps, codec, container, duration_ms, "
+                      "first_keyframe_time, last_keyframe_time, first_pts, last_pts, "
+                      "is_complete, trigger_type, retention_tier, disk_pressure_eligible) "
+                      "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);";
 
     rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
     if (rc != SQLITE_OK) {
@@ -128,15 +129,38 @@ uint64_t add_recording_metadata(const recording_metadata_t *metadata) {
     sqlite3_bind_int(stmt, 7, metadata->height);
     sqlite3_bind_int(stmt, 8, metadata->fps);
     sqlite3_bind_text(stmt, 9, metadata->codec, -1, SQLITE_STATIC);
-    sqlite3_bind_int(stmt, 10, metadata->is_complete ? 1 : 0);
+    const char *container = (metadata->container[0] != '\0') ? metadata->container : "mp4";
+    sqlite3_bind_text(stmt, 10, container, -1, SQLITE_STATIC);
+    sqlite3_bind_int64(stmt, 11, (sqlite3_int64)metadata->duration_ms);
+    if (metadata->first_keyframe_time > 0) {
+        sqlite3_bind_int64(stmt, 12, (sqlite3_int64)metadata->first_keyframe_time);
+    } else {
+        sqlite3_bind_null(stmt, 12);
+    }
+    if (metadata->last_keyframe_time > 0) {
+        sqlite3_bind_int64(stmt, 13, (sqlite3_int64)metadata->last_keyframe_time);
+    } else {
+        sqlite3_bind_null(stmt, 13);
+    }
+    if (metadata->first_keyframe_time > 0 && metadata->first_pts != INT64_MIN) {
+        sqlite3_bind_int64(stmt, 14, (sqlite3_int64)metadata->first_pts);
+    } else {
+        sqlite3_bind_null(stmt, 14);
+    }
+    if (metadata->last_keyframe_time > 0 && metadata->last_pts != INT64_MIN) {
+        sqlite3_bind_int64(stmt, 15, (sqlite3_int64)metadata->last_pts);
+    } else {
+        sqlite3_bind_null(stmt, 15);
+    }
+    sqlite3_bind_int(stmt, 16, metadata->is_complete ? 1 : 0);
 
     // Bind trigger_type, default to 'scheduled' if not set
     const char *trigger_type = (metadata->trigger_type[0] != '\0') ? metadata->trigger_type : "scheduled";
-    sqlite3_bind_text(stmt, 11, trigger_type, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 17, trigger_type, -1, SQLITE_STATIC);
 
     // Bind retention tier and disk pressure eligibility
-    sqlite3_bind_int(stmt, 12, metadata->retention_tier);
-    sqlite3_bind_int(stmt, 13, metadata->disk_pressure_eligible ? 1 : 0);
+    sqlite3_bind_int(stmt, 18, metadata->retention_tier);
+    sqlite3_bind_int(stmt, 19, metadata->disk_pressure_eligible ? 1 : 0);
 
     // Execute statement
     rc = sqlite3_step(stmt);
@@ -170,7 +194,8 @@ int update_recording_metadata(uint64_t id, time_t end_time,
 
     pthread_mutex_lock(db_mutex);
 
-    const char *sql = "UPDATE recordings SET end_time = ?, size_bytes = ?, is_complete = ? "
+    const char *sql = "UPDATE recordings SET end_time = ?, size_bytes = ?, is_complete = ?, "
+                      "duration_ms = CASE WHEN ? > start_time THEN (? - start_time) * 1000 ELSE duration_ms END "
                       "WHERE id = ?;";
 
     rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
@@ -186,7 +211,9 @@ int update_recording_metadata(uint64_t id, time_t end_time,
     sqlite3_bind_int64(stmt, 1, (sqlite3_int64)end_time);
     sqlite3_bind_int64(stmt, 2, (sqlite3_int64)size_bytes);
     sqlite3_bind_int(stmt, 3, is_complete ? 1 : 0);
-    sqlite3_bind_int64(stmt, 4, (sqlite3_int64)id);
+    sqlite3_bind_int64(stmt, 4, (sqlite3_int64)end_time);
+    sqlite3_bind_int64(stmt, 5, (sqlite3_int64)end_time);
+    sqlite3_bind_int64(stmt, 6, (sqlite3_int64)id);
 
     // Execute statement
     rc = sqlite3_step(stmt);
@@ -200,6 +227,65 @@ int update_recording_metadata(uint64_t id, time_t end_time,
     // Finalize the prepared statement
     sqlite3_finalize(stmt);
     pthread_mutex_unlock(db_mutex);
+
+    return 0;
+}
+
+int update_recording_archive_metadata(uint64_t id,
+                                      const char *container,
+                                      time_t first_keyframe_time,
+                                      time_t last_keyframe_time,
+                                      int64_t first_pts,
+                                      int64_t last_pts) {
+    sqlite3 *db = get_db_handle();
+    pthread_mutex_t *db_mutex = get_db_mutex();
+
+    if (!db) {
+        log_error("Database not initialized");
+        return -1;
+    }
+
+    pthread_mutex_lock(db_mutex);
+
+    const char *sql =
+        "UPDATE recordings SET "
+        "container = COALESCE(NULLIF(?, ''), container), "
+        "first_keyframe_time = CASE WHEN ? > 0 THEN ? ELSE first_keyframe_time END, "
+        "last_keyframe_time = CASE WHEN ? > 0 THEN ? ELSE last_keyframe_time END, "
+        "first_pts = CASE WHEN ? != ? THEN ? ELSE first_pts END, "
+        "last_pts = CASE WHEN ? != ? THEN ? ELSE last_pts END "
+        "WHERE id = ?;";
+
+    sqlite3_stmt *stmt = NULL;
+    int rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        log_error("Failed to prepare archive metadata update: %s", sqlite3_errmsg(db));
+        pthread_mutex_unlock(db_mutex);
+        return -1;
+    }
+
+    const char *safe_container = container ? container : "";
+    sqlite3_bind_text(stmt, 1, safe_container, -1, SQLITE_STATIC);
+    sqlite3_bind_int64(stmt, 2, (sqlite3_int64)first_keyframe_time);
+    sqlite3_bind_int64(stmt, 3, (sqlite3_int64)first_keyframe_time);
+    sqlite3_bind_int64(stmt, 4, (sqlite3_int64)last_keyframe_time);
+    sqlite3_bind_int64(stmt, 5, (sqlite3_int64)last_keyframe_time);
+    sqlite3_bind_int64(stmt, 6, (sqlite3_int64)first_pts);
+    sqlite3_bind_int64(stmt, 7, (sqlite3_int64)INT64_MIN);
+    sqlite3_bind_int64(stmt, 8, (sqlite3_int64)first_pts);
+    sqlite3_bind_int64(stmt, 9, (sqlite3_int64)last_pts);
+    sqlite3_bind_int64(stmt, 10, (sqlite3_int64)INT64_MIN);
+    sqlite3_bind_int64(stmt, 11, (sqlite3_int64)last_pts);
+    sqlite3_bind_int64(stmt, 12, (sqlite3_int64)id);
+
+    rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    pthread_mutex_unlock(db_mutex);
+
+    if (rc != SQLITE_DONE) {
+        log_error("Failed to update archive metadata: %s", sqlite3_errmsg(db));
+        return -1;
+    }
 
     return 0;
 }
@@ -227,7 +313,8 @@ int get_recording_metadata_by_id(uint64_t id, recording_metadata_t *metadata) {
 
     const char *sql = "SELECT id, stream_name, file_path, start_time, end_time, "
                       "size_bytes, width, height, fps, codec, is_complete, trigger_type, "
-                      "protected, retention_override_days, retention_tier, disk_pressure_eligible "
+                      "protected, retention_override_days, retention_tier, disk_pressure_eligible, "
+                      "container, duration_ms, first_keyframe_time, last_keyframe_time, first_pts, last_pts "
                       "FROM recordings WHERE id = ?;";
 
     rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
@@ -306,6 +393,23 @@ int get_recording_metadata_by_id(uint64_t id, recording_metadata_t *metadata) {
         metadata->disk_pressure_eligible = (sqlite3_column_type(stmt, 15) != SQLITE_NULL)
             ? (sqlite3_column_int(stmt, 15) != 0) : true;
 
+        const char *container = (const char *)sqlite3_column_text(stmt, 16);
+        if (container) {
+            strncpy(metadata->container, container, sizeof(metadata->container) - 1);
+            metadata->container[sizeof(metadata->container) - 1] = '\0';
+        } else {
+            strncpy(metadata->container, "mp4", sizeof(metadata->container) - 1);
+        }
+        metadata->duration_ms = (uint64_t)sqlite3_column_int64(stmt, 17);
+        metadata->first_keyframe_time = (sqlite3_column_type(stmt, 18) != SQLITE_NULL)
+            ? (time_t)sqlite3_column_int64(stmt, 18) : 0;
+        metadata->last_keyframe_time = (sqlite3_column_type(stmt, 19) != SQLITE_NULL)
+            ? (time_t)sqlite3_column_int64(stmt, 19) : 0;
+        metadata->first_pts = (sqlite3_column_type(stmt, 20) != SQLITE_NULL)
+            ? (int64_t)sqlite3_column_int64(stmt, 20) : INT64_MIN;
+        metadata->last_pts = (sqlite3_column_type(stmt, 21) != SQLITE_NULL)
+            ? (int64_t)sqlite3_column_int64(stmt, 21) : INT64_MIN;
+
         result = 0; // Success
     }
 
@@ -339,7 +443,8 @@ int get_recording_metadata_by_path(const char *file_path, recording_metadata_t *
 
     const char *sql = "SELECT id, stream_name, file_path, start_time, end_time, "
                       "size_bytes, width, height, fps, codec, is_complete, trigger_type, "
-                      "protected, retention_override_days, retention_tier, disk_pressure_eligible "
+                      "protected, retention_override_days, retention_tier, disk_pressure_eligible, "
+                      "container, duration_ms, first_keyframe_time, last_keyframe_time, first_pts, last_pts "
                       "FROM recordings WHERE file_path = ?;";
 
     rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
@@ -413,6 +518,23 @@ int get_recording_metadata_by_path(const char *file_path, recording_metadata_t *
             ? sqlite3_column_int(stmt, 14) : RETENTION_TIER_STANDARD;
         metadata->disk_pressure_eligible = (sqlite3_column_type(stmt, 15) != SQLITE_NULL)
             ? (sqlite3_column_int(stmt, 15) != 0) : true;
+
+        const char *container = (const char *)sqlite3_column_text(stmt, 16);
+        if (container) {
+            strncpy(metadata->container, container, sizeof(metadata->container) - 1);
+            metadata->container[sizeof(metadata->container) - 1] = '\0';
+        } else {
+            strncpy(metadata->container, "mp4", sizeof(metadata->container) - 1);
+        }
+        metadata->duration_ms = (uint64_t)sqlite3_column_int64(stmt, 17);
+        metadata->first_keyframe_time = (sqlite3_column_type(stmt, 18) != SQLITE_NULL)
+            ? (time_t)sqlite3_column_int64(stmt, 18) : 0;
+        metadata->last_keyframe_time = (sqlite3_column_type(stmt, 19) != SQLITE_NULL)
+            ? (time_t)sqlite3_column_int64(stmt, 19) : 0;
+        metadata->first_pts = (sqlite3_column_type(stmt, 20) != SQLITE_NULL)
+            ? (int64_t)sqlite3_column_int64(stmt, 20) : INT64_MIN;
+        metadata->last_pts = (sqlite3_column_type(stmt, 21) != SQLITE_NULL)
+            ? (int64_t)sqlite3_column_int64(stmt, 21) : INT64_MIN;
 
         result = 0; // Success
     }

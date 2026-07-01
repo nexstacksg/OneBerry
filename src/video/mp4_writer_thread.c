@@ -17,6 +17,7 @@
 #include <unistd.h>
 #include <time.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <signal.h>
 #include <pthread.h>
 #include <sys/stat.h>
@@ -39,11 +40,170 @@
 #include "storage/storage_manager_streams_cache.h"
 #include "telemetry/stream_metrics.h"
 
+#define ROTATION_LATE_WARN_MS 100
+
+static time_t align_segment_start(time_t timestamp, int segment_duration) {
+    if (segment_duration <= 0) {
+        return timestamp;
+    }
+
+    return timestamp - (timestamp % segment_duration);
+}
+
+static long long realtime_epoch_ms(void) {
+    struct timespec ts;
+    if (clock_gettime(CLOCK_REALTIME, &ts) != 0) {
+        return (long long)time(NULL) * 1000LL;
+    }
+
+    return ((long long)ts.tv_sec * 1000LL) + (ts.tv_nsec / 1000000LL);
+}
+
+static void format_utc_time(time_t timestamp, char *buffer, size_t buffer_size) {
+    if (!buffer || buffer_size == 0) {
+        return;
+    }
+
+    struct tm tm_buf;
+    const struct tm *tm_info = gmtime_r(&timestamp, &tm_buf);
+    if (!tm_info) {
+        snprintf(buffer, buffer_size, "%ld", (long)timestamp);
+        return;
+    }
+
+    strftime(buffer, buffer_size, "%Y-%m-%dT%H:%M:%SZ", tm_info);
+}
+
+static void build_segment_output_path(char *buffer, size_t buffer_size,
+                                      const char *output_dir, time_t timestamp,
+                                      int segment_count) {
+    if (!buffer || buffer_size == 0 || !output_dir) {
+        return;
+    }
+
+    char timestamp_str[32];
+    struct tm tm_buf;
+    const struct tm *tm_info = localtime_r(&timestamp, &tm_buf);
+    if (tm_info) {
+        strftime(timestamp_str, sizeof(timestamp_str), "%Y%m%d_%H%M%S", tm_info);
+    } else {
+        snprintf(timestamp_str, sizeof(timestamp_str), "%ld", (long)timestamp);
+    }
+
+    snprintf(buffer, buffer_size, "%s/recording_%s_%06d.mp4",
+             output_dir, timestamp_str, segment_count);
+}
+
+static void log_rotation_event(const char *stream_name,
+                               time_t scheduled_time,
+                               time_t actual_time,
+                               long long delay_ms,
+                               const char *reason) {
+    char scheduled_buf[32];
+    char actual_buf[32];
+    format_utc_time(scheduled_time, scheduled_buf, sizeof(scheduled_buf));
+    format_utc_time(actual_time, actual_buf, sizeof(actual_buf));
+
+    if (delay_ms > ROTATION_LATE_WARN_MS) {
+        log_error("recording.rotation_late stream=%s scheduled=%s actual=%s delay_ms=%lld reason=%s",
+                  stream_name ? stream_name : "unknown",
+                  scheduled_buf,
+                  actual_buf,
+                  delay_ms,
+                  reason ? reason : "unknown");
+    } else {
+        log_info("recording.rotation stream=%s scheduled=%s actual=%s delay_ms=%lld reason=%s",
+                 stream_name ? stream_name : "unknown",
+                 scheduled_buf,
+                 actual_buf,
+                 delay_ms,
+                 reason ? reason : "on_time");
+    }
+}
+
+static void log_missing_segment_slots(const char *stream_name,
+                                      time_t from_boundary,
+                                      time_t to_boundary,
+                                      int segment_duration,
+                                      const char *reason) {
+    if (segment_duration <= 0 || to_boundary <= from_boundary) {
+        return;
+    }
+
+    for (time_t slot = from_boundary; slot < to_boundary; slot += segment_duration) {
+        char slot_buf[32];
+        format_utc_time(slot, slot_buf, sizeof(slot_buf));
+        log_error("recording.segment_missing stream=%s expected_start=%s duration=%d reason=%s",
+                  stream_name ? stream_name : "unknown",
+                  slot_buf,
+                  segment_duration,
+                  reason ? reason : "recorder_missed_slot");
+    }
+}
+
+static void update_wallclock_schedule(mp4_writer_thread_t *thread_ctx,
+                                      const char *stream_name,
+                                      int segment_duration,
+                                      time_t now,
+                                      const char *reason) {
+    if (!thread_ctx || !thread_ctx->writer || segment_duration <= 0) {
+        return;
+    }
+
+    time_t slot_start = align_segment_start(now, segment_duration);
+    time_t slot_end = slot_start + segment_duration;
+
+    if (thread_ctx->scheduled_segment_end_time > 0 &&
+        slot_start > thread_ctx->scheduled_segment_end_time) {
+        log_missing_segment_slots(stream_name,
+                                  thread_ctx->scheduled_segment_end_time,
+                                  slot_start,
+                                  segment_duration,
+                                  reason);
+    }
+
+    thread_ctx->scheduled_segment_start_time = slot_start;
+    thread_ctx->scheduled_segment_end_time = slot_end;
+    thread_ctx->writer->last_rotation_time = slot_start;
+}
+
+static void discard_current_recording(mp4_writer_thread_t *thread_ctx,
+                                      const char *stream_name,
+                                      const char *reason) {
+    if (!thread_ctx || !thread_ctx->writer) {
+        return;
+    }
+
+    uint64_t recording_id = thread_ctx->writer->current_recording_id;
+    if (recording_id > 0) {
+        log_warn("Discarding incomplete recording metadata (ID: %llu) for stream %s: %s",
+                 (unsigned long long)recording_id,
+                 stream_name ? stream_name : "unknown",
+                 reason ? reason : "recording failed");
+        delete_recording_metadata(recording_id);
+        thread_ctx->writer->current_recording_id = 0;
+    }
+
+    if (thread_ctx->writer->output_path[0] != '\0') {
+        if (unlink(thread_ctx->writer->output_path) == 0) {
+            log_info("Removed incomplete recording file for stream %s: %s",
+                     stream_name ? stream_name : "unknown",
+                     thread_ctx->writer->output_path);
+        } else if (errno != ENOENT) {
+            log_warn("Failed to remove incomplete recording file for stream %s: %s (%s)",
+                     stream_name ? stream_name : "unknown",
+                     thread_ctx->writer->output_path,
+                     strerror(errno));
+        }
+    }
+}
+
 
 // Callback invoked by record_segment when the first keyframe is detected
-// and the segment officially begins. We create the DB metadata here so
-// start_time aligns with the actual playable start.
-static void on_segment_started_cb(void *user_ctx) {
+// and the segment officially begins. For normal rotations, use the planned
+// boundary time so adjacent DB rows remain continuous; for fresh starts and
+// reconnects, use the actual keyframe time.
+static void on_segment_started_cb(void *user_ctx, time_t keyframe_time, int64_t keyframe_pts) {
     mp4_writer_thread_t *thread_ctx = (mp4_writer_thread_t *)user_ctx;
     if (!thread_ctx || !thread_ctx->writer) return;
 
@@ -53,14 +213,23 @@ static void on_segment_started_cb(void *user_ctx) {
     const char *stream_name = thread_ctx->writer->stream_name[0] ? thread_ctx->writer->stream_name : "unknown";
 
     if (thread_ctx->writer->output_path[0] != '\0') {
+        time_t actual_keyframe_time = keyframe_time > 0 ? keyframe_time : time(NULL);
+        time_t start_time = thread_ctx->pending_segment_start_time > 0
+            ? thread_ctx->pending_segment_start_time
+            : actual_keyframe_time;
+
         recording_metadata_t metadata;
         memset(&metadata, 0, sizeof(recording_metadata_t));
         strncpy(metadata.stream_name, stream_name, sizeof(metadata.stream_name) - 1);
         strncpy(metadata.file_path, thread_ctx->writer->output_path, sizeof(metadata.file_path) - 1);
-        metadata.start_time = time(NULL); // Align to keyframe time
+        metadata.start_time = start_time;
         metadata.end_time = 0;
         metadata.size_bytes = 0;
         metadata.is_complete = false;
+        strncpy(metadata.container, "mp4", sizeof(metadata.container) - 1);
+        metadata.first_keyframe_time = actual_keyframe_time > 0 ? actual_keyframe_time : start_time;
+        metadata.first_pts = keyframe_pts;
+        metadata.last_pts = INT64_MIN;
         strncpy(metadata.trigger_type, thread_ctx->writer->trigger_type, sizeof(metadata.trigger_type) - 1);
 
         uint64_t recording_id = add_recording_metadata(&metadata);
@@ -70,7 +239,15 @@ static void on_segment_started_cb(void *user_ctx) {
             log_info("Added recording at segment start (ID: %llu, trigger_type: %s) for file: %s",
                      (unsigned long long)recording_id, metadata.trigger_type, thread_ctx->writer->output_path);
             thread_ctx->writer->current_recording_id = recording_id;
+            update_recording_archive_metadata(recording_id, "mp4",
+                                              metadata.first_keyframe_time,
+                                              0,
+                                              metadata.first_pts,
+                                              INT64_MIN);
         }
+
+        thread_ctx->pending_segment_start_time = 0;
+        thread_ctx->pending_segment_boundary_time = 0;
     }
 }
 
@@ -106,6 +283,10 @@ static void *mp4_writer_rtsp_thread(void *arg) {
     thread_ctx->segment_info.has_audio = false;
     thread_ctx->segment_info.last_frame_was_key = false;
     thread_ctx->segment_info.pending_video_keyframe = NULL;
+    thread_ctx->segment_info.first_keyframe_wall_time = 0;
+    thread_ctx->segment_info.last_keyframe_wall_time = 0;
+    thread_ctx->segment_info.first_keyframe_pts = INT64_MIN;
+    thread_ctx->segment_info.last_keyframe_pts = INT64_MIN;
     memset(thread_ctx->segment_info.stream_name, 0, sizeof(thread_ctx->segment_info.stream_name));
     if (thread_ctx->writer && thread_ctx->writer->stream_name[0] != '\0') {
         strncpy(thread_ctx->segment_info.stream_name, thread_ctx->writer->stream_name,
@@ -117,6 +298,11 @@ static void *mp4_writer_rtsp_thread(void *arg) {
     // Initialize self-management fields
     thread_ctx->retry_count = 0;
     thread_ctx->last_retry_time = 0;
+    thread_ctx->pending_segment_start_time = 0;
+    thread_ctx->pending_segment_boundary_time = 0;
+    thread_ctx->scheduled_segment_start_time = 0;
+    thread_ctx->scheduled_segment_end_time = 0;
+    thread_ctx->last_integrity_check_time = 0;
 
     // Make a local copy of the stream name for thread safety
     char stream_name[MAX_STREAM_NAME];
@@ -179,6 +365,8 @@ static void *mp4_writer_rtsp_thread(void *arg) {
             // Re-detect video params after reconnect — the stream resolution
             // may have changed (e.g., camera firmware update, stream switch).
             thread_ctx->video_params_detected = false;
+            thread_ctx->pending_segment_start_time = 0;
+            thread_ctx->pending_segment_boundary_time = 0;
 
             // Wait a moment for the upstream to be ready (go2rtc may still be initializing streams)
             // Check for shutdown every 500ms during the wait
@@ -263,29 +451,54 @@ static void *mp4_writer_rtsp_thread(void *arg) {
         // Check if it's time to create a new segment based on segment duration
         // Force segment rotation every segment_duration seconds
         if (segment_duration > 0) {
-            time_t elapsed_time = current_time - thread_ctx->writer->last_rotation_time;
-            if (elapsed_time >= segment_duration) {
-                log_info("Time to create new segment for stream %s (elapsed time: %ld seconds, segment duration: %d seconds)",
-                         stream_name, (long)elapsed_time, segment_duration);
+            if (thread_ctx->scheduled_segment_start_time == 0 ||
+                thread_ctx->scheduled_segment_end_time == 0) {
+                update_wallclock_schedule(thread_ctx, stream_name, segment_duration,
+                                          current_time, "initial_schedule");
+                build_segment_output_path(thread_ctx->writer->output_path,
+                                          MAX_PATH_LENGTH,
+                                          thread_ctx->writer->output_dir,
+                                          thread_ctx->scheduled_segment_start_time,
+                                          thread_ctx->segment_count + 1);
+                thread_ctx->pending_segment_start_time = thread_ctx->scheduled_segment_start_time;
+            }
 
-                // Create timestamp for new MP4 filename
-                char timestamp_str[32];
-                struct tm tm_buf;
-                const struct tm *tm_info = localtime_r(&current_time, &tm_buf);
-                strftime(timestamp_str, sizeof(timestamp_str), "%Y%m%d_%H%M%S", tm_info);
+            if (current_time >= thread_ctx->scheduled_segment_end_time) {
+                time_t scheduled_boundary = thread_ctx->scheduled_segment_end_time;
+                time_t next_slot_start = align_segment_start(current_time, segment_duration);
+                if (next_slot_start < scheduled_boundary) {
+                    next_slot_start = scheduled_boundary;
+                }
+                long long actual_ms = realtime_epoch_ms();
+                long long scheduled_ms = ((long long)scheduled_boundary) * 1000LL;
+                long long delay_ms = actual_ms - scheduled_ms;
+                if (delay_ms < 0) {
+                    delay_ms = 0;
+                }
+
+                log_rotation_event(stream_name,
+                                   scheduled_boundary,
+                                   current_time,
+                                   delay_ms,
+                                   "wall_clock_boundary");
 
                 // Create new output path
                 char new_path[MAX_PATH_LENGTH];
-                snprintf(new_path, MAX_PATH_LENGTH, "%s/recording_%s.mp4",
-                         thread_ctx->writer->output_dir, timestamp_str);
+                build_segment_output_path(new_path, sizeof(new_path),
+                                          thread_ctx->writer->output_dir,
+                                          next_slot_start,
+                                          thread_ctx->segment_count + 1);
 
                 // Get the current output path before closing
                 char current_path[MAX_PATH_LENGTH];
                 strncpy(current_path, thread_ctx->writer->output_path, MAX_PATH_LENGTH - 1);
                 current_path[MAX_PATH_LENGTH - 1] = '\0';
 
-                // Defer creation of DB metadata for the new file until first keyframe via callback
-                // so that start_time aligns to a playable keyframe.
+                // Defer creation of DB metadata for the new file until first keyframe
+                // via callback, but remember the planned rotation boundary so normal
+                // adjacent segments do not show artificial gaps in the timeline.
+                thread_ctx->pending_segment_start_time = next_slot_start;
+                thread_ctx->pending_segment_boundary_time = scheduled_boundary;
 
                 // Mark the previous recording as complete
                 if (thread_ctx->writer->current_recording_id > 0) {
@@ -301,8 +514,14 @@ static void *mp4_writer_rtsp_thread(void *arg) {
                         // the MP4 file with avformat_open_input + avformat_find_stream_info.
                         // The probing was taking ~3-4 seconds of blocking I/O between
                         // segments, causing consistent gaps in continuous recording.
-                        time_t end_time = current_time;
+                        time_t end_time = thread_ctx->pending_segment_boundary_time;
 
+                        update_recording_archive_metadata(thread_ctx->writer->current_recording_id,
+                                                          "mp4",
+                                                          0,
+                                                          thread_ctx->segment_info.last_keyframe_wall_time,
+                                                          INT64_MIN,
+                                                          thread_ctx->segment_info.last_keyframe_pts);
                         // Mark the recording as complete with the correct file size and end time
                         update_recording_metadata(thread_ctx->writer->current_recording_id, end_time, size_bytes, true);
                         log_info("Marked previous recording (ID: %llu) as complete for stream %s (size: %llu bytes)",
@@ -314,7 +533,16 @@ static void *mp4_writer_rtsp_thread(void *arg) {
                                 current_path, strerror(errno));
 
                         // Still mark the recording as complete, but with size 0
-                        update_recording_metadata(thread_ctx->writer->current_recording_id, current_time, 0, true);
+                        update_recording_archive_metadata(thread_ctx->writer->current_recording_id,
+                                                          "mp4",
+                                                          0,
+                                                          thread_ctx->segment_info.last_keyframe_wall_time,
+                                                          INT64_MIN,
+                                                          thread_ctx->segment_info.last_keyframe_pts);
+                        update_recording_metadata(thread_ctx->writer->current_recording_id,
+                                                  thread_ctx->pending_segment_boundary_time,
+                                                  0,
+                                                  true);
                         log_info("Marked previous recording (ID: %llu) as complete for stream %s (size unknown)",
                                 (unsigned long long)thread_ctx->writer->current_recording_id, stream_name);
                         update_stream_storage_cache_add_recording(stream_name, 0);
@@ -330,8 +558,8 @@ static void *mp4_writer_rtsp_thread(void *arg) {
 
 
 
-                // Update rotation time
-                thread_ctx->writer->last_rotation_time = current_time;
+                update_wallclock_schedule(thread_ctx, stream_name, segment_duration,
+                                          current_time, "normal_rotation");
             }
         }
 
@@ -401,8 +629,17 @@ static void *mp4_writer_rtsp_thread(void *arg) {
         // can interrupt blocking calls when this specific thread needs to be stopped
         // (e.g., during dead recording recovery), not just during global shutdown.
         time_t segment_start = time(NULL);
+        int seconds_until_boundary = segment_duration;
+        if (segment_duration > 0 && thread_ctx->scheduled_segment_end_time > 0) {
+            time_t now_before_record = time(NULL);
+            seconds_until_boundary = (int)(thread_ctx->scheduled_segment_end_time - now_before_record);
+            if (seconds_until_boundary <= 0) {
+                seconds_until_boundary = 1;
+            }
+        }
+
         ret = record_segment(thread_ctx->rtsp_url, thread_ctx->writer->output_path,
-                           segment_duration, thread_ctx->writer->has_audio,
+                           seconds_until_boundary, thread_ctx->writer->has_audio,
                            &thread_ctx->input_ctx, &thread_ctx->segment_info,
                            on_segment_started_cb, thread_ctx,
                            &thread_ctx->shutdown_requested);
@@ -425,6 +662,8 @@ static void *mp4_writer_rtsp_thread(void *arg) {
         if (ret < 0) {
             log_error("Failed to record segment for stream %s (error: %d), implementing retry strategy...",
                      stream_name, ret);
+
+            discard_current_recording(thread_ctx, stream_name, "segment recording failed before completion");
 
             // Tiered backoff: give the stream progressively more time to heal.
             // Exponential for the first few retries (1 s → 16 s), then hold at
@@ -454,6 +693,13 @@ static void *mp4_writer_rtsp_thread(void *arg) {
             // backoff ensures we don't spin.
             if (thread_ctx->writer) {
                 thread_ctx->writer->last_packet_time = time(NULL);
+            }
+
+            thread_ctx->pending_segment_start_time = 0;
+            thread_ctx->pending_segment_boundary_time = 0;
+            if (segment_duration > 0) {
+                update_wallclock_schedule(thread_ctx, stream_name, segment_duration,
+                                          time(NULL), "recording_failure_retry");
             }
 
             // Input context is always NULL after a record_segment failure — it is
@@ -492,11 +738,11 @@ static void *mp4_writer_rtsp_thread(void *arg) {
                 struct tm retry_tm_buf;
                 const struct tm *retry_tm = localtime_r(&retry_ts, &retry_tm_buf);
                 if (retry_tm) {
-                    char retry_ts_str[32];
-                    strftime(retry_ts_str, sizeof(retry_ts_str), "%Y%m%d_%H%M%S", retry_tm);
-                    snprintf(thread_ctx->writer->output_path, MAX_PATH_LENGTH,
-                             "%s/recording_%s.mp4",
-                             thread_ctx->writer->output_dir, retry_ts_str);
+                    build_segment_output_path(thread_ctx->writer->output_path,
+                                              MAX_PATH_LENGTH,
+                                              thread_ctx->writer->output_dir,
+                                              retry_ts,
+                                              thread_ctx->segment_count + thread_ctx->retry_count + 1);
                     log_debug("Updated output path for retry attempt: %s",
                               thread_ctx->writer->output_path);
                 }
@@ -575,32 +821,9 @@ static void *mp4_writer_rtsp_thread(void *arg) {
         // Update the last packet time for activity tracking
         thread_ctx->writer->last_packet_time = time(NULL);
 
-        // Update the recording metadata with the current file size
-        if (thread_ctx->writer->current_recording_id > 0) {
-            struct stat st;
-            if (stat(thread_ctx->writer->output_path, &st) == 0) {
-                uint64_t size_bytes = st.st_size;
-                // Update size but don't mark as complete yet
-                update_recording_metadata(thread_ctx->writer->current_recording_id, 0, size_bytes, false);
-                log_debug("Updated recording metadata for ID: %llu, size: %llu bytes",
-                        (unsigned long long)thread_ctx->writer->current_recording_id,
-                        (unsigned long long)size_bytes);
-            }
-        }
-
-        // BUGFIX (#315): Guarantee a new segment is created on the next loop
-        // iteration, even when record_segment exits up to 1 second early (the
-        // "within 1 second of duration limit" optimisation in mp4_segment_recorder.c
-        // sets waiting_for_final_keyframe at elapsed >= duration-1).  Without this,
-        // the wall-clock elapsed_time check at the top of the loop sees
-        // (segment_duration - 1) < segment_duration and skips rotation, so
-        // record_segment is called again with the *same* output path, truncating
-        // and overwriting the just-completed recording.
-        //
-        // Setting last_rotation_time to exactly segment_duration seconds in the
-        // past ensures elapsed_time >= segment_duration on the very next check.
-        if (thread_ctx->writer && segment_duration > 0) {
-            thread_ctx->writer->last_rotation_time = time(NULL) - segment_duration;
+        if (thread_ctx->writer && segment_duration > 0 &&
+            time(NULL) >= thread_ctx->scheduled_segment_end_time) {
+            thread_ctx->writer->last_rotation_time = thread_ctx->scheduled_segment_start_time;
         }
     }
 

@@ -80,6 +80,7 @@ function stripHours(hours) {
 const MIN_FULLSCREEN_TIMELINE_VIEW_HOURS = 1 / 3600;
 const PLAYBACK_SPEEDS = [0.25, 0.5, 1, 1.5, 2, 4];
 const SEEK_SETTLE_TOLERANCE_SECONDS = 1.5;
+const CONTINUOUS_SEGMENT_GAP_SECONDS = 10;
 
 function formatDurationLabel(seconds) {
   if (!Number.isFinite(seconds) || seconds <= 0) {
@@ -303,7 +304,27 @@ export function FullscreenTimelineOverlay({
       return [];
     }
 
-    return segments
+    const sorted = [...segments].sort((a, b) => Number(a.start_timestamp) - Number(b.start_timestamp));
+    const merged = [];
+
+    for (const segment of sorted) {
+      const start = Number(segment.start_timestamp);
+      const end = Number(segment.end_timestamp);
+      if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
+        continue;
+      }
+
+      const previous = merged[merged.length - 1];
+      if (previous && start - Number(previous.end_timestamp) <= CONTINUOUS_SEGMENT_GAP_SECONDS) {
+        previous.end_timestamp = Math.max(Number(previous.end_timestamp), end);
+        previous.has_detection = Boolean(previous.has_detection || segment.has_detection);
+        continue;
+      }
+
+      merged.push({ ...segment });
+    }
+
+    return merged
       .map((segment) => {
         const range = getClippedSegmentHourRange(segment, selectedDate);
         if (!range) return null;
@@ -860,7 +881,7 @@ export function FullscreenTimelineOverlay({
                   renderTrackContent={() => (
                     <div
                       ref={trackRef}
-                      className={`relative cursor-default overflow-hidden rounded-xl border border-white/10 bg-gradient-to-b from-[#121417] via-[#0d0f12] to-[#07080a] shadow-inner ${isDocked ? 'h-6' : 'h-11'}`}
+                      className={`relative cursor-pointer overflow-visible rounded-xl border border-white/10 bg-gradient-to-b from-[#121417] via-[#0d0f12] to-[#07080a] shadow-inner ${isDocked ? 'h-6' : 'h-11'}`}
                       onPointerDown={handleTrackPointerDown}
                       onPointerMove={handleTrackPointerMove}
                       onPointerUp={endTrackScrub}
@@ -880,8 +901,14 @@ export function FullscreenTimelineOverlay({
                       />
 
                       {visibleSegments.map((segment, index) => {
-                        const left = ((segment.startHour - startHour) / visibleRange) * 100;
-                        const width = Math.max(((segment.endHour - segment.startHour) / visibleRange) * 100, 0.12);
+                        const visibleStart = Math.max(segment.startHour, startHour);
+                        const visibleEnd = Math.min(segment.endHour, endHour);
+                        if (visibleEnd <= startHour || visibleStart >= endHour) {
+                          return null;
+                        }
+
+                        const left = ((visibleStart - startHour) / visibleRange) * 100;
+                        const width = Math.max(((visibleEnd - visibleStart) / visibleRange) * 100, 0.12);
 
                         return (
                           <div
@@ -909,7 +936,7 @@ export function FullscreenTimelineOverlay({
                           }}
                         >
                           <div className={isDocked ? 'mx-auto h-2.5 w-[2px] rounded-full bg-amber-400 shadow-[0_0_10px_rgba(251,191,36,0.75)]' : 'mx-auto h-4 w-[2px] rounded-full bg-amber-400 shadow-[0_0_10px_rgba(251,191,36,0.75)]'} />
-                          <div className={`mt-0.5 -translate-x-1/2 rounded-sm border border-amber-300/30 bg-amber-500/90 px-1 py-0.5 font-semibold tracking-[0.12em] text-black shadow-lg ${isDocked ? 'text-[7px]' : 'text-[9px]'}`}>
+                          <div className={`mt-0.5 rounded-sm border border-amber-300/30 bg-amber-500/90 px-1 py-0.5 font-semibold tracking-[0.12em] text-black shadow-lg ${isDocked ? 'text-[7px]' : 'text-[9px]'}`}>
                             {formatClockLabel(activeCursorTimestamp)}
                           </div>
                         </div>

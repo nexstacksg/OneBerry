@@ -288,7 +288,6 @@ export function TimelineCursor() {
         <div
           style={{
             marginTop: '2px',
-            transform: 'translateX(-50%)',
             borderRadius: '3px',
             border: '1px solid rgba(253, 224, 71, 0.3)',
             background: 'rgba(245, 158, 11, 0.92)',

@@ -635,6 +635,23 @@ static const char migration_0041_up[] =
 static const char migration_0041_down[] =
     "SELECT 1;";
 
+static const char migration_0042_up[] =
+    "ALTER TABLE recordings ADD COLUMN container TEXT DEFAULT 'mp4';\n"
+    "ALTER TABLE recordings ADD COLUMN duration_ms INTEGER DEFAULT 0;\n"
+    "ALTER TABLE recordings ADD COLUMN first_keyframe_time INTEGER DEFAULT NULL;\n"
+    "ALTER TABLE recordings ADD COLUMN last_keyframe_time INTEGER DEFAULT NULL;\n"
+    "ALTER TABLE recordings ADD COLUMN first_pts INTEGER DEFAULT NULL;\n"
+    "ALTER TABLE recordings ADD COLUMN last_pts INTEGER DEFAULT NULL;\n"
+    "CREATE INDEX IF NOT EXISTS idx_recordings_stream_complete_time\n"
+    "ON recordings(stream_name, is_complete, start_time, end_time);\n"
+    "CREATE INDEX IF NOT EXISTS idx_recordings_cleanup_complete_time\n"
+    "ON recordings(is_complete, start_time);";
+
+static const char migration_0042_down[] =
+    "DROP INDEX IF EXISTS idx_recordings_cleanup_complete_time;\n"
+    "DROP INDEX IF EXISTS idx_recordings_stream_complete_time;\n"
+    "SELECT 1;";
+
 static const migration_t embedded_migrations_data[] = {
     {
         .version = "0001",
@@ -923,8 +940,15 @@ static const migration_t embedded_migrations_data[] = {
         .sql_down = migration_0041_down,
         .is_embedded = true
     },
+    {
+        .version = "0042",
+        .description = "add_archive_segment_metadata",
+        .sql_up = migration_0042_up,
+        .sql_down = migration_0042_down,
+        .is_embedded = true
+    },
 };
 
-#define EMBEDDED_MIGRATIONS_COUNT 41
+#define EMBEDDED_MIGRATIONS_COUNT 42
 
 #endif /* DB_EMBEDDED_MIGRATIONS_H */

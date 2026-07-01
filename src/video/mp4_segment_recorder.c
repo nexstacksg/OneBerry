@@ -11,6 +11,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <string.h>
 #include <unistd.h>
 #include <time.h>
@@ -57,13 +58,10 @@
 // Timeout for probing video dimensions from the bitstream, in microseconds.
 #define DIMENSION_PROBE_TIMEOUT_US 60000000LL  // 60 seconds
 
-// Timeout thresholds (in seconds) for waiting on final keyframes.
-// SHUTDOWN_KEYFRAME_WAIT_TIMEOUT_S: how long to wait after shutdown before
-// ending without a keyframe.
-// KEYFRAME_WAIT_TIMEOUT_S: hard cap on how long to wait for a keyframe in
-// normal operation.
+// Timeout threshold (in seconds) for waiting on final keyframes during shutdown.
+// Normal segment rotation must wait for the next keyframe so the boundary frame
+// can be carried into the next segment and recording remains continuous.
 #define SHUTDOWN_KEYFRAME_WAIT_TIMEOUT_S 1
-#define KEYFRAME_WAIT_TIMEOUT_S          5
 
 // Small fixed offset used to maintain timestamp continuity between segments.
 // Expressed in stream time_base units; currently set to 1 (minimum positive
@@ -867,6 +865,9 @@ int record_segment(const char *rtsp_url, const char *output_file, int duration, 
     bool waiting_for_final_keyframe = false;
     // Flag to track if shutdown was detected
     bool shutdown_detected = false;
+    // If the RTSP/go2rtc input ends before we intentionally reached the
+    // segment boundary, this is a source failure rather than a valid segment.
+    bool premature_stream_end = false;
 
     // CRITICAL FIX: Ensure input_ctx is valid before entering the main loop
     if (!input_ctx) {
@@ -924,6 +925,11 @@ int record_segment(const char *rtsp_url, const char *output_file, int duration, 
 		if (ret < 0) {
 			if (ret == AVERROR_EOF) {
 				log_info("End of stream reached for %s", output_file);
+                if (!waiting_for_final_keyframe && !shutdown_detected) {
+                    premature_stream_end = true;
+                    log_warn("Stream ended before segment boundary for %s; treating segment as failed",
+                             output_file);
+                }
 				break;
 			} else if (ret == AVERROR_EXIT) {
 				// AVERROR_EXIT means the interrupt callback returned 1.
@@ -931,12 +937,20 @@ int record_segment(const char *rtsp_url, const char *output_file, int duration, 
 				// dead-recording cleanup) or during global shutdown.
 				log_warn("RTSP read interrupted (AVERROR_EXIT) for %s — "
 				         "recording thread is being stopped", output_file);
+                if (!waiting_for_final_keyframe && !shutdown_detected) {
+                    premature_stream_end = true;
+                }
 				break;
 			} else if (ret != AVERROR(EAGAIN)) {
 				char err_buf[AV_ERROR_MAX_STRING_SIZE] = {0};
 				av_strerror(ret, err_buf, sizeof(err_buf));
 				log_error("Error reading frame for %s: %d (%s)",
 				          output_file, ret, err_buf);
+                if (!waiting_for_final_keyframe && !shutdown_detected) {
+                    premature_stream_end = true;
+                    log_warn("Read failed before segment boundary for %s; treating segment as failed",
+                             output_file);
+                }
 				break;
 			}
 			// EAGAIN means try again, so we continue
@@ -969,7 +983,15 @@ int record_segment(const char *rtsp_url, const char *output_file, int duration, 
 
                     // Notify caller that segment has officially started (aligned to keyframe)
                     if (!started_cb_called && started_cb) {
-                        started_cb(cb_ctx);
+                        int64_t keyframe_pts = pkt->pts != AV_NOPTS_VALUE
+                            ? pkt->pts
+                            : (pkt->dts != AV_NOPTS_VALUE ? pkt->dts : INT64_MIN);
+                        time_t keyframe_time = time(NULL);
+                        segment_info_ptr->first_keyframe_wall_time = keyframe_time;
+                        segment_info_ptr->first_keyframe_pts = keyframe_pts;
+                        segment_info_ptr->last_keyframe_wall_time = keyframe_time;
+                        segment_info_ptr->last_keyframe_pts = keyframe_pts;
+                        started_cb(cb_ctx, keyframe_time, keyframe_pts);
                         started_cb_called = true;
                     }
 
@@ -994,52 +1016,47 @@ int record_segment(const char *rtsp_url, const char *output_file, int duration, 
 
                 // Calculate how long we've been waiting for a key frame
                 int64_t wait_time = (av_gettime() - waiting_start_time) / 1000000;
-                bool keyframe_timeout_reached = (wait_time >= KEYFRAME_WAIT_TIMEOUT_S);
-
-				// Prefer ending on a keyframe to avoid gaps in the next segment.
-				// Allow ending without a keyframe on shutdown OR after a 5-second
-				// hard timeout so cameras with long keyframe intervals (e.g. low-FPS
-				// enclosure cameras) cannot push segments past their configured length.
-				if (is_keyframe ||
-				    (shutdown_detected && wait_time > SHUTDOWN_KEYFRAME_WAIT_TIMEOUT_S) ||
-				    keyframe_timeout_reached) {
+                // Prefer ending on a keyframe to avoid gaps in the next segment.
+                // In normal operation we keep waiting so the boundary keyframe can be
+                // carried into the next segment. Cutting on a non-keyframe creates
+                // a real recording gap because the next MP4 must skip packets until
+                // the next keyframe arrives.
+                if (is_keyframe ||
+                    (shutdown_detected && wait_time > SHUTDOWN_KEYFRAME_WAIT_TIMEOUT_S)) {
                     // The nested check below determines whether this *specific final* frame is a
                     // keyframe. This influences boundary handling: only a final keyframe triggers
-                    // overlap mode (storing the frame for the next segment). A timeout or shutdown
-                    // exit falls through to the else branch regardless of is_keyframe's value above.
+                    // overlap mode (storing the frame for the next segment). A shutdown
+                    // exit can fall through to the else branch regardless of is_keyframe's value.
                     if (is_keyframe) {
                         log_info("Found final key frame, ending recording");
-                        // Set flag to indicate the last frame was a key frame
+                        // Route this boundary keyframe to the next segment only.
                         segment_info_ptr->last_frame_was_key = true;
-						log_debug("Last frame was a key frame, next segment can start immediately (overlap mode)");
+                        log_debug("Boundary keyframe will start the next segment without duplication");
 
-						// Overlap mode: store a copy of this boundary keyframe so the next segment
-						// can begin with it immediately (duplicate keyframe is OK; gaps are not).
-						if (!segment_info_ptr->pending_video_keyframe) {
-							segment_info_ptr->pending_video_keyframe = av_packet_alloc();
-						}
-						if (segment_info_ptr->pending_video_keyframe) {
-							av_packet_unref(segment_info_ptr->pending_video_keyframe);
-							int ref_ret = av_packet_ref(segment_info_ptr->pending_video_keyframe, pkt);
-							if (ref_ret < 0) {
-								log_warn("Failed to store pending keyframe for next segment (ret=%d)", ref_ret);
-								av_packet_free(&segment_info_ptr->pending_video_keyframe);
-								segment_info_ptr->pending_video_keyframe = NULL;
-							} else {
-								log_debug("Stored boundary keyframe for next segment start (overlap mode)");
-							}
-						} else {
-							log_warn("Failed to allocate pending keyframe packet for overlap mode");
-						}
-                    } else {
-	                        if (keyframe_timeout_reached && !shutdown_detected) {
-                            log_warn("Keyframe wait timeout after %lld s — camera has long keyframe interval? "
-                                     "Cutting segment without final keyframe to enforce configured segment length.",
-                                     (long long)wait_time);
-                        } else {
-                            log_info("Shutdown: waited %lld seconds for key frame, ending recording with non-key frame",
-                                     (long long)wait_time);
+                        // Store a copy of this boundary keyframe so the next segment
+                        // can begin with it immediately without writing it to this segment.
+                        if (!segment_info_ptr->pending_video_keyframe) {
+                            segment_info_ptr->pending_video_keyframe = av_packet_alloc();
                         }
+                        if (segment_info_ptr->pending_video_keyframe) {
+                            av_packet_unref(segment_info_ptr->pending_video_keyframe);
+                            int ref_ret = av_packet_ref(segment_info_ptr->pending_video_keyframe, pkt);
+                            if (ref_ret < 0) {
+                                log_warn("Failed to store pending keyframe for next segment (ret=%d)", ref_ret);
+                                av_packet_free(&segment_info_ptr->pending_video_keyframe);
+                                segment_info_ptr->pending_video_keyframe = NULL;
+                            } else {
+                                log_debug("Stored boundary keyframe for next segment start (overlap mode)");
+                            }
+                        } else {
+                            log_warn("Failed to allocate pending keyframe packet for overlap mode");
+                        }
+
+                        av_packet_unref(pkt);
+                        break;
+                    } else {
+                        log_info("Shutdown: waited %lld seconds for key frame, ending recording with non-key frame",
+                                 (long long)wait_time);
                         // Clear flag since the last frame was not a key frame
                         segment_info_ptr->last_frame_was_key = false;
                         log_debug("Last frame was NOT a key frame, next segment will wait for a keyframe");
@@ -1159,6 +1176,13 @@ int record_segment(const char *rtsp_url, const char *output_file, int duration, 
                     av_packet_unref(pkt);
                     break;
                 }
+            }
+
+            if (is_keyframe) {
+                segment_info_ptr->last_keyframe_wall_time = time(NULL);
+                segment_info_ptr->last_keyframe_pts = pkt->pts != AV_NOPTS_VALUE
+                    ? pkt->pts
+                    : (pkt->dts != AV_NOPTS_VALUE ? pkt->dts : INT64_MIN);
             }
 
             // Initialize first DTS if not set
@@ -1553,6 +1577,14 @@ int record_segment(const char *rtsp_url, const char *output_file, int duration, 
         // Ensure the caller's pointer is also NULL so it opens a fresh connection.
         // input_ctx_ptr was validated at function entry.
         *input_ctx_ptr = NULL;
+        ret = -1;
+        goto cleanup;
+    }
+
+    if (premature_stream_end) {
+        log_warn("Segment ended after only %d video packets before the configured boundary; "
+                 "discarding partial segment so it is not marked complete",
+                 video_packet_count);
         ret = -1;
         goto cleanup;
     }
