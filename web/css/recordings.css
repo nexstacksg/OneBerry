@@ -54,17 +54,170 @@
     @apply bg-muted;
 }
 
-/* Ensure tables don't get too compressed on small screens but stay within container */
-@media (max-width: 576px) {
-    #recordings-table {
-        @apply min-w-[500px] max-w-full;
+@media (max-width: 768px) {
+    #recordings-page.page {
+        @apply px-2;
     }
-    
+
+    #recordings-page .page-header {
+        @apply flex-col items-stretch gap-3 p-3;
+    }
+
+    #recordings-page [role="tablist"] .flex {
+        @apply overflow-x-auto;
+        scrollbar-width: none;
+    }
+
+    #recordings-page [role="tablist"] .flex::-webkit-scrollbar {
+        display: none;
+    }
+
+    .recordings-layout {
+        @apply gap-3;
+    }
+
+    .recordings-content {
+        min-width: 0;
+    }
+
+    .filters-sidebar {
+        @apply rounded-md shadow-sm;
+        max-height: min(68dvh, 34rem);
+        overflow-y: auto;
+        overscroll-behavior: contain;
+    }
+
     .recordings-container {
-        @apply max-w-full;
+        @apply rounded-md shadow-sm;
     }
-    
-    .overflow-x-auto {
-        @apply max-w-full;
+
+    .recordings-container > .overflow-x-auto:first-child {
+        overflow-x: visible;
+    }
+
+    .recordings-container > .overflow-x-auto:first-child > div {
+        @apply min-w-0 flex-wrap items-start gap-2 px-3 py-3;
+    }
+
+    .recordings-container .selected-count {
+        @apply w-full text-xs;
+    }
+
+    .recordings-container .btn-danger,
+    .recordings-container .btn-primary,
+    .recordings-container .btn-secondary {
+        min-height: 38px;
+        white-space: nowrap;
+    }
+}
+
+@media (max-width: 640px) {
+    .filters-sidebar .filter-tag {
+        @apply text-xs px-2 py-1;
+    }
+
+    .recordings-container > .overflow-x-auto:last-child {
+        overflow-x: visible;
+    }
+
+    #recordings-table {
+        display: block;
+        min-width: 0;
+    }
+
+    #recordings-table thead {
+        display: none;
+    }
+
+    #recordings-table tbody {
+        display: grid;
+        gap: 0.75rem;
+        padding: 0.75rem;
+        background: hsl(var(--muted) / 0.35);
+    }
+
+    #recordings-table tr {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        gap: 0;
+        border: 1px solid hsl(var(--border));
+        border-radius: 0.5rem;
+        background: hsl(var(--card));
+        box-shadow: 0 8px 18px -18px rgba(15, 23, 42, 0.7);
+        overflow: hidden;
+    }
+
+    #recordings-table tr:hover {
+        background: hsl(var(--card));
+    }
+
+    #recordings-table td {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+        width: 100%;
+        min-width: 0;
+        padding: 0.625rem 0.75rem !important;
+        border-bottom: 1px solid hsl(var(--border) / 0.65);
+        white-space: normal !important;
+        text-align: right;
+    }
+
+    #recordings-table td:last-child {
+        border-bottom: 0;
+    }
+
+    #recordings-table td::before {
+        content: attr(data-label);
+        flex: 0 0 42%;
+        color: hsl(var(--muted-foreground));
+        font-size: 0.72rem;
+        font-weight: 600;
+        letter-spacing: 0.02em;
+        text-align: left;
+        text-transform: uppercase;
+    }
+
+    #recordings-table .recording-select-cell {
+        justify-content: flex-start;
+        background: hsl(var(--muted) / 0.45);
+    }
+
+    #recordings-table .recording-select-cell::before {
+        content: "Select";
+    }
+
+    #recordings-table .recording-actions-cell {
+        align-items: flex-start;
+    }
+
+    #recordings-table .recording-actions-cell > div {
+        justify-content: flex-end;
+        flex-wrap: wrap;
+        gap: 0.375rem;
+    }
+
+    #recordings-table .recording-actions-cell button,
+    #recordings-table .recording-actions-cell a {
+        width: 2.25rem;
+        height: 2.25rem;
+        align-items: center;
+        justify-content: center;
+    }
+
+    #recordings-table .recording-tags-cell > div,
+    #recordings-table .recording-detections-cell > div {
+        justify-content: flex-end;
+        max-width: 58%;
+    }
+
+    #recordings-table .recording-empty-cell {
+        display: block;
+        text-align: center;
+    }
+
+    #recordings-table .recording-empty-cell::before {
+        content: none;
     }
 }

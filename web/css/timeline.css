@@ -198,6 +198,7 @@
 @media (max-width: 768px) {
     .timeline-container {
         height: 80px;
+        margin-bottom: 12px;
     }
     
     .timeline-ruler {
@@ -210,6 +211,13 @@
     
     .timeline-time-display {
         font-size: 16px;
+        min-width: 0;
+        overflow-wrap: anywhere;
+    }
+
+    .timeline-controls {
+        flex-wrap: wrap;
+        gap: 8px;
     }
     
     .timeline-control-btn {
@@ -220,5 +228,39 @@
     .timeline-zoom-btn {
         width: 26px;
         height: 26px;
+    }
+}
+
+@media (max-width: 480px) {
+    .timeline-container {
+        height: 72px;
+        border-radius: 6px;
+    }
+
+    .timeline-ruler {
+        height: 22px;
+    }
+
+    .timeline-label {
+        font-size: 9px;
+        max-width: 44px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .timeline-segments {
+        height: 50px;
+    }
+
+    .timeline-controls {
+        align-items: stretch;
+    }
+
+    .timeline-time-display {
+        order: 3;
+        flex: 1 1 100%;
+        text-align: center;
+        font-size: 14px;
     }
 }

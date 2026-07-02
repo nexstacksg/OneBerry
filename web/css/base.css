@@ -128,6 +128,19 @@
 
 /* Base Styles */
 @layer base {
+  html,
+  body {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: hidden;
+  }
+
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+
   body {
     font-family: 'Comfortaa', 'Roboto', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
     overflow-y: scroll;

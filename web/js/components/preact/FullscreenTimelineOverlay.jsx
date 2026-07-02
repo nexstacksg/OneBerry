@@ -702,7 +702,7 @@ export function FullscreenTimelineOverlay({
   return (
     <div
       ref={rootRef}
-      className={`cursor-default text-white ${isDocked ? 'w-full' : 'border-t border-white/10 bg-[#05070d]'}`}
+      className={`fullscreen-timeline-overlay cursor-default text-white ${isDocked ? 'is-docked w-full' : 'border-t border-white/10 bg-[#05070d]'}`}
       style={{
         pointerEvents: 'auto',
         position: isDocked ? 'relative' : 'fixed',
@@ -730,12 +730,12 @@ export function FullscreenTimelineOverlay({
       </div>
 
       {isExpanded && (
-        <div className={isDocked ? 'px-2 pb-1 pt-1 sm:px-3' : 'px-2 pb-2 pt-2 sm:px-3 sm:pb-3'}>
+        <div className={`fullscreen-timeline-body ${isDocked ? 'px-2 pb-1 pt-1 sm:px-3' : 'px-2 pb-2 pt-2 sm:px-3 sm:pb-3'}`}>
           <div className={isDocked
             ? 'overflow-hidden rounded-t-2xl rounded-b-none border border-white/10 bg-[#05070d]/96 shadow-[0_-24px_60px_rgba(0,0,0,0.48)]'
             : 'overflow-hidden rounded-2xl border border-white/10 bg-black/45 shadow-2xl'
           }>
-            <div className={`flex flex-nowrap items-center justify-between gap-2 overflow-x-auto border-b border-white/10 px-2 ${isDocked ? 'bg-black/35 py-1 sm:px-3' : 'py-2 sm:px-3'}`}>
+            <div className={`fullscreen-timeline-toolbar flex flex-nowrap items-center justify-between gap-2 overflow-x-auto border-b border-white/10 px-2 ${isDocked ? 'bg-black/35 py-1 sm:px-3' : 'py-2 sm:px-3'}`}>
               <div className="min-w-0 flex items-center gap-3">
                 <div className="min-w-0">
                   <div className={`font-mono font-semibold tabular-nums tracking-[0.12em] text-sky-200 ${isDocked ? 'text-[10px] sm:text-[11px]' : 'text-[12px] sm:text-[13px]'}`}>
