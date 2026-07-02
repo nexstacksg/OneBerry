@@ -542,7 +542,7 @@ export function MSEVideoCell({
         autoPlay
         muted
         playsInline
-        style={{ width: '100%', height: '100%', objectFit: isPageFullscreen ? 'contain' : 'cover' }}
+        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
       />
 
       <LivePreviewPoster
@@ -658,7 +658,7 @@ export function MSEVideoCell({
       {/* Control buttons overlay */}
       {showControls && isPlaying && !error && (
         <div
-          className="video-controls"
+          className="stream-controls"
           style={{
             position: 'absolute',
             bottom: '8px',

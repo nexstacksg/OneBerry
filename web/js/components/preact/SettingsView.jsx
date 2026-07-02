@@ -38,7 +38,7 @@ export function SettingsView() {
     dbPostBackupScript: '',
     webPort: '8080',
     webThreadPoolSize: '',   // populated from API; blank = use server default (2x cores)
-    maxStreams: '32',
+    maxStreams: '64',
     authEnabled: true,
     demoMode: false, // Demo mode: allows unauthenticated viewer access
     webrtcDisabled: false, // Whether WebRTC is disabled (use HLS only)
@@ -260,7 +260,7 @@ export function SettingsView() {
         dbPostBackupScript: settingsData.db_post_backup_script || '',
         webPort: settingsData.web_port?.toString() || '',
         webThreadPoolSize: settingsData.web_thread_pool_size?.toString() || '',
-        maxStreams: settingsData.max_streams?.toString() || '32',
+        maxStreams: settingsData.max_streams?.toString() || '64',
         authEnabled: settingsData.web_auth_enabled || false,
         demoMode: settingsData.demo_mode || false,
         webrtcDisabled: settingsData.webrtc_disabled || false,
@@ -356,7 +356,7 @@ export function SettingsView() {
       db_post_backup_script: settings.dbPostBackupScript,
       web_port: parseInt(settings.webPort, 10),
       web_thread_pool_size: Number.isNaN(webThreadPoolSize) ? undefined : webThreadPoolSize,
-      max_streams: Number.isNaN(parsedMaxStreams) ? 32 : parsedMaxStreams,
+      max_streams: Number.isNaN(parsedMaxStreams) ? 64 : parsedMaxStreams,
       web_auth_enabled: settings.authEnabled,
       demo_mode: settings.demoMode,
       webrtc_disabled: settings.webrtcDisabled,
@@ -827,7 +827,7 @@ export function SettingsView() {
                 id="setting-max-streams"
                 name="maxStreams"
                 min="1"
-                max="256"
+                max="64"
                 class="w-full p-2 border border-input rounded bg-background text-foreground disabled:opacity-60 disabled:cursor-not-allowed"
                 value={settings.maxStreams}
                 onChange={handleInputChange}

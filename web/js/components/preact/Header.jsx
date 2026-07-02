@@ -110,6 +110,10 @@ const getStoredSidebarState = () => {
 };
 
 const LAYOUT_TREE_STORAGE_KEY = 'oneberry.dashboardLayouts';
+const WORKSPACE_GRID_COLS = 48;
+const WORKSPACE_GRID_ROWS = 27;
+const DEFAULT_WORKSPACE_TILE_W = 24;
+const DEFAULT_WORKSPACE_TILE_H = 13;
 
 const getStoredExpandedTree = (storageKey) => {
   try {
@@ -126,20 +130,78 @@ const normalizeLiveLayouts = (data = {}) => ({
   layouts: Array.isArray(data.layouts)
     ? data.layouts
       .filter((layout) => layout && layout.id && layout.name)
-      .map((layout) => ({
-        id: String(layout.id),
-        name: String(layout.name).trim(),
-        cameras: Array.from(new Set(
-          (Array.isArray(layout.cameras) ? layout.cameras : [])
-            .map((camera) => String(camera || '').trim())
-            .filter(Boolean)
-        )),
-      }))
+      .map((layout) => {
+        const legacyCameras = Array.isArray(layout.cameras) ? layout.cameras : [];
+        const sourceTiles = Array.isArray(layout.tiles)
+          ? layout.tiles
+          : legacyCameras.map((camera, index) => ({
+            id: `tile-${index + 1}`,
+            camera,
+            x: index,
+            y: 0,
+            w: 1,
+            h: 1,
+          }));
+        const tiles = sourceTiles
+          .map((tile, index) => {
+            const camera = String(tile?.camera || tile?.cameraName || '').trim();
+            if (!camera) return null;
+            return {
+              id: String(tile?.id || `tile-${index + 1}`).trim() || `tile-${index + 1}`,
+              camera,
+              x: Number.isFinite(Number(tile?.x)) ? Math.max(0, Math.floor(Number(tile.x))) : index,
+              y: Number.isFinite(Number(tile?.y)) ? Math.max(0, Math.floor(Number(tile.y))) : 0,
+              w: Number.isFinite(Number(tile?.w)) ? Math.max(1, Math.floor(Number(tile.w))) : 1,
+              h: Number.isFinite(Number(tile?.h)) ? Math.max(1, Math.floor(Number(tile.h))) : 1,
+            };
+          })
+          .filter(Boolean);
+
+        return {
+          id: String(layout.id),
+          name: String(layout.name).trim(),
+          cols: Number.isFinite(Number(layout.cols)) ? Math.max(1, Math.floor(Number(layout.cols))) : undefined,
+          rows: Number.isFinite(Number(layout.rows)) ? Math.max(1, Math.floor(Number(layout.rows))) : undefined,
+          tiles,
+          cameras: tiles.map((tile) => tile.camera),
+        };
+      })
       .filter((layout) => layout.name)
     : [],
 });
 
 const createLayoutId = () => `layout-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+const createLayoutTile = (camera, index = 0) => ({
+  id: `tile-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+  camera,
+  x: (index * DEFAULT_WORKSPACE_TILE_W) % WORKSPACE_GRID_COLS,
+  y: Math.floor((index * DEFAULT_WORKSPACE_TILE_W) / WORKSPACE_GRID_COLS) * DEFAULT_WORKSPACE_TILE_H,
+  w: DEFAULT_WORKSPACE_TILE_W,
+  h: DEFAULT_WORKSPACE_TILE_H,
+});
+
+const buildResponsiveLayoutTiles = (tiles) => {
+  const count = tiles.length;
+  if (count === 0) return [];
+
+  const layoutCols = Math.ceil(Math.sqrt(count));
+  const layoutRows = Math.ceil(count / layoutCols);
+  return tiles.map((tile, index) => {
+    const col = index % layoutCols;
+    const row = Math.floor(index / layoutCols);
+    const x = Math.floor((col * WORKSPACE_GRID_COLS) / layoutCols);
+    const y = Math.floor((row * WORKSPACE_GRID_ROWS) / layoutRows);
+    const nextX = Math.floor(((col + 1) * WORKSPACE_GRID_COLS) / layoutCols);
+    const nextY = Math.floor(((row + 1) * WORKSPACE_GRID_ROWS) / layoutRows);
+    return {
+      ...tile,
+      x,
+      y,
+      w: Math.max(1, nextX - x),
+      h: Math.max(1, nextY - y),
+    };
+  });
+};
 
 const makeLiveHref = (params = {}) => {
   const search = new URLSearchParams();
@@ -244,9 +306,11 @@ export function Header({ version = VERSION }) {
       return { tag: '', stream: '' };
     }
     const params = new URLSearchParams(locationSearch);
+    const layout = params.get('layout') || '';
     return {
       tag: params.get('tag') || '',
       stream: params.get('stream') || '',
+      layout: layout === 'none' || layout === 'workspace' ? '' : layout,
     };
   }, [activeNav, locationSearch]);
 
@@ -668,6 +732,9 @@ export function Header({ version = VERSION }) {
         {
           id: createLayoutId(),
           name,
+          cols: WORKSPACE_GRID_COLS,
+          rows: WORKSPACE_GRID_ROWS,
+          tiles: [],
           cameras: [],
         },
       ],
@@ -714,36 +781,24 @@ export function Header({ version = VERSION }) {
     const camera = String(cameraName || '').trim();
     if (!camera || !isAdmin) return;
 
-    let changed = false;
     const previous = liveLayouts;
     const next = {
       layouts: liveLayouts.layouts.map((layout) => {
-        if (layout.id !== layoutId || layout.cameras.includes(camera)) {
+        if (layout.id !== layoutId) {
           return layout;
         }
-        changed = true;
+        const tiles = Array.isArray(layout.tiles) ? layout.tiles : [];
+        const nextTiles = buildResponsiveLayoutTiles([...tiles, createLayoutTile(camera, tiles.length)]);
         return {
           ...layout,
-          cameras: [...layout.cameras, camera],
+          cols: WORKSPACE_GRID_COLS,
+          rows: WORKSPACE_GRID_ROWS,
+          tiles: nextTiles,
+          cameras: nextTiles.map((tile) => tile.camera),
         };
       }),
     };
 
-    if (changed) {
-      await saveLiveLayouts(next, previous);
-    }
-  }, [isAdmin, liveLayouts, saveLiveLayouts]);
-
-  const removeCameraFromLayout = useCallback(async (layoutId, cameraName) => {
-    if (!isAdmin) return;
-    const previous = liveLayouts;
-    const next = {
-      layouts: liveLayouts.layouts.map((layout) => (
-        layout.id === layoutId
-          ? { ...layout, cameras: layout.cameras.filter((camera) => camera !== cameraName) }
-          : layout
-      )),
-    };
     await saveLiveLayouts(next, previous);
   }, [isAdmin, liveLayouts, saveLiveLayouts]);
 
@@ -759,11 +814,16 @@ export function Header({ version = VERSION }) {
       return;
     }
 
-    event.preventDefault();
-    window.dispatchEvent(new CustomEvent('oneberry:add-live-camera', {
-      detail: { cameraName },
-    }));
-  }, [activeNav]);
+    if (!liveSelection.layout) {
+      event.preventDefault();
+      window.dispatchEvent(new CustomEvent('oneberry:add-live-camera', {
+        detail: { cameraName, autoFit: true },
+      }));
+      return;
+    }
+
+    forceNavigation(makeLiveHref({ layout: 'none', stream: cameraName }), event);
+  }, [activeNav, liveSelection.layout]);
 
   const renderCameraList = () => {
     if (sidebarCameraList.length === 0) {
@@ -932,23 +992,30 @@ export function Header({ version = VERSION }) {
                       />
                     </form>
                   ) : (
-                    <div className="sidebar-layout-title" title={layout.name}>
+                    <a
+                      href={makeLiveHref({ layout: layout.id })}
+                      className={`sidebar-layout-title no-underline ${activeNav === 'nav-live' && liveSelection.layout === layout.id ? 'is-active' : ''}`}
+                      title={layout.name}
+                      aria-current={activeNav === 'nav-live' && liveSelection.layout === layout.id ? 'page' : undefined}
+                      onClick={(event) => forceNavigation(makeLiveHref({ layout: layout.id }), event)}
+                    >
                       <TreeIcon type="area" />
                       <span className="sidebar-tree-label">{layout.name}</span>
-                      <span className="sidebar-tree-count">{layout.cameras.length}</span>
-                    </div>
+                      <span className="sidebar-tree-count">{layout.tiles.length}</span>
+                    </a>
                   )}
                   {renderLayoutMenu(layout)}
                 </div>
                 {expanded && (
                   <ul className="sidebar-layout-camera-tree">
-                    {layout.cameras.map((cameraName) => {
+                    {layout.tiles.map((tile, index) => {
+                      const cameraName = tile.camera;
                       const stream = streamByName.get(cameraName);
                       const statusKind = stream ? getStreamStatusKind(stream) : 'offline';
                       const cameraHref = makeLiveHref({ cols: 1, rows: 1, stream: cameraName });
                       const cameraActive = activeNav === 'nav-live' && liveSelection.stream === cameraName;
                       return (
-                        <li key={cameraName} className={`sidebar-layout-camera-node ${cameraActive ? 'is-active' : ''}`}>
+                        <li key={`${tile.id}-${index}`} className={`sidebar-layout-camera-node ${cameraActive ? 'is-active' : ''}`}>
                           <a
                             href={cameraHref}
                             className={`sidebar-camera-link sidebar-layout-camera-link ${cameraActive ? 'is-active' : ''}`}
@@ -960,18 +1027,6 @@ export function Header({ version = VERSION }) {
                             <TreeIcon type="camera" />
                             <span className="sidebar-camera-name">{cameraName}</span>
                           </a>
-                          {isAdmin && (
-                            <button
-                              type="button"
-                              className="sidebar-layout-camera-remove"
-                              aria-label={`Remove ${cameraName} from ${layout.name}`}
-                              onClick={() => removeCameraFromLayout(layout.id, cameraName)}
-                            >
-                              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" aria-hidden="true">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4l8 8M12 4l-8 8" />
-                              </svg>
-                            </button>
-                          )}
                         </li>
                       );
                     })}
@@ -1024,7 +1079,7 @@ export function Header({ version = VERSION }) {
 
         <div className="sidebar-content">
           <nav className="sidebar-main-nav" aria-label="Primary navigation">
-            <div className="sidebar-section-label">{t('nav.live')}</div>
+            <div className="sidebar-section-label">Camera List</div>
             {renderCameraList()}
             {renderLayouts()}
 

@@ -36,8 +36,12 @@ typedef struct {
     bool last_frame_was_key;  // Flag to indicate if the last frame of previous segment was a key frame
 
     // If set, the next segment should start by writing this packet first.
-    // This intentionally duplicates the boundary keyframe to bias toward overlap (no gaps).
+    // The boundary keyframe is carried forward instead of being duplicated.
     AVPacket *pending_video_keyframe;
+    time_t first_keyframe_wall_time;
+    time_t last_keyframe_wall_time;
+    int64_t first_keyframe_pts;
+    int64_t last_keyframe_pts;
 
     // Stream name for telemetry instrumentation
     char stream_name[MAX_STREAM_NAME];
@@ -54,6 +58,11 @@ typedef struct {
     mp4_writer_t *writer;     // MP4 writer instance
     int segment_duration;     // Duration of each segment in seconds
     time_t last_segment_time; // Time when the last segment was created
+    time_t pending_segment_start_time; // Planned start time for the next normal rotation
+    time_t pending_segment_boundary_time; // Matching end time of the previous rotated segment
+    time_t scheduled_segment_start_time; // Wall-clock aligned start of the current recording slot
+    time_t scheduled_segment_end_time;   // Wall-clock aligned end of the current recording slot
+    time_t last_integrity_check_time;    // Last expected boundary audited for missing slots
 
     // Self-management fields
     int retry_count;          // Number of consecutive failures

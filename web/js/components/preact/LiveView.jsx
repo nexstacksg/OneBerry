@@ -7,6 +7,7 @@ import { useState, useEffect, useMemo, useCallback, useRef } from 'preact/hooks'
 import { showStatusMessage } from './ToastContainer.jsx';
 import { useFullscreenManager, FullscreenManager, useFullscreenGridNav } from './FullscreenManager.jsx';
 import { useQuery } from '../../query-client.js';
+import { fetchJSON, queryClient } from '../../query-client.js';
 import { SnapshotManager, useSnapshotManager } from './SnapshotManager.jsx';
 import { HLSVideoCell } from './HLSVideoCell.jsx';
 import { MSEVideoCell } from './MSEVideoCell.jsx';
@@ -16,7 +17,13 @@ import { isGo2rtcEnabled } from '../../utils/settings-utils.js';
 import { useCameraOrder } from './useCameraOrder.js';
 import { GridPicker, computeOptimalGrid, MAX_GRID_CELLS } from './GridPicker.jsx';
 import { buildBuildingTree } from '../../utils/building-hierarchy.js';
+import { getAuthHeaders } from '../../utils/auth-utils.js';
 import { useI18n } from '../../i18n.js';
+
+const WORKSPACE_GRID_COLS = 48;
+const WORKSPACE_GRID_ROWS = 27;
+const DEFAULT_WORKSPACE_TILE_W = 24;
+const DEFAULT_WORKSPACE_TILE_H = 13;
 
 /**
  * Convert the old single-string layout value to cols/rows for backward compat.
@@ -65,11 +72,242 @@ function getLiveInitDelay({ isWebRTC, useMSE, go2rtcAvailable, index, totalStrea
   return Math.ceil((index - immediateCount + 1) / 4) * 150;
 }
 
-function createWorkspaceTile(cameraId) {
+function createWorkspaceTile(cameraId, tile = {}) {
   return {
-    instanceId: `tile-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+    instanceId: tile.id || `tile-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
     cameraId,
+    x: Number.isFinite(Number(tile.x)) ? Math.max(0, Math.floor(Number(tile.x))) : 0,
+    y: Number.isFinite(Number(tile.y)) ? Math.max(0, Math.floor(Number(tile.y))) : 0,
+    w: Number.isFinite(Number(tile.w)) ? Math.max(1, Math.floor(Number(tile.w))) : DEFAULT_WORKSPACE_TILE_W,
+    h: Number.isFinite(Number(tile.h)) ? Math.max(1, Math.floor(Number(tile.h))) : DEFAULT_WORKSPACE_TILE_H,
   };
+}
+
+function createLiveLayoutId() {
+  return `layout-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function normalizeLiveLayouts(data = {}) {
+  return {
+    layouts: Array.isArray(data.layouts)
+      ? data.layouts
+        .filter((layout) => layout && layout.id && layout.name)
+        .map((layout) => {
+          const sourceTiles = Array.isArray(layout.tiles)
+            ? layout.tiles
+            : (Array.isArray(layout.cameras) ? layout.cameras : []).map((camera, index) => ({
+              id: `tile-${index + 1}`,
+              camera,
+              x: index,
+              y: 0,
+              w: 1,
+              h: 1,
+            }));
+          const tiles = sourceTiles
+            .map((tile, index) => {
+              const camera = String(tile?.camera || tile?.cameraName || '').trim();
+              if (!camera) return null;
+              return {
+                id: String(tile?.id || `tile-${index + 1}`).trim() || `tile-${index + 1}`,
+                camera,
+                x: Number.isFinite(Number(tile?.x)) ? Math.max(0, Math.floor(Number(tile.x))) : index,
+                y: Number.isFinite(Number(tile?.y)) ? Math.max(0, Math.floor(Number(tile.y))) : 0,
+                w: Number.isFinite(Number(tile?.w)) ? Math.max(1, Math.floor(Number(tile.w))) : 1,
+                h: Number.isFinite(Number(tile?.h)) ? Math.max(1, Math.floor(Number(tile.h))) : 1,
+              };
+            })
+            .filter(Boolean);
+
+          return {
+            id: String(layout.id),
+            name: String(layout.name).trim(),
+            cols: Number.isFinite(Number(layout.cols)) ? Math.max(1, Math.floor(Number(layout.cols))) : undefined,
+            rows: Number.isFinite(Number(layout.rows)) ? Math.max(1, Math.floor(Number(layout.rows))) : undefined,
+            tiles,
+            cameras: tiles.map((tile) => tile.camera),
+          };
+        })
+        .filter((layout) => layout.name)
+      : [],
+  };
+}
+
+function tilesOverlap(a, b) {
+  return (
+    a.x < b.x + b.w &&
+    a.x + a.w > b.x &&
+    a.y < b.y + b.h &&
+    a.y + a.h > b.y
+  );
+}
+
+function findTileCollision(candidate, workspaceTiles, ignoredInstanceId = '') {
+  return workspaceTiles.find((tile) => (
+    tile.instanceId !== ignoredInstanceId && tilesOverlap(candidate, tile)
+  )) || null;
+}
+
+function findOpenWorkspaceSlot(workspaceTiles, width, height, cols, rows) {
+  const w = Math.max(1, Math.min(cols, width));
+  const h = Math.max(1, Math.min(rows, height));
+  for (let y = 0; y <= rows - h; y += 1) {
+    for (let x = 0; x <= cols - w; x += 1) {
+      const candidate = { x, y, w, h };
+      if (!findTileCollision(candidate, workspaceTiles)) {
+        return { x, y };
+      }
+    }
+  }
+  return null;
+}
+
+function buildWorkspaceOccupancyPrefix(workspaceTiles, cols, rows) {
+  const safeCols = Math.max(1, cols || 1);
+  const safeRows = Math.max(1, rows || 1);
+  const occupied = Array.from({ length: safeRows }, () => Array(safeCols).fill(0));
+
+  workspaceTiles.forEach((tile) => {
+    const bounded = normalizeWorkspaceBounds(tile, safeCols, safeRows);
+    for (let y = bounded.y; y < bounded.y + bounded.h; y += 1) {
+      for (let x = bounded.x; x < bounded.x + bounded.w; x += 1) {
+        occupied[y][x] = 1;
+      }
+    }
+  });
+
+  const prefix = Array.from({ length: safeRows + 1 }, () => Array(safeCols + 1).fill(0));
+  for (let y = 0; y < safeRows; y += 1) {
+    for (let x = 0; x < safeCols; x += 1) {
+      prefix[y + 1][x + 1] = occupied[y][x] + prefix[y][x + 1] + prefix[y + 1][x] - prefix[y][x];
+    }
+  }
+  return prefix;
+}
+
+function isWorkspaceRectEmpty(prefix, x, y, w, h) {
+  const x2 = x + w;
+  const y2 = y + h;
+  return (prefix[y2][x2] - prefix[y][x2] - prefix[y2][x] + prefix[y][x]) === 0;
+}
+
+function findBestOpenWorkspaceArea(workspaceTiles, cols, rows, preferredPoint = null) {
+  const safeCols = Math.max(1, cols || 1);
+  const safeRows = Math.max(1, rows || 1);
+  const prefix = buildWorkspaceOccupancyPrefix(workspaceTiles, safeCols, safeRows);
+  const preferred = preferredPoint
+    ? {
+      x: Math.max(0, Math.min(safeCols - 1, Math.floor(Number(preferredPoint.x) || 0))),
+      y: Math.max(0, Math.min(safeRows - 1, Math.floor(Number(preferredPoint.y) || 0))),
+    }
+    : null;
+  const mustContainPreferred = preferred && isWorkspaceRectEmpty(prefix, preferred.x, preferred.y, 1, 1);
+
+  let best = null;
+  for (let y = 0; y < safeRows; y += 1) {
+    for (let x = 0; x < safeCols; x += 1) {
+      for (let h = 1; y + h <= safeRows; h += 1) {
+        for (let w = 1; x + w <= safeCols; w += 1) {
+          if (mustContainPreferred) {
+            const containsPreferred =
+              preferred.x >= x && preferred.x < x + w &&
+              preferred.y >= y && preferred.y < y + h;
+            if (!containsPreferred) continue;
+          }
+          if (!isWorkspaceRectEmpty(prefix, x, y, w, h)) continue;
+
+          const area = w * h;
+          const distance = preferred
+            ? Math.abs(x + (w / 2) - preferred.x) + Math.abs(y + (h / 2) - preferred.y)
+            : x + y;
+          if (
+            !best ||
+            area > best.area ||
+            (area === best.area && distance < best.distance)
+          ) {
+            best = { x, y, w, h, area, distance };
+          }
+        }
+      }
+    }
+  }
+
+  return best ? { x: best.x, y: best.y, w: best.w, h: best.h } : null;
+}
+
+function normalizeWorkspaceBounds(tile, cols, rows) {
+  const safeCols = Math.max(1, cols || 1);
+  const safeRows = Math.max(1, rows || 1);
+  const w = Math.max(1, Math.min(safeCols, Math.floor(Number(tile.w) || 1)));
+  const h = Math.max(1, Math.min(safeRows, Math.floor(Number(tile.h) || 1)));
+  return {
+    ...tile,
+    w,
+    h,
+    x: Math.max(0, Math.min(safeCols - w, Math.floor(Number(tile.x) || 0))),
+    y: Math.max(0, Math.min(safeRows - h, Math.floor(Number(tile.y) || 0))),
+  };
+}
+
+function buildResponsiveWorkspaceLayout(workspaceTiles) {
+  const count = workspaceTiles.length;
+  if (count === 0) return [];
+
+  const [layoutCols, layoutRows] = computeOptimalGrid(count);
+  return workspaceTiles.map((tile, index) => {
+    const col = index % layoutCols;
+    const row = Math.floor(index / layoutCols);
+    const x = Math.floor((col * WORKSPACE_GRID_COLS) / layoutCols);
+    const y = Math.floor((row * WORKSPACE_GRID_ROWS) / layoutRows);
+    const nextX = Math.floor(((col + 1) * WORKSPACE_GRID_COLS) / layoutCols);
+    const nextY = Math.floor(((row + 1) * WORKSPACE_GRID_ROWS) / layoutRows);
+    return normalizeWorkspaceBounds({
+      ...tile,
+      x,
+      y,
+      w: Math.max(1, nextX - x),
+      h: Math.max(1, nextY - y),
+    }, WORKSPACE_GRID_COLS, WORKSPACE_GRID_ROWS);
+  });
+}
+
+function scaleLayoutTileToWorkspace(tile, layoutCols, layoutRows) {
+  const sourceCols = Number.isFinite(Number(layoutCols)) && Number(layoutCols) > 0 ? Number(layoutCols) : WORKSPACE_GRID_COLS;
+  const sourceRows = Number.isFinite(Number(layoutRows)) && Number(layoutRows) > 0 ? Number(layoutRows) : WORKSPACE_GRID_ROWS;
+  if (sourceCols === WORKSPACE_GRID_COLS && sourceRows === WORKSPACE_GRID_ROWS) {
+    return normalizeWorkspaceBounds(tile, WORKSPACE_GRID_COLS, WORKSPACE_GRID_ROWS);
+  }
+
+  const scaleX = WORKSPACE_GRID_COLS / sourceCols;
+  const scaleY = WORKSPACE_GRID_ROWS / sourceRows;
+  return normalizeWorkspaceBounds({
+    ...tile,
+    x: Math.round((Number(tile.x) || 0) * scaleX),
+    y: Math.round((Number(tile.y) || 0) * scaleY),
+    w: Math.max(DEFAULT_WORKSPACE_TILE_W, Math.round((Number(tile.w) || 1) * scaleX)),
+    h: Math.max(DEFAULT_WORKSPACE_TILE_H, Math.round((Number(tile.h) || 1) * scaleY)),
+  }, WORKSPACE_GRID_COLS, WORKSPACE_GRID_ROWS);
+}
+
+function serializeWorkspaceTilesForSave(workspaceTiles) {
+  return workspaceTiles.map((tile) => ({
+    id: tile.instanceId,
+    camera: tile.cameraId,
+    x: Number.isFinite(Number(tile.x)) ? tile.x : 0,
+    y: Number.isFinite(Number(tile.y)) ? tile.y : 0,
+    w: Number.isFinite(Number(tile.w)) ? tile.w : DEFAULT_WORKSPACE_TILE_W,
+    h: Number.isFinite(Number(tile.h)) ? tile.h : DEFAULT_WORKSPACE_TILE_H,
+  }));
+}
+
+function reflowWorkspaceTiles(workspaceTiles, cols) {
+  const safeCols = Math.max(1, cols || 1);
+  return workspaceTiles.map((tile, index) => ({
+    ...tile,
+    x: index % safeCols,
+    y: Math.floor(index / safeCols),
+    w: tile.w || 1,
+    h: tile.h || 1,
+  }));
 }
 
 function LiveEmptyState({ t, title, message, actionHref, actionLabel, actionOnClick, secondaryText }) {
@@ -132,8 +370,23 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
   // State for streams and layout
   const [streams, setStreams] = useState([]);
   const [workspaceTiles, setWorkspaceTiles] = useState([]);
-  const [workspaceStarted, setWorkspaceStarted] = useState(false);
+  const [workspaceStarted, setWorkspaceStarted] = useState(true);
   const [workspaceAutoGrid, setWorkspaceAutoGrid] = useState(true);
+  const [activeLayoutId, setActiveLayoutId] = useState(() => {
+    const p = new URLSearchParams(window.location.search);
+    const layoutParam = p.get('layout');
+    if (layoutParam === 'none' || layoutParam === 'workspace') {
+      return '';
+    }
+    return layoutParam || localStorage.getItem(`lightnvr-${storagePrefix}-last-layout`) || '';
+  });
+  const [hydratedLayoutId, setHydratedLayoutId] = useState('');
+  const lastSavedLayoutPayloadRef = useRef('');
+  const saveLayoutTimeoutRef = useRef(null);
+  const workspaceGridRef = useRef(null);
+  const workspacePointerRef = useRef(null);
+  const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false);
+  const [layoutEditMode, setLayoutEditMode] = useState(false);
   const [urlStreamHydrated, setUrlStreamHydrated] = useState(false);
   const [removingTileIds, setRemovingTileIds] = useState(new Set());
   const removeTimeoutsRef = useRef(new Map());
@@ -217,9 +470,11 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
   // Total streams per page — derived immediately so URL-sync useEffect can reference
   // isSingleStream in its dependency array without TDZ issues.
   const maxStreams = cols * rows;
+  const workspaceGridCols = workspaceStarted ? WORKSPACE_GRID_COLS : cols;
+  const workspaceGridRows = workspaceStarted ? WORKSPACE_GRID_ROWS : rows;
 
   // Clamp cols×rows to MAX_GRID_CELLS — guards against stale URL params or
-  // localStorage values written before the 36-stream cap was enforced.
+  // localStorage values written before the 64-stream cap was enforced.
   useEffect(() => {
     if (cols * rows > MAX_GRID_CELLS) {
       setRows(Math.max(1, Math.floor(MAX_GRID_CELLS / cols)));
@@ -310,6 +565,22 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
     }
   );
 
+  const {
+    data: liveLayoutsData = { layouts: [] }
+  } = useQuery(
+    ['live-layouts'],
+    '/api/live-layouts',
+    {
+      headers: getAuthHeaders(),
+      timeout: 10000,
+      retries: 1,
+      retryDelay: 1000
+    },
+    {
+      refetchInterval: 30000
+    }
+  );
+
   // Update loading state based on streams query status
   useEffect(() => {
     setIsLoading(isLoadingStreams);
@@ -338,11 +609,11 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
             const urlParams = new URLSearchParams(window.location.search);
             const streamParam = urlParams.get('stream');
 
-            if (streamParam && filteredStreams.some(stream => stream.name === streamParam)) {
+            if (!activeLayoutId && streamParam && filteredStreams.some(stream => stream.name === streamParam)) {
               // If the stream from URL exists in the loaded streams, use it
               setSelectedStream(streamParam);
               if (!urlStreamHydrated) {
-                setWorkspaceTiles([createWorkspaceTile(streamParam)]);
+                setWorkspaceTiles(buildResponsiveWorkspaceLayout([createWorkspaceTile(streamParam)]));
                 setWorkspaceStarted(true);
                 setWorkspaceAutoGrid(true);
                 setUrlStreamHydrated(true);
@@ -365,7 +636,7 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
     // Note: We intentionally only re-run when streamsData changes
     // selectedStream is read but we don't want to trigger refetch when it changes
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [streamsData, autoGrid]);
+  }, [streamsData, autoGrid, activeLayoutId]);
 
   // Sync layout/page/stream to URL — only meaningful once streams are loaded.
   useEffect(() => {
@@ -387,9 +658,15 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
     }
     url.searchParams.delete('layout'); // remove legacy param
 
-    // Stream selection (single-stream mode only)
-    if (isSingleStream && selectedStream) url.searchParams.set('stream', selectedStream);
-    else url.searchParams.delete('stream');
+    if (activeLayoutId) {
+      url.searchParams.set('layout', activeLayoutId);
+      url.searchParams.delete('stream');
+    } else {
+      url.searchParams.delete('layout');
+      // Stream selection (single-stream mode only)
+      if (isSingleStream && selectedStream) url.searchParams.set('stream', selectedStream);
+      else url.searchParams.delete('stream');
+    }
 
     window.history.replaceState({}, '', url);
 
@@ -402,9 +679,9 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
     localStorage.removeItem(`lightnvr-${storagePrefix}-cols`);
     localStorage.removeItem(`lightnvr-${storagePrefix}-rows`);
     localStorage.removeItem(`lightnvr-${storagePrefix}-layout`);
-    if (isSingleStream && selectedStream) sessionStorage.setItem(`${storagePrefix}_selected_stream`, selectedStream);
+    if (!activeLayoutId && isSingleStream && selectedStream) sessionStorage.setItem(`${storagePrefix}_selected_stream`, selectedStream);
     else sessionStorage.removeItem(`${storagePrefix}_selected_stream`);
-  }, [currentPage, cols, rows, isSingleStream, selectedStream, streams.length]);
+  }, [activeLayoutId, currentPage, cols, rows, isSingleStream, selectedStream, streams.length]);
 
   // Sync UI preference controls (group, labels, controls) to URL and localStorage.
   // Runs independently of streams-loaded state so the URL is always accurate.
@@ -466,30 +743,220 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
   const streamByName = useMemo(() => (
     new Map(streams.map((stream) => [stream.name, stream]))
   ), [streams]);
+  const liveLayouts = useMemo(() => normalizeLiveLayouts(liveLayoutsData), [liveLayoutsData]);
+  const activeLayout = useMemo(() => (
+    activeLayoutId
+      ? liveLayouts.layouts.find((layout) => layout.id === activeLayoutId) || null
+      : null
+  ), [activeLayoutId, liveLayouts]);
+  const workspaceLocked = Boolean(activeLayoutId) && !layoutEditMode;
 
-  const addWorkspaceTile = useCallback((cameraName) => {
+  const saveLiveLayouts = useCallback(async (nextLayouts, previousLayouts = liveLayouts) => {
+    const normalized = normalizeLiveLayouts(nextLayouts);
+    queryClient.setQueryData(['live-layouts'], normalized);
+
+    try {
+      const saved = await fetchJSON('/api/live-layouts', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          ...getAuthHeaders(),
+        },
+        body: JSON.stringify(normalized),
+        timeout: 10000,
+        retries: 1,
+        retryDelay: 1000,
+      });
+      const savedLayouts = normalizeLiveLayouts(saved);
+      queryClient.setQueryData(['live-layouts'], savedLayouts);
+      return savedLayouts;
+    } catch (error) {
+      queryClient.setQueryData(['live-layouts'], previousLayouts);
+      showStatusMessage(error.message || 'Failed to save layouts', 'error', 8000);
+      throw error;
+    }
+  }, [liveLayouts]);
+
+  useEffect(() => {
+    if (!activeLayoutId) {
+      localStorage.removeItem(`lightnvr-${storagePrefix}-last-layout`);
+      return;
+    }
+    localStorage.setItem(`lightnvr-${storagePrefix}-last-layout`, activeLayoutId);
+  }, [activeLayoutId, storagePrefix]);
+
+  useEffect(() => {
+    if (!activeLayoutId || isLoadingStreams || liveLayouts.layouts.length === 0) return;
+    if (activeLayout) return;
+    setActiveLayoutId('');
+    setHydratedLayoutId('');
+    lastSavedLayoutPayloadRef.current = '';
+  }, [activeLayout, activeLayoutId, isLoadingStreams, liveLayouts.layouts.length]);
+
+  useEffect(() => {
+    if (!activeLayoutId || !activeLayout || streams.length === 0 || hydratedLayoutId === activeLayoutId) return;
+
+    const sourceCols = activeLayout.cols || activeLayout.tiles.reduce((max, tile) => (
+      Math.max(max, (Number(tile.x) || 0) + (Number(tile.w) || 1))
+    ), 1);
+    const sourceRows = activeLayout.rows || activeLayout.tiles.reduce((max, tile) => (
+      Math.max(max, (Number(tile.y) || 0) + (Number(tile.h) || 1))
+    ), 1);
+    const tiles = activeLayout.tiles
+      .filter((tile) => streamByName.has(tile.camera))
+      .map((tile, index) => scaleLayoutTileToWorkspace(
+        createWorkspaceTile(tile.camera, {
+          ...tile,
+          id: tile.id || `tile-${index + 1}`,
+        }),
+        sourceCols,
+        sourceRows
+      ));
+
+    setWorkspaceTiles(tiles);
+    setWorkspaceStarted(true);
+    setWorkspaceAutoGrid(tiles.length === 0);
+    setLayoutEditMode(false);
+    setCurrentPage(0);
+
+    const serializedTiles = serializeWorkspaceTilesForSave(tiles);
+    lastSavedLayoutPayloadRef.current = JSON.stringify({
+      id: activeLayout.id,
+      cols: WORKSPACE_GRID_COLS,
+      rows: WORKSPACE_GRID_ROWS,
+      tiles: serializedTiles,
+    });
+    setHydratedLayoutId(activeLayoutId);
+  }, [activeLayout, activeLayoutId, hydratedLayoutId, streamByName, streams.length]);
+
+  const getWorkspaceGridPoint = useCallback((event, fallbackIndex = workspaceTiles.length) => {
+    const grid = workspaceGridRef.current;
+    if (!grid) {
+      return {
+        x: workspaceGridCols > 0 ? fallbackIndex % workspaceGridCols : fallbackIndex,
+        y: workspaceGridCols > 0 ? Math.floor(fallbackIndex / workspaceGridCols) : 0,
+      };
+    }
+
+    const rect = grid.getBoundingClientRect();
+    const styles = window.getComputedStyle(grid);
+    const gap = Number.parseFloat(styles.columnGap || styles.gap || '0') || 0;
+    const safeCols = Math.max(1, workspaceGridCols);
+    const safeRows = Math.max(1, workspaceGridRows);
+    const cellWidth = (rect.width - (gap * (safeCols - 1))) / safeCols;
+    const cellHeight = (rect.height - (gap * (safeRows - 1))) / safeRows;
+    const x = Math.max(0, Math.min(safeCols - 1, Math.floor((event.clientX - rect.left) / Math.max(1, cellWidth + gap))));
+    const y = Math.max(0, Math.min(safeRows - 1, Math.floor((event.clientY - rect.top) / Math.max(1, cellHeight + gap))));
+    return { x, y };
+  }, [workspaceGridCols, workspaceGridRows, workspaceTiles.length]);
+
+  const updateWorkspaceTile = useCallback((instanceId, updater) => {
+    setWorkspaceTiles((previousTiles) => {
+      const currentTile = previousTiles.find((tile) => tile.instanceId === instanceId);
+      if (!currentTile) return previousTiles;
+
+      const proposedTile = normalizeWorkspaceBounds(
+        typeof updater === 'function' ? updater(currentTile) : { ...currentTile, ...updater },
+        workspaceGridCols,
+        workspaceGridRows
+      );
+      const collision = findTileCollision(proposedTile, previousTiles, instanceId);
+
+      if (!collision) {
+        return previousTiles.map((tile) => (
+          tile.instanceId === instanceId ? proposedTile : tile
+        ));
+      }
+
+      if (proposedTile.w === collision.w && proposedTile.h === collision.h) {
+        return previousTiles.map((tile) => {
+          if (tile.instanceId === instanceId) return { ...proposedTile, x: collision.x, y: collision.y };
+          if (tile.instanceId === collision.instanceId) return { ...collision, x: currentTile.x, y: currentTile.y };
+          return tile;
+        });
+      }
+
+      return previousTiles;
+    });
+  }, [workspaceGridCols, workspaceGridRows]);
+
+  const addWorkspaceTile = useCallback((cameraName, placement = null, options = {}) => {
     const cameraId = String(cameraName || '').trim();
     if (!cameraId) return;
+
+    if (workspaceLocked && !options.force) {
+      showStatusMessage('Click Edit Layout before changing this saved layout', 'error', 5000);
+      return;
+    }
 
     if (!streamByName.has(cameraId)) {
       showStatusMessage(`Camera "${cameraId}" is not available in Live View`, 'error', 5000);
       return;
     }
 
+    const shouldAutoTile = !activeLayoutId && !placement && options.autoFit !== false;
     setWorkspaceStarted(true);
     setWorkspaceTiles((previousTiles) => {
-      if (previousTiles.length >= MAX_GRID_CELLS) {
-        showStatusMessage(`Workspace is limited to ${MAX_GRID_CELLS} camera tiles`, 'error', 5000);
-        return previousTiles;
+      const candidateTile = createWorkspaceTile(cameraId);
+      if (shouldAutoTile || (!placement && workspaceAutoGrid && options.autoFit !== false)) {
+        return buildResponsiveWorkspaceLayout([...previousTiles, candidateTile]);
       }
 
-      return [...previousTiles, createWorkspaceTile(cameraId)];
+      const openArea = findBestOpenWorkspaceArea(
+        previousTiles,
+        workspaceGridCols,
+        workspaceGridRows,
+        placement
+      );
+      const openSlot = openArea || findOpenWorkspaceSlot(
+        previousTiles,
+        Math.min(DEFAULT_WORKSPACE_TILE_W, workspaceGridCols),
+        Math.min(DEFAULT_WORKSPACE_TILE_H, workspaceGridRows),
+        workspaceGridCols,
+        workspaceGridRows
+      );
+      const point = openArea || placement || {
+        x: openSlot?.x ?? 0,
+        y: openSlot?.y ?? 0,
+      };
+      const nextTile = normalizeWorkspaceBounds({
+        ...candidateTile,
+        x: point.x,
+        y: point.y,
+        w: openArea?.w ?? DEFAULT_WORKSPACE_TILE_W,
+        h: openArea?.h ?? DEFAULT_WORKSPACE_TILE_H,
+      }, workspaceGridCols, workspaceGridRows);
+      const collision = findTileCollision(nextTile, previousTiles);
+      if (collision) {
+        if (!openSlot) {
+          showStatusMessage('No open workspace space for another camera tile', 'error', 5000);
+          return previousTiles;
+        }
+        const fallback = normalizeWorkspaceBounds(createWorkspaceTile(cameraId, {
+          x: openSlot.x,
+          y: openSlot.y,
+          w: openSlot.w ?? DEFAULT_WORKSPACE_TILE_W,
+          h: openSlot.h ?? DEFAULT_WORKSPACE_TILE_H,
+        }), workspaceGridCols, workspaceGridRows);
+        return [...previousTiles, fallback];
+      }
+
+      return [...previousTiles, nextTile];
     });
+    if (placement) {
+      setWorkspaceAutoGrid(false);
+    } else if (shouldAutoTile || (workspaceAutoGrid && options.autoFit !== false)) {
+      setWorkspaceAutoGrid(true);
+    }
     setCurrentPage(0);
     setSelectedStream(cameraId);
-  }, [streamByName]);
+  }, [activeLayoutId, streamByName, workspaceAutoGrid, workspaceGridCols, workspaceGridRows, workspaceLocked]);
 
   const removeWorkspaceTile = useCallback((instanceId) => {
+    if (workspaceLocked) {
+      showStatusMessage('Click Edit Layout before changing this saved layout', 'error', 5000);
+      return;
+    }
     if (!instanceId || removeTimeoutsRef.current.has(instanceId)) return;
 
     setRemovingTileIds((previousIds) => {
@@ -499,7 +966,10 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
     });
 
     const timeoutId = window.setTimeout(() => {
-      setWorkspaceTiles((previousTiles) => previousTiles.filter((tile) => tile.instanceId !== instanceId));
+      setWorkspaceTiles((previousTiles) => {
+        const nextTiles = previousTiles.filter((tile) => tile.instanceId !== instanceId);
+        return workspaceAutoGrid ? buildResponsiveWorkspaceLayout(nextTiles) : nextTiles;
+      });
       setRemovingTileIds((previousIds) => {
         const nextIds = new Set(previousIds);
         nextIds.delete(instanceId);
@@ -509,38 +979,301 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
     }, 190);
 
     removeTimeoutsRef.current.set(instanceId, timeoutId);
-  }, []);
+  }, [workspaceAutoGrid, workspaceLocked]);
+
+  const getWorkspaceCellSize = useCallback(() => {
+    const grid = workspaceGridRef.current;
+    if (!grid) return { width: 1, height: 1 };
+
+    const rect = grid.getBoundingClientRect();
+    const styles = window.getComputedStyle(grid);
+    const gap = Number.parseFloat(styles.columnGap || styles.gap || '0') || 0;
+    const safeCols = Math.max(1, workspaceGridCols);
+    const safeRows = Math.max(1, workspaceGridRows);
+    return {
+      width: Math.max(1, (rect.width - (gap * (safeCols - 1))) / safeCols + gap),
+      height: Math.max(1, (rect.height - (gap * (safeRows - 1))) / safeRows + gap),
+    };
+  }, [workspaceGridCols, workspaceGridRows]);
+
+  const handleWorkspacePointerMove = useCallback((event) => {
+    const state = workspacePointerRef.current;
+    if (!state) return;
+
+    event.preventDefault();
+    const cellSize = getWorkspaceCellSize();
+    const dx = Math.round((event.clientX - state.startX) / cellSize.width);
+    const dy = Math.round((event.clientY - state.startY) / cellSize.height);
+
+    if (state.mode === 'move') {
+      if (dx === 0 && dy === 0) return;
+      setWorkspaceAutoGrid(false);
+      updateWorkspaceTile(state.instanceId, {
+        ...state.startTile,
+        x: state.startTile.x + dx,
+        y: state.startTile.y + dy,
+      });
+      return;
+    }
+
+    const nextTile = { ...state.startTile };
+    if (state.edges.includes('e')) {
+      nextTile.w = state.startTile.w + dx;
+    }
+    if (state.edges.includes('s')) {
+      nextTile.h = state.startTile.h + dy;
+    }
+    if (state.edges.includes('w')) {
+      nextTile.x = state.startTile.x + dx;
+      nextTile.w = state.startTile.w - dx;
+    }
+    if (state.edges.includes('n')) {
+      nextTile.y = state.startTile.y + dy;
+      nextTile.h = state.startTile.h - dy;
+    }
+    if (dx !== 0 || dy !== 0) {
+      setWorkspaceAutoGrid(false);
+    }
+    updateWorkspaceTile(state.instanceId, nextTile);
+  }, [getWorkspaceCellSize, updateWorkspaceTile]);
+
+  const finishWorkspacePointer = useCallback(() => {
+    workspacePointerRef.current = null;
+    window.removeEventListener('pointermove', handleWorkspacePointerMove);
+    window.removeEventListener('pointerup', finishWorkspacePointer);
+    window.removeEventListener('pointercancel', finishWorkspacePointer);
+  }, [handleWorkspacePointerMove]);
+
+  const startWorkspacePointer = useCallback((event, tile, mode = 'move', edges = '') => {
+    if (!workspaceStarted || !tile) return;
+    if (workspaceLocked) return;
+
+    const target = event.target;
+    if (
+      mode === 'move' &&
+      target?.closest?.('button, input, select, textarea, a, .stream-controls, .live-workspace-tile-close, .live-workspace-resize-handle')
+    ) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    if (mode === 'resize') {
+      setWorkspaceAutoGrid(false);
+    }
+    workspacePointerRef.current = {
+      mode,
+      edges,
+      instanceId: tile.instanceId,
+      startTile: { ...tile },
+      startX: event.clientX,
+      startY: event.clientY,
+    };
+    window.addEventListener('pointermove', handleWorkspacePointerMove);
+    window.addEventListener('pointerup', finishWorkspacePointer);
+    window.addEventListener('pointercancel', finishWorkspacePointer);
+  }, [finishWorkspacePointer, handleWorkspacePointerMove, workspaceLocked, workspaceStarted]);
 
   useEffect(() => () => {
+    finishWorkspacePointer();
     removeTimeoutsRef.current.forEach((timeoutId) => window.clearTimeout(timeoutId));
     removeTimeoutsRef.current.clear();
+    if (saveLayoutTimeoutRef.current) {
+      window.clearTimeout(saveLayoutTimeoutRef.current);
+      saveLayoutTimeoutRef.current = null;
+    }
   }, []);
 
   useEffect(() => {
+    if (!activeLayoutId || !activeLayout || !workspaceStarted || hydratedLayoutId !== activeLayoutId) return;
+    if (localStorage.getItem('userrole') === 'viewer') return;
+
+    const tiles = serializeWorkspaceTilesForSave(workspaceTiles);
+    const payloadKey = JSON.stringify({
+      id: activeLayoutId,
+      cols: WORKSPACE_GRID_COLS,
+      rows: WORKSPACE_GRID_ROWS,
+      tiles,
+    });
+
+    if (payloadKey === lastSavedLayoutPayloadRef.current) return;
+
+    if (saveLayoutTimeoutRef.current) {
+      window.clearTimeout(saveLayoutTimeoutRef.current);
+    }
+
+    saveLayoutTimeoutRef.current = window.setTimeout(async () => {
+      const previousLayouts = liveLayouts;
+      const nextLayouts = {
+        layouts: liveLayouts.layouts.map((layout) => (
+          layout.id === activeLayoutId
+            ? {
+              ...layout,
+              cols: WORKSPACE_GRID_COLS,
+              rows: WORKSPACE_GRID_ROWS,
+              tiles,
+              cameras: tiles.map((tile) => tile.camera),
+            }
+            : layout
+        )),
+      };
+
+      try {
+        lastSavedLayoutPayloadRef.current = payloadKey;
+        queryClient.setQueryData(['live-layouts'], nextLayouts);
+        const saved = await fetchJSON('/api/live-layouts', {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            ...getAuthHeaders(),
+          },
+          body: JSON.stringify(nextLayouts),
+          timeout: 10000,
+          retries: 1,
+          retryDelay: 1000,
+        });
+        const normalized = normalizeLiveLayouts(saved);
+        queryClient.setQueryData(['live-layouts'], normalized);
+      } catch (error) {
+        queryClient.setQueryData(['live-layouts'], previousLayouts);
+        lastSavedLayoutPayloadRef.current = '';
+        showStatusMessage(error.message || 'Failed to save layout', 'error', 8000);
+      } finally {
+        saveLayoutTimeoutRef.current = null;
+      }
+    }, 450);
+  }, [activeLayout, activeLayoutId, hydratedLayoutId, liveLayouts, workspaceStarted, workspaceTiles]);
+
+  useEffect(() => {
     const handleAddCamera = (event) => {
-      addWorkspaceTile(event.detail?.cameraName);
+      addWorkspaceTile(event.detail?.cameraName, null, {
+        autoFit: event.detail?.autoFit !== false,
+      });
     };
 
     window.addEventListener('oneberry:add-live-camera', handleAddCamera);
     return () => window.removeEventListener('oneberry:add-live-camera', handleAddCamera);
   }, [addWorkspaceTile]);
 
+  const saveCurrentWorkspaceAsLayout = useCallback(async (layoutName) => {
+    const name = String(layoutName || '').trim();
+    if (!name) return null;
+
+    const tiles = serializeWorkspaceTilesForSave(workspaceTiles);
+    const nextLayout = {
+      id: createLiveLayoutId(),
+      name,
+      cols: WORKSPACE_GRID_COLS,
+      rows: WORKSPACE_GRID_ROWS,
+      tiles,
+      cameras: tiles.map((tile) => tile.camera),
+    };
+    const previousLayouts = liveLayouts;
+    const saved = await saveLiveLayouts({
+      layouts: [...liveLayouts.layouts, nextLayout],
+    }, previousLayouts);
+    const savedLayout = saved.layouts.find((layout) => layout.id === nextLayout.id) || nextLayout;
+    setActiveLayoutId(savedLayout.id);
+    setHydratedLayoutId(savedLayout.id);
+    setLayoutEditMode(false);
+    lastSavedLayoutPayloadRef.current = JSON.stringify({
+      id: savedLayout.id,
+      cols: WORKSPACE_GRID_COLS,
+      rows: WORKSPACE_GRID_ROWS,
+      tiles,
+    });
+    return savedLayout;
+  }, [liveLayouts, saveLiveLayouts, workspaceTiles]);
+
+  const saveCurrentWorkspaceLayout = useCallback(async () => {
+    if (!activeLayoutId || !activeLayout) {
+      const name = window.prompt('Layout name');
+      if (name) await saveCurrentWorkspaceAsLayout(name);
+      return;
+    }
+
+    const tiles = serializeWorkspaceTilesForSave(workspaceTiles);
+    const previousLayouts = liveLayouts;
+    const nextLayouts = {
+      layouts: liveLayouts.layouts.map((layout) => (
+        layout.id === activeLayoutId
+          ? {
+            ...layout,
+            cols: WORKSPACE_GRID_COLS,
+            rows: WORKSPACE_GRID_ROWS,
+            tiles,
+            cameras: tiles.map((tile) => tile.camera),
+          }
+          : layout
+      )),
+    };
+    await saveLiveLayouts(nextLayouts, previousLayouts);
+    lastSavedLayoutPayloadRef.current = JSON.stringify({
+      id: activeLayoutId,
+      cols: WORKSPACE_GRID_COLS,
+      rows: WORKSPACE_GRID_ROWS,
+      tiles,
+    });
+    showStatusMessage('Layout saved');
+    setLayoutEditMode(false);
+  }, [activeLayout, activeLayoutId, liveLayouts, saveCurrentWorkspaceAsLayout, saveLiveLayouts, workspaceTiles]);
+
+  const renameCurrentWorkspaceLayout = useCallback(async () => {
+    if (!activeLayoutId || !activeLayout) return;
+    const name = window.prompt('Layout name', activeLayout.name);
+    const trimmed = String(name || '').trim();
+    if (!trimmed || trimmed === activeLayout.name) return;
+
+    await saveLiveLayouts({
+      layouts: liveLayouts.layouts.map((layout) => (
+        layout.id === activeLayoutId ? { ...layout, name: trimmed } : layout
+      )),
+    }, liveLayouts);
+  }, [activeLayout, activeLayoutId, liveLayouts, saveLiveLayouts]);
+
+  const deleteCurrentWorkspaceLayout = useCallback(async () => {
+    if (!activeLayoutId || !activeLayout) return;
+    if (!window.confirm(`Delete layout "${activeLayout.name}"?`)) return;
+
+    await saveLiveLayouts({
+      layouts: liveLayouts.layouts.filter((layout) => layout.id !== activeLayoutId),
+    }, liveLayouts);
+    setActiveLayoutId('');
+    setLayoutEditMode(false);
+    setHydratedLayoutId('');
+    lastSavedLayoutPayloadRef.current = '';
+    setWorkspaceTiles([]);
+    setWorkspaceStarted(true);
+    setLayoutEditMode(true);
+    setWorkspaceAutoGrid(true);
+  }, [activeLayout, activeLayoutId, liveLayouts, saveLiveLayouts]);
+
+  const resetCurrentWorkspaceLayout = useCallback(() => {
+    setWorkspaceTiles([]);
+    setWorkspaceStarted(true);
+    setLayoutEditMode(!activeLayoutId);
+    setCurrentPage(0);
+    setWorkspaceAutoGrid(true);
+  }, [activeLayoutId]);
+
   useEffect(() => {
-    if (!workspaceAutoGrid || workspaceTiles.length === 0) return;
+    if (workspaceStarted || !workspaceAutoGrid || workspaceTiles.length === 0) return;
 
     const targetCells = Math.min(MAX_GRID_CELLS, Math.max(1, workspaceTiles.length));
     const [optCols, optRows] = computeOptimalGrid(targetCells);
     setCols(optCols);
     setRows(optRows);
+    setWorkspaceTiles((previousTiles) => reflowWorkspaceTiles(previousTiles, optCols));
   }, [workspaceAutoGrid, workspaceTiles.length]);
 
   useEffect(() => {
-    if (!workspaceStarted || workspaceTiles.length <= 2 || rows > 1 || cols <= 3) return;
+    if (workspaceStarted || workspaceTiles.length <= 2 || rows > 1 || cols <= 3) return;
 
     const targetCells = Math.min(MAX_GRID_CELLS, Math.max(1, workspaceTiles.length));
     const [optCols, optRows] = computeOptimalGrid(targetCells);
     setCols(optCols);
     setRows(optRows);
+    setWorkspaceTiles((previousTiles) => reflowWorkspaceTiles(previousTiles, optCols));
     setWorkspaceAutoGrid(true);
   }, [cols, rows, workspaceStarted, workspaceTiles.length]);
 
@@ -648,25 +1381,16 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
         return [];
       }
 
-      const totalPages = Math.ceil(workspaceTiles.length / maxStreams);
-
-      if (currentPage >= totalPages && totalPages > 0) {
-        return [];
-      }
-
-      const startIdx = currentPage * maxStreams;
-      const endIdx = Math.min(startIdx + maxStreams, workspaceTiles.length);
       return workspaceTiles
-        .slice(startIdx, endIdx)
         .map((tile) => {
           const stream = streamByName.get(tile.cameraId);
-          return stream ? { stream, tileInstanceId: tile.instanceId } : null;
+          return stream ? { stream, tile, tileInstanceId: tile.instanceId } : null;
         })
         .filter(Boolean);
     }
 
     return [];
-  }, [workspaceStarted, workspaceTiles, streamByName, currentPage, maxStreams]);
+  }, [workspaceStarted, workspaceTiles, streamByName]);
 
   // Memoize the streams to show to prevent unnecessary re-renders
   const streamsToShow = useMemo(() => {
@@ -706,11 +1430,9 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
   useFullscreenGridNav(streamsToShow, cols, rows);
 
   const isWorkspaceMode = workspaceStarted;
-  const workspaceTotalPages = Math.ceil(workspaceTiles.length / maxStreams);
   const orderedTotalPages = Math.ceil(orderedStreams.length / maxStreams);
-  const workspaceEmptySlotCount = isWorkspaceMode && workspaceTiles.length > 0
-    ? Math.max(0, maxStreams - streamsToShow.length)
-    : 0;
+  const visibleWorkspaceTileCount = isWorkspaceMode ? streamsToShow.length : 0;
+  const workspaceEmptySlotCount = 0;
 
   const gridHasEmptySlots = !isWorkspaceMode
     && !isLoadingStreams
@@ -834,16 +1556,24 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
             </div>
           )}
 
-          {/* Grid layout picker */}
-          <div className="flex items-center gap-1.5">
-            <label className="text-sm whitespace-nowrap">{t('live.layout')}:</label>
-            <GridPicker
-              cols={cols}
-              rows={rows}
-              onSelect={(c, r) => { setCols(c); setRows(r); setCurrentPage(0); setAutoGrid(false); setWorkspaceAutoGrid(false); }}
-              maxCells={isWorkspaceMode ? workspaceTiles.length : orderedStreams.length}
-            />
-          </div>
+          {!isWorkspaceMode && (
+            <div className="flex items-center gap-1.5">
+              <label className="text-sm whitespace-nowrap">{t('live.layout')}:</label>
+              <GridPicker
+                cols={cols}
+                rows={rows}
+                onSelect={(c, r) => {
+                  setCols(c);
+                  setRows(r);
+                  setWorkspaceTiles((previousTiles) => reflowWorkspaceTiles(previousTiles, c));
+                  setCurrentPage(0);
+                  setAutoGrid(false);
+                  setWorkspaceAutoGrid(false);
+                }}
+                maxCells={orderedStreams.length}
+              />
+            </div>
+          )}
 
           {!isWorkspaceMode && isSingleStream && (
             <div className="flex items-center gap-1.5">
@@ -954,26 +1684,87 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
         </div>
       </div>
 
-      <div className="flex flex-col space-y-4 h-full">
+      <div className="live-workspace-shell">
+        <div className="live-workspace-main">
+          <div className="live-workspace-header">
+            <div className="live-workspace-title">
+              <span>{activeLayout?.name || 'Unsaved workspace'}</span>
+              <small>
+                {workspaceTiles.length} camera tile{workspaceTiles.length === 1 ? '' : 's'}
+                {activeLayoutId ? ` · ${layoutEditMode ? 'Editing' : 'Locked'}` : ''}
+              </small>
+            </div>
+            <div className="live-workspace-header-actions">
+              <button
+                type="button"
+                className="live-workspace-add-button"
+                onClick={() => {
+                  const firstCamera = streams[0]?.name;
+                  if (firstCamera) addWorkspaceTile(firstCamera);
+                }}
+                disabled={streams.length === 0 || workspaceLocked}
+                title={workspaceLocked ? 'Click Edit Layout from the menu before adding cameras' : 'Add camera'}
+              >
+                + Add Camera
+              </button>
+              <div className="live-workspace-menu-wrap">
+                <button
+                  type="button"
+                  className="live-workspace-menu-button"
+                  aria-label="Open workspace layout menu"
+                  aria-expanded={workspaceMenuOpen}
+                  onClick={() => setWorkspaceMenuOpen((open) => !open)}
+                >
+                  <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                    <circle cx="8" cy="3.25" r="1.2" />
+                    <circle cx="8" cy="8" r="1.2" />
+                    <circle cx="8" cy="12.75" r="1.2" />
+                  </svg>
+                </button>
+                {workspaceMenuOpen && (
+                  <div className="live-workspace-menu" role="menu">
+                    {activeLayoutId && (
+                      layoutEditMode ? (
+                        <button type="button" role="menuitem" onClick={() => { setWorkspaceMenuOpen(false); setLayoutEditMode(false); }}>Done Editing</button>
+                      ) : (
+                        <button type="button" role="menuitem" onClick={() => { setWorkspaceMenuOpen(false); setLayoutEditMode(true); }}>Edit Layout</button>
+                      )
+                    )}
+                    <button type="button" role="menuitem" disabled={workspaceLocked} onClick={() => { setWorkspaceMenuOpen(false); saveCurrentWorkspaceLayout(); }}>Save Layout</button>
+                    <button type="button" role="menuitem" onClick={() => {
+                      setWorkspaceMenuOpen(false);
+                      const name = window.prompt('Layout name', activeLayout?.name ? `${activeLayout.name} Copy` : '');
+                      if (name) saveCurrentWorkspaceAsLayout(name);
+                    }}>Save As</button>
+                    <button type="button" role="menuitem" disabled={!activeLayoutId} onClick={() => { setWorkspaceMenuOpen(false); renameCurrentWorkspaceLayout(); }}>Rename Layout</button>
+                    <button type="button" role="menuitem" disabled={!activeLayoutId} onClick={() => { setWorkspaceMenuOpen(false); deleteCurrentWorkspaceLayout(); }}>Delete Layout</button>
+                    <button type="button" role="menuitem" disabled={workspaceLocked} onClick={() => { setWorkspaceMenuOpen(false); resetCurrentWorkspaceLayout(); }}>Reset Layout</button>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
         <div
           id="video-grid"
-          className={`video-container ${isWorkspaceMode ? 'is-workspace-grid' : gridHasEmptySlots ? 'is-partial-grid' : 'is-filled-grid'}`}
-          style={{ '--grid-cols': cols, '--grid-rows': rows }}
+          ref={workspaceGridRef}
+          className={`video-container ${isWorkspaceMode ? 'is-workspace-grid' : gridHasEmptySlots ? 'is-partial-grid' : 'is-filled-grid'} ${visibleWorkspaceTileCount === 1 ? 'is-single-camera' : ''}`}
+          style={{ '--grid-cols': workspaceGridCols, '--grid-rows': workspaceGridRows }}
           onDragOver={(event) => {
-            if (reorderMode) return;
+            if (reorderMode || workspaceLocked) return;
             const types = Array.from(event.dataTransfer.types || []);
             if (!types.includes('application/x-oneberry-camera')) return;
             event.preventDefault();
             event.dataTransfer.dropEffect = 'copy';
           }}
           onDrop={(event) => {
-            if (reorderMode) return;
+            if (reorderMode || workspaceLocked) return;
             const types = Array.from(event.dataTransfer.types || []);
             if (!types.includes('application/x-oneberry-camera')) return;
             const cameraName = event.dataTransfer.getData('application/x-oneberry-camera') || event.dataTransfer.getData('text/plain');
             if (!cameraName) return;
             event.preventDefault();
-            addWorkspaceTile(cameraName);
+            addWorkspaceTile(cameraName, getWorkspaceGridPoint(event));
           }}
         >
           {isLoadingStreams ? (
@@ -1036,6 +1827,7 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
             <>
               {streamsToShow.map((stream, index) => {
                 const tileInstanceId = isWorkspaceMode ? workspaceStreamsToShow[index]?.tileInstanceId : '';
+                const workspaceTile = isWorkspaceMode ? workspaceStreamsToShow[index]?.tile : null;
                 const VideoCell = isWebRTC ? WebRTCVideoCell : useMSE ? MSEVideoCell : HLSVideoCell;
                 const initDelay = isWorkspaceMode
                   ? 0
@@ -1053,12 +1845,19 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
                   <div
                     key={tileInstanceId || stream.name}
                     className={`live-workspace-tile ${removingTileIds.has(tileInstanceId) ? 'is-removing' : ''}`}
-                    style={{ position: 'relative' }}
+                    style={{
+                      position: 'relative',
+                      ...(isWorkspaceMode && workspaceTile ? {
+                        gridColumn: `${Math.min(workspaceGridCols, workspaceTile.x + 1)} / span ${Math.max(1, Math.min(workspaceGridCols - workspaceTile.x, workspaceTile.w || DEFAULT_WORKSPACE_TILE_W))}`,
+                        gridRow: `${Math.min(workspaceGridRows, workspaceTile.y + 1)} / span ${Math.max(1, Math.min(workspaceGridRows - workspaceTile.y, workspaceTile.h || DEFAULT_WORKSPACE_TILE_H))}`,
+                      } : {}),
+                    }}
                     draggable={!isWorkspaceMode && reorderMode}
                     onDragStart={!isWorkspaceMode && reorderMode ? () => handleDragStart(globalIndex) : undefined}
                     onDragOver={!isWorkspaceMode && reorderMode ? (e) => handleDragOver(e, globalIndex) : undefined}
                     onDrop={!isWorkspaceMode && reorderMode ? handleDrop : undefined}
                     onDragEnd={!isWorkspaceMode && reorderMode ? handleDragEnd : undefined}
+                    onPointerDown={isWorkspaceMode && workspaceTile ? (event) => startWorkspacePointer(event, workspaceTile, 'move') : undefined}
                   >
                     {!isWorkspaceMode && reorderMode && (
                       <div
@@ -1078,7 +1877,7 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
                         {t('live.dragToReorder')}
                       </div>
                     )}
-                    {isWorkspaceMode && tileInstanceId && (
+                    {isWorkspaceMode && tileInstanceId && !workspaceLocked && (
                       <button
                         type="button"
                         className="live-workspace-tile-close"
@@ -1090,6 +1889,18 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4l8 8M12 4l-8 8" />
                         </svg>
                       </button>
+                    )}
+                    {isWorkspaceMode && workspaceTile && !workspaceLocked && (
+                      <>
+                        {['n', 'e', 's', 'w', 'ne', 'se', 'sw', 'nw'].map((handle) => (
+                          <span
+                            key={handle}
+                            className={`live-workspace-resize-handle is-${handle}`}
+                            aria-hidden="true"
+                            onPointerDown={(event) => startWorkspacePointer(event, workspaceTile, 'resize', handle)}
+                          />
+                        ))}
+                      </>
                     )}
                     <VideoCell
                       stream={stream}
@@ -1130,29 +1941,7 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
           />
         )}
 
-        {isWorkspaceMode && workspaceTiles.length > maxStreams ? (
-          <div className="pagination-controls flex justify-center items-center space-x-4 mt-4">
-            <button
-              className="btn-primary focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-50 disabled:cursor-not-allowed"
-              onClick={() => setCurrentPage(Math.max(0, currentPage - 1))}
-              disabled={currentPage === 0}
-            >
-              {t('common.previous')}
-            </button>
-
-            <span className="text-foreground">
-              {t('live.pageOf', { current: currentPage + 1, total: workspaceTotalPages })}
-            </span>
-
-            <button
-              className="btn-primary focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-50 disabled:cursor-not-allowed"
-              onClick={() => setCurrentPage(Math.min(workspaceTotalPages - 1, currentPage + 1))}
-              disabled={currentPage >= workspaceTotalPages - 1}
-            >
-              {t('common.next')}
-            </button>
-          </div>
-        ) : !isWorkspaceMode && !isSingleStream && orderedStreams.length > maxStreams ? (
+        {!isWorkspaceMode && !isSingleStream && orderedStreams.length > maxStreams ? (
           <div className="pagination-controls flex justify-center items-center space-x-4 mt-4">
             <button
               className="btn-primary focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-50 disabled:cursor-not-allowed"
@@ -1181,6 +1970,7 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
             </button>
           </div>
         ) : null}
+      </div>
       </div>
     </section>
   );

@@ -13,6 +13,8 @@
 #define MP4_SEGMENT_RECORDER_H
 
 #include <stdbool.h>
+#include <stdint.h>
+#include <time.h>
 #include <libavformat/avformat.h>
 
 // Include the header that defines segment_info_t
@@ -24,7 +26,7 @@
  * Allows callers to align external metadata (e.g., DB start_time) to the true
  * recording start aligned to a keyframe.
  */
-typedef void (*record_segment_started_cb)(void *user_ctx);
+typedef void (*record_segment_started_cb)(void *user_ctx, time_t keyframe_time, int64_t keyframe_pts);
 
 /**
  * Record an RTSP stream to an MP4 file for a specified duration

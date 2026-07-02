@@ -108,11 +108,24 @@ void handle_recordings_playback(const http_request_t *req, http_response_t *res)
 
     log_info("Using content type: %s for file: %s", content_type, recording.file_path);
 
-    // Build headers with CORS and range support
-    const char *headers = "Accept-Ranges: bytes\r\n"
-                         "Access-Control-Allow-Origin: *\r\n"
-                         "Access-Control-Allow-Methods: GET, OPTIONS\r\n"
-                         "Access-Control-Allow-Headers: Range, Origin, Content-Type, Accept\r\n";
+    // Build headers with CORS, range support, and cache hints for timeline preloading.
+    char headers[1024];
+    snprintf(headers, sizeof(headers),
+             "Accept-Ranges: bytes\r\n"
+             "Cache-Control: private, max-age=300\r\n"
+             "X-Archive-Start: %ld\r\n"
+             "X-Archive-End: %ld\r\n"
+             "X-Archive-Duration-Ms: %llu\r\n"
+             "X-Archive-First-Keyframe: %ld\r\n"
+             "X-Archive-Last-Keyframe: %ld\r\n"
+             "Access-Control-Allow-Origin: *\r\n"
+             "Access-Control-Allow-Methods: GET, OPTIONS\r\n"
+             "Access-Control-Allow-Headers: Range, Origin, Content-Type, Accept\r\n",
+             (long)recording.start_time,
+             (long)recording.end_time,
+             (unsigned long long)recording.duration_ms,
+             (long)recording.first_keyframe_time,
+             (long)recording.last_keyframe_time);
 
     // Check for Range header
     const char *range_header = http_request_get_header(req, "Range");
@@ -131,4 +144,3 @@ void handle_recordings_playback(const http_request_t *req, http_response_t *res)
 
     log_info("File serving initiated for GET /api/recordings/play/%llu", (unsigned long long)id);
 }
-

@@ -18,6 +18,63 @@
 #include "video/stream_manager.h"
 #include <cjson/cJSON.h>
 
+static bool string_contains_case_insensitive(const char *haystack, const char *needle) {
+    if (!haystack || !needle || needle[0] == '\0') {
+        return false;
+    }
+
+    return strcasestr(haystack, needle) != NULL;
+}
+
+static double profile_rank_score(const onvif_profile_t *profile) {
+    if (!profile) {
+        return 0.0;
+    }
+
+    const double area = (double)((profile->width > 0 ? profile->width : 0) * (profile->height > 0 ? profile->height : 0));
+    const double bitrate = (double)(profile->bitrate > 0 ? profile->bitrate : 0);
+    const double fps = (double)(profile->fps > 0 ? profile->fps : 0);
+    double score = area + (bitrate * 8.0) + (fps * 250.0);
+
+    const bool primary_hint =
+        string_contains_case_insensitive(profile->name, "main") ||
+        string_contains_case_insensitive(profile->name, "primary") ||
+        string_contains_case_insensitive(profile->name, "high") ||
+        string_contains_case_insensitive(profile->name, "stream 1") ||
+        string_contains_case_insensitive(profile->name, "stream1");
+    const bool secondary_hint =
+        string_contains_case_insensitive(profile->name, "sub") ||
+        string_contains_case_insensitive(profile->name, "secondary") ||
+        string_contains_case_insensitive(profile->name, "low") ||
+        string_contains_case_insensitive(profile->name, "stream 2") ||
+        string_contains_case_insensitive(profile->name, "stream2");
+
+    if (primary_hint) {
+        score += 100000000.0;
+    }
+    if (secondary_hint) {
+        score -= 50000000.0;
+    }
+
+    return score;
+}
+
+static int compare_profile_rank_desc(const void *a, const void *b) {
+    const onvif_profile_t *const *profile_a = (const onvif_profile_t *const *)a;
+    const onvif_profile_t *const *profile_b = (const onvif_profile_t *const *)b;
+    const double score_a = profile_rank_score(*profile_a);
+    const double score_b = profile_rank_score(*profile_b);
+
+    if (score_a > score_b) {
+        return -1;
+    }
+    if (score_a < score_b) {
+        return 1;
+    }
+
+    return strcmp((*profile_a)->name, (*profile_b)->name);
+}
+
 /**
  * @brief Backend-agnostic handler for GET /api/onvif/discovery/status
  */
@@ -307,8 +364,15 @@ void handle_get_onvif_device_profiles(const http_request_t *req, http_response_t
         return;
     }
 
+    const onvif_profile_t *ordered_profiles[16];
+    for (int i = 0; i < count; i++) {
+        ordered_profiles[i] = &profiles[i];
+    }
+    qsort(ordered_profiles, count, sizeof(ordered_profiles[0]), compare_profile_rank_desc);
+
     // Add profiles to array
     for (int i = 0; i < count; i++) {
+        const onvif_profile_t *profile_info = ordered_profiles[i];
         cJSON *profile = cJSON_CreateObject();
         if (!profile) {
             log_error("Failed to create JSON response");
@@ -317,27 +381,29 @@ void handle_get_onvif_device_profiles(const http_request_t *req, http_response_t
             return;
         }
 
-        cJSON_AddStringToObject(profile, "token", profiles[i].token);
-        cJSON_AddStringToObject(profile, "name", profiles[i].name);
+        cJSON_AddStringToObject(profile, "token", profile_info->token);
+        cJSON_AddStringToObject(profile, "name", profile_info->name);
         char safe_snapshot_uri[MAX_URL_LENGTH];
         char safe_stream_uri[MAX_URL_LENGTH];
 
-        if (url_strip_credentials(profiles[i].snapshot_uri, safe_snapshot_uri, sizeof(safe_snapshot_uri)) != 0) {
-            strncpy(safe_snapshot_uri, profiles[i].snapshot_uri, sizeof(safe_snapshot_uri) - 1);
+        if (url_strip_credentials(profile_info->snapshot_uri, safe_snapshot_uri, sizeof(safe_snapshot_uri)) != 0) {
+            strncpy(safe_snapshot_uri, profile_info->snapshot_uri, sizeof(safe_snapshot_uri) - 1);
             safe_snapshot_uri[sizeof(safe_snapshot_uri) - 1] = '\0';
         }
-        if (url_strip_credentials(profiles[i].stream_uri, safe_stream_uri, sizeof(safe_stream_uri)) != 0) {
-            strncpy(safe_stream_uri, profiles[i].stream_uri, sizeof(safe_stream_uri) - 1);
+        if (url_strip_credentials(profile_info->stream_uri, safe_stream_uri, sizeof(safe_stream_uri)) != 0) {
+            strncpy(safe_stream_uri, profile_info->stream_uri, sizeof(safe_stream_uri) - 1);
             safe_stream_uri[sizeof(safe_stream_uri) - 1] = '\0';
         }
 
         cJSON_AddStringToObject(profile, "snapshot_uri", safe_snapshot_uri);
         cJSON_AddStringToObject(profile, "stream_uri", safe_stream_uri);
-        cJSON_AddNumberToObject(profile, "width", profiles[i].width);
-        cJSON_AddNumberToObject(profile, "height", profiles[i].height);
-        cJSON_AddStringToObject(profile, "encoding", profiles[i].encoding);
-        cJSON_AddNumberToObject(profile, "fps", profiles[i].fps);
-        cJSON_AddNumberToObject(profile, "bitrate", profiles[i].bitrate);
+        cJSON_AddNumberToObject(profile, "width", profile_info->width);
+        cJSON_AddNumberToObject(profile, "height", profile_info->height);
+        cJSON_AddStringToObject(profile, "encoding", profile_info->encoding);
+        cJSON_AddNumberToObject(profile, "fps", profile_info->fps);
+        cJSON_AddNumberToObject(profile, "bitrate", profile_info->bitrate);
+        cJSON_AddStringToObject(profile, "stream_role",
+                                i == 0 ? "primary" : (i == 1 ? "secondary" : "additional"));
 
         cJSON_AddItemToArray(profiles_array, profile);
     }
@@ -555,4 +621,3 @@ void handle_post_test_onvif_connection(const http_request_t *req, http_response_
 
     log_info("Successfully handled POST /api/onvif/device/test request");
 }
-

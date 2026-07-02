@@ -14,6 +14,9 @@ typedef struct {
     time_t start_time;
     time_t end_time;
     uint64_t size_bytes;
+    uint64_t duration_ms;
+    time_t first_keyframe_time;
+    time_t last_keyframe_time;
     bool has_detection;
 } timeline_segment_t;
 

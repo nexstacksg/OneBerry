@@ -152,12 +152,12 @@ function PerformanceStep({ form, onChange, cpuCores }) {
       </Field>
       <Field
         label="Maximum concurrent streams"
-        hint="How many cameras Oneberry can keep active at once. Default 32, max 256. If you expect 8 cameras, choose at least 8. Requires restart to take effect."
+        hint="How many cameras Oneberry can keep active at once. Default 64, max 64. If you expect 8 cameras, choose at least 8. Requires restart to take effect."
       >
         <input
           type="number"
           min="1"
-          max="256"
+          max="64"
           class="w-full p-2 border border-input rounded bg-background text-foreground"
           value={form.maxStreams}
           onInput={e => onChange('maxStreams', e.target.value)}
@@ -209,7 +209,7 @@ export function SetupWizard({ onClose }) {
     maxStorageSize: '0',
     dbPath: '',
     threadPoolSize: '',
-    maxStreams: '32',
+    maxStreams: '64',
   });
 
   useEffect(() => {
@@ -249,7 +249,7 @@ export function SetupWizard({ onClose }) {
         max_storage_size:     parseInt(form.maxStorageSize, 10) || 0,
         db_path:              form.dbPath         || undefined,
         web_thread_pool_size: form.threadPoolSize ? parseInt(form.threadPoolSize, 10) : undefined,
-        max_streams:          parseInt(form.maxStreams, 10) || 32,
+        max_streams:          parseInt(form.maxStreams, 10) || 64,
       };
       Object.keys(payload).forEach(k => payload[k] === undefined && delete payload[k]);
 

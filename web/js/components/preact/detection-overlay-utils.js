@@ -65,13 +65,26 @@ export function setupDetectionCanvasLayout({
 
   const videoAspect = videoWidth / videoHeight;
   const canvasAspect = canvas.width / canvas.height;
+  const objectFit = typeof window !== 'undefined'
+    ? window.getComputedStyle(videoElement).objectFit
+    : 'contain';
 
   let drawWidth;
   let drawHeight;
   let offsetX = 0;
   let offsetY = 0;
 
-  if (videoAspect > canvasAspect) {
+  if (objectFit === 'cover') {
+    if (videoAspect > canvasAspect) {
+      drawHeight = canvas.height;
+      drawWidth = canvas.height * videoAspect;
+      offsetX = (canvas.width - drawWidth) / 2;
+    } else {
+      drawWidth = canvas.width;
+      drawHeight = canvas.width / videoAspect;
+      offsetY = (canvas.height - drawHeight) / 2;
+    }
+  } else if (videoAspect > canvasAspect) {
     drawWidth = canvas.width;
     drawHeight = canvas.width / videoAspect;
     offsetY = (canvas.height - drawHeight) / 2;

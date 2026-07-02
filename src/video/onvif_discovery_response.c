@@ -295,10 +295,6 @@ int receive_discovery_responses(onvif_device_info_t *devices, int max_devices) {
     int bind_result = -1;
     int original_port = ntohs(addr.sin_port); // Save original port
     
-    // Add a longer delay before first binding attempt to allow TIME_WAIT sockets to clear
-    log_info("Waiting 2 seconds before binding to allow TIME_WAIT sockets to clear");
-    sleep(2);
-    
     while (bind_attempts < max_bind_attempts) {
         bind_result = bind(sock, (struct sockaddr *)&addr, sizeof(addr));
         if (bind_result == 0) {
@@ -316,8 +312,8 @@ int receive_discovery_responses(onvif_device_info_t *devices, int max_devices) {
             addr.sin_port = htons(original_port + bind_attempts + 1);
         } else {
             // If "Address in use", wait a bit and retry
-            log_warn("Address in use, waiting 1 second before retry");
-            sleep(1);
+            log_warn("Address in use, waiting briefly before retry");
+            usleep(100000);
             
             // After a couple of attempts, try a different port
             if (bind_attempts >= 2) {
@@ -339,15 +335,15 @@ int receive_discovery_responses(onvif_device_info_t *devices, int max_devices) {
     // Add a small delay after binding to ensure the socket is fully ready
     usleep(100000); // 100ms
     
-    log_info("Waiting for discovery responses (timeout: 10 seconds, attempts: 5)");
+    log_info("Waiting for discovery responses (timeout: 1 second, attempts: 2)");
     
-    // Set timeout for select - significantly increased timeout
-    timeout.tv_sec = 10;
+    // Set a short timeout so interactive discovery returns quickly.
+    timeout.tv_sec = 1;
     timeout.tv_usec = 0;
     
-    // Wait for responses - increased number of attempts
-    for (int i = 0; i < 5; i++) {
-        log_info("Waiting for responses, attempt %d/5", i+1);
+    // Wait for responses.
+    for (int i = 0; i < 2; i++) {
+        log_info("Waiting for responses, attempt %d/2", i+1);
         
         FD_ZERO(&readfds);
         FD_SET(sock, &readfds);
@@ -453,7 +449,7 @@ int receive_discovery_responses(onvif_device_info_t *devices, int max_devices) {
         }
         
         // Reset timeout for next attempt
-        timeout.tv_sec = 2;
+        timeout.tv_sec = 1;
         timeout.tv_usec = 0;
     }
     
@@ -551,10 +547,6 @@ int receive_extended_discovery_responses(onvif_device_info_t *devices, int max_d
     int bind_result = -1;
     int original_port = ntohs(addr.sin_port); // Save original port
     
-    // Add a longer delay before first binding attempt to allow TIME_WAIT sockets to clear
-    log_info("Waiting 2 seconds before binding to allow TIME_WAIT sockets to clear");
-    sleep(2);
-    
     while (bind_attempts < max_bind_attempts) {
         bind_result = bind(sock, (struct sockaddr *)&addr, sizeof(addr));
         if (bind_result == 0) {
@@ -572,8 +564,8 @@ int receive_extended_discovery_responses(onvif_device_info_t *devices, int max_d
             addr.sin_port = htons(original_port + bind_attempts + 1);
         } else {
             // If "Address in use", wait a bit and retry
-            log_warn("Address in use, waiting 1 second before retry");
-            sleep(1);
+            log_warn("Address in use, waiting briefly before retry");
+            usleep(100000);
             
             // After a couple of attempts, try a different port
             if (bind_attempts >= 2) {

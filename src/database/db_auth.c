@@ -349,10 +349,12 @@ static void populate_user_from_stmt(sqlite3_stmt *stmt, user_t *user) {
     user->password_change_locked = sqlite3_column_int(stmt, 9) != 0;
     user->totp_enabled = sqlite3_column_int(stmt, 10) != 0;
 
-    const char *allowed_tags = (const char *)sqlite3_column_text(stmt, 11);
-    if (allowed_tags && allowed_tags[0] != '\0') {
-        strncpy(user->allowed_tags, allowed_tags, sizeof(user->allowed_tags) - 1);
-        user->allowed_tags[sizeof(user->allowed_tags) - 1] = '\0';
+    if (sqlite3_column_type(stmt, 11) != SQLITE_NULL) {
+        const char *allowed_tags = (const char *)sqlite3_column_text(stmt, 11);
+        if (allowed_tags) {
+            strncpy(user->allowed_tags, allowed_tags, sizeof(user->allowed_tags) - 1);
+            user->allowed_tags[sizeof(user->allowed_tags) - 1] = '\0';
+        }
         user->has_tag_restriction = true;
     }
 
@@ -2307,7 +2309,7 @@ int db_auth_enable_totp(int64_t user_id, bool enabled) {
 /**
  * Set the allowed_tags restriction for a user.
  * Pass NULL to remove any tag restriction (user can see all streams).
- * Pass an empty string to restrict to streams with NO tags (edge-case, generally use NULL for unrestricted).
+ * Pass an empty string to deny all tagged streams; generally use NULL for unrestricted.
  */
 int db_auth_set_allowed_tags(int64_t user_id, const char *allowed_tags) {
     sqlite3 *db = get_db_handle();
@@ -2347,7 +2349,7 @@ int db_auth_set_allowed_tags(int64_t user_id, const char *allowed_tags) {
     }
 
     log_info("allowed_tags updated for user %lld: %s", (long long)user_id,
-             allowed_tags ? allowed_tags : "(unrestricted)");
+             allowed_tags ? (allowed_tags[0] ? allowed_tags : "(none)") : "(unrestricted)");
     return 0;
 }
 
@@ -2446,6 +2448,7 @@ bool db_auth_ip_allowed_for_user(const user_t *user, const char *client_ip) {
  * Returns true when:
  *   - The user has no tag restriction (has_tag_restriction == false), OR
  *   - The stream's tag list contains at least one tag that appears in the user's allowed_tags list
+ *   - An empty allowed_tags string is a restriction that matches no streams
  */
 bool db_auth_stream_allowed_for_user(const user_t *user, const char *stream_tags) {
     if (!user) return false;
