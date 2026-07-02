@@ -253,7 +253,7 @@ export function TimelineControls() {
   };
 
   return (
-    <div className="overflow-hidden rounded-none border-x border-b border-white/10 bg-[#070a12] shadow-[0_18px_55px_rgba(15,23,42,0.24)]">
+    <div className="timeline-transport-panel overflow-hidden rounded-none border-x border-b border-white/10 bg-[#070a12] shadow-[0_18px_55px_rgba(15,23,42,0.24)]">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/10 px-3 py-2.5">
         <div className="min-w-0 flex items-center gap-3">
           <div className="flex items-center gap-1 rounded-md border border-white/10 bg-black/25 p-1">

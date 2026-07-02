@@ -103,6 +103,8 @@ export function TimelinePlayer({ videoElementRef = null, autoFullscreen = false 
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [segmentRecordingData, setSegmentRecordingData] = useState(null);
+  const [videoAspectRatio, setVideoAspectRatio] = useState('16 / 9');
+  const [videoAspectValue, setVideoAspectValue] = useState(16 / 9);
   // When arriving from a Live View fullscreen session, show a one-time overlay
   // that lets the user re-enter fullscreen with a single click.  Browser security
   // (transient activation requirement) prevents auto-calling requestFullscreen()
@@ -135,6 +137,16 @@ export function TimelinePlayer({ videoElementRef = null, autoFullscreen = false 
 
     videoElementRef.current = node;
   }, [videoElementRef]);
+
+  const handleLoadedMetadata = useCallback((event) => {
+    const video = event?.currentTarget || videoRef.current;
+    if (!video?.videoWidth || !video?.videoHeight) {
+      return;
+    }
+
+    setVideoAspectRatio(`${video.videoWidth} / ${video.videoHeight}`);
+    setVideoAspectValue(video.videoWidth / video.videoHeight);
+  }, []);
 
   const cleanupPreloadedVideo = useCallback(() => {
     if (typeof preloadedVideoCleanupRef.current !== 'function') {
@@ -961,7 +973,7 @@ export function TimelinePlayer({ videoElementRef = null, autoFullscreen = false 
   return (
     <>
       {/* Top playback toolbar: actions on the left, speed on the right. */}
-      <div className="flex items-center flex-nowrap gap-2 overflow-x-auto rounded-t-xl border border-b-0 border-slate-200 bg-white px-3 py-2 shadow-sm">
+      <div className="timeline-player-toolbar flex items-center flex-nowrap gap-2 overflow-x-auto rounded-t-xl border border-b-0 border-slate-200 bg-white px-3 py-2 shadow-sm">
         <label className="flex h-8 shrink-0 items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-2.5 text-xs text-slate-700 cursor-pointer" data-keyboard-nav-preserve>
           <input
             type="checkbox"
@@ -1023,12 +1035,17 @@ export function TimelinePlayer({ videoElementRef = null, autoFullscreen = false 
         </div>
       </div>
 
-      <div className="timeline-player-container" id="video-player">
+      <div className="timeline-player-container timeline-player-stage" id="video-player">
         <div
           ref={videoContainerRef}
           data-testid="timeline-video-container"
-          className="relative w-full overflow-hidden rounded-none border border-slate-800 bg-black shadow-[0_24px_70px_rgba(15,23,42,0.28)]"
-          style={isFullscreen ? { width: '100vw', height: '100vh' } : { aspectRatio: '16/9', maxHeight: '66vh' }}
+          className="timeline-video-surface relative w-full overflow-hidden rounded-none border border-slate-800 bg-black shadow-[0_24px_70px_rgba(15,23,42,0.28)]"
+          style={isFullscreen
+            ? { width: '100vw', height: '100vh' }
+            : {
+              '--timeline-video-aspect': videoAspectRatio,
+              '--timeline-video-aspect-value': videoAspectValue
+            }}
         >
           <video
               ref={setVideoRefs}
@@ -1040,6 +1057,7 @@ export function TimelinePlayer({ videoElementRef = null, autoFullscreen = false 
               onPlay={handlePlay}
               onPause={handlePause}
               onEnded={handleEnded}
+              onLoadedMetadata={handleLoadedMetadata}
               onTimeUpdate={handleTimeUpdate}
           ></video>
 
