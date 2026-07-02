@@ -22,9 +22,10 @@ const HIDEABLE_COLUMNS = [
  * Inline tag cell with overlay toggle
  */
 function TagCell({ recording, onTagsChanged }) {
+  const { t } = useI18n();
   const [showOverlay, setShowOverlay] = useState(false);
   return (
-    <td className="px-6 py-4">
+    <td className="recording-tags-cell px-6 py-4" data-label={t('live.tags')}>
       <div className="relative">
         <div className="flex flex-wrap gap-1 items-center">
           {(recording.tags || []).map((tag, idx) => (
@@ -326,14 +327,14 @@ export function RecordingsTable({
           <tbody ref={recordingsTableBodyRef} className="bg-card divide-y divide-border">
             {recordings.length === 0 ? (
               <tr>
-                <td colSpan={visibleCount} className="px-6 py-4 text-center text-muted-foreground">
+                <td colSpan={visibleCount} className="recording-empty-cell px-6 py-4 text-center text-muted-foreground">
                   {pagination.totalItems === 0 ? t('recordings.noRecordingsFound') : t('recordings.loadingRecordings')}
                 </td>
               </tr>
             ) : recordings.map(recording => (
               <tr key={recording.id} className={"hover:bg-muted/50" + (!!selectedRecordings[recording.id] ? " table-row-selected-recording" : "")}>
                 {canDelete && (
-                  <td className="px-4 py-4 whitespace-nowrap">
+                  <td className="recording-select-cell px-4 py-4 whitespace-nowrap">
                     <input
                       type="checkbox"
                       checked={!!selectedRecordings[recording.id]}
@@ -343,28 +344,28 @@ export function RecordingsTable({
                   </td>
                 )}
                 {isColumnVisible('stream') && (
-                  <td className="px-6 py-4 whitespace-nowrap">
+                  <td className="px-6 py-4 whitespace-nowrap" data-label={t('live.stream')}>
                     <div className="flex flex-col gap-1">
                       <span>{recording.stream || t('common.unknown')}</span>
                     </div>
                   </td>
                 )}
                 {isColumnVisible('capture_method') && (
-                  <td className="px-6 py-4 whitespace-nowrap">
+                  <td className="px-6 py-4 whitespace-nowrap" data-label={t('recordings.columnCaptureMethod')}>
                     <span className="inline-flex w-fit items-center px-2 py-0.5 rounded-full text-[10px] bg-muted text-muted-foreground border border-border">
                       {formatUtils.formatCaptureMethod(recording.capture_method)}
                     </span>
                   </td>
                 )}
-                <td className="px-6 py-4 whitespace-nowrap">{formatUtils.formatDateTime(recording.start_time_unix ?? recording.start_time)}</td>
+                <td className="px-6 py-4 whitespace-nowrap" data-label={t('recordings.columnStartTime')}>{formatUtils.formatDateTime(recording.start_time_unix ?? recording.start_time)}</td>
                 {isColumnVisible('duration') && (
-                  <td className="px-6 py-4 whitespace-nowrap">{formatUtils.formatDuration(recording.duration)}</td>
+                  <td className="px-6 py-4 whitespace-nowrap" data-label={t('recordings.columnDuration')}>{formatUtils.formatDuration(recording.duration)}</td>
                 )}
                 {isColumnVisible('size') && (
-                  <td className="px-6 py-4 whitespace-nowrap">{recording.size || t('common.unknown')}</td>
+                  <td className="px-6 py-4 whitespace-nowrap" data-label={t('recordings.columnSize')}>{recording.size || t('common.unknown')}</td>
                 )}
                 {isColumnVisible('detections') && (
-                  <td className="px-6 py-4">
+                  <td className="recording-detections-cell px-6 py-4" data-label={t('recordings.detections')}>
                     {recording.detection_labels && recording.detection_labels.length > 0 ? (
                       <div className="flex flex-wrap gap-1">
                         {recording.detection_labels.map((det, idx) => (
@@ -389,7 +390,7 @@ export function RecordingsTable({
                   <TagCell recording={recording} onTagsChanged={onTagsChanged} />
                 )}
                 {isColumnVisible('actions') && (
-                  <td className="px-6 py-4 whitespace-nowrap">
+                  <td className="recording-actions-cell px-6 py-4 whitespace-nowrap" data-label={t('common.actions')}>
                     <div className="flex space-x-2">
                       <button className="p-1 rounded-full focus:outline-none"
                               style={{color: 'hsl(var(--primary))'}}

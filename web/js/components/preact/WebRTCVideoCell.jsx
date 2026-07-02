@@ -51,6 +51,7 @@ const FULLSCREEN_ARROW_SEEK_SECONDS = 10;
 const FULLSCREEN_SEEK_SETTLE_TOLERANCE_SECONDS = 1.5;
 const FULLSCREEN_SEGMENT_CACHE_TTL_MS = 5 * 60 * 1000;
 const FULLSCREEN_PLAYBACK_WARMUP_TTL_MS = 20 * 1000;
+const FULLSCREEN_SEAMLESS_ADVANCE_REMAINING_SECONDS = 0.85;
 const DEFAULT_ICE_SERVERS = [{ urls: 'stun:stun.l.google.com:19302' }];
 
 let iceServersCache = null;
@@ -542,6 +543,7 @@ export function WebRTCVideoCell({
     const nextRequestId = fullscreenPlaybackRequestRef.current + 1;
     fullscreenPlaybackRequestRef.current = nextRequestId;
     fullscreenPlaybackCoverRequestRef.current = nextRequestId;
+    fullscreenSeamlessAdvanceSegmentRef.current = null;
     warmFullscreenPlaybackUrl(sample.playbackUrl);
 
     const playbackVideo = playbackVideoRef.current;
@@ -636,6 +638,13 @@ export function WebRTCVideoCell({
       return;
     }
 
+    const preloadedNext = fullscreenNextPlaybackRef.current;
+    if (preloadedNext?.sample &&
+        preloadedNext.sample.segmentId !== fullscreenPlayback.segmentId) {
+      handleFullscreenPreviewSelect(preloadedNext.sample);
+      return;
+    }
+
     const requestId = fullscreenPlaybackRequestRef.current + 1;
     fullscreenPlaybackRequestRef.current = requestId;
     resolveFullscreenPlaybackSample(segmentEnd + 1, {
@@ -678,6 +687,17 @@ export function WebRTCVideoCell({
   const fullscreenPlaybackSeekTargetRef = useRef(null);
   const fullscreenPlaybackCoverFrameRef = useRef(null);
   const fullscreenPlaybackCoverRequestRef = useRef(0);
+  const fullscreenNextPlaybackRef = useRef(null);
+  const fullscreenNextPlaybackCleanupRef = useRef(null);
+  const fullscreenSeamlessAdvanceSegmentRef = useRef(null);
+
+  const cleanupFullscreenNextPlayback = useCallback(() => {
+    if (typeof fullscreenNextPlaybackCleanupRef.current === 'function') {
+      fullscreenNextPlaybackCleanupRef.current();
+    }
+    fullscreenNextPlaybackCleanupRef.current = null;
+    fullscreenNextPlaybackRef.current = null;
+  }, []);
 
   useEffect(() => {
     const syncFullscreenState = () => {
@@ -701,8 +721,9 @@ export function WebRTCVideoCell({
       setFullscreenPlaybackTimestamp(null);
       setFullscreenPlaybackCoverFrame(null);
       setIsFullscreenPlaybackFrameReady(false);
+      cleanupFullscreenNextPlayback();
     }
-  }, [isFullscreenCell]);
+  }, [cleanupFullscreenNextPlayback, isFullscreenCell]);
 
   useEffect(() => {
     const video = playbackVideoRef.current;
@@ -762,6 +783,20 @@ export function WebRTCVideoCell({
       setFullscreenPlaybackTimestamp(nextTimestamp);
       fullscreenPlaybackTimestampRef.current = nextTimestamp;
       requestFullscreenPlaybackCoverRelease(video);
+    }
+
+    const remainingSeconds = Number.isFinite(video.duration)
+      ? video.duration - (Number(video.currentTime) || 0)
+      : Infinity;
+    const preloadedNext = fullscreenNextPlaybackRef.current;
+    if (remainingSeconds <= FULLSCREEN_SEAMLESS_ADVANCE_REMAINING_SECONDS &&
+        preloadedNext?.sample &&
+        preloadedNext.video &&
+        preloadedNext.video.readyState >= 2 &&
+        preloadedNext.sample.segmentId !== fullscreenPlayback.segmentId &&
+        fullscreenSeamlessAdvanceSegmentRef.current !== fullscreenPlayback.segmentId) {
+      fullscreenSeamlessAdvanceSegmentRef.current = fullscreenPlayback.segmentId;
+      handleFullscreenPreviewSelect(preloadedNext.sample);
     }
   };
 
@@ -930,6 +965,81 @@ export function WebRTCVideoCell({
 
     return sample;
   }, [stream?.name]);
+
+  useEffect(() => {
+    cleanupFullscreenNextPlayback();
+
+    if (!isFullscreenCell || !fullscreenPlayback) {
+      return undefined;
+    }
+
+    const segmentEnd = Number(fullscreenPlayback.segmentEndTimestamp);
+    if (!Number.isFinite(segmentEnd)) {
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    resolveFullscreenPlaybackSample(segmentEnd + 1, {
+      mode: 'forward',
+      maxForwardGapSeconds: 5
+    }).then((sample) => {
+      if (cancelled ||
+          !sample?.playbackUrl ||
+          sample.segmentId === fullscreenPlayback.segmentId) {
+        return;
+      }
+
+      const preloadVideo = document.createElement('video');
+      preloadVideo.preload = 'auto';
+      preloadVideo.muted = true;
+      preloadVideo.playsInline = true;
+      preloadVideo.src = sample.playbackUrl;
+
+      const cleanup = () => {
+        try {
+          preloadVideo.pause();
+        } catch (error) {
+          // Ignore cleanup failures.
+        }
+        preloadVideo.removeAttribute('src');
+        try {
+          preloadVideo.load();
+        } catch (error) {
+          // Ignore cleanup failures.
+        }
+        if (fullscreenNextPlaybackCleanupRef.current === cleanup) {
+          fullscreenNextPlaybackCleanupRef.current = null;
+        }
+        if (fullscreenNextPlaybackRef.current?.sample?.segmentId === sample.segmentId) {
+          fullscreenNextPlaybackRef.current = null;
+        }
+      };
+
+      fullscreenNextPlaybackRef.current = {
+        sample,
+        video: preloadVideo
+      };
+      fullscreenNextPlaybackCleanupRef.current = cleanup;
+
+      try {
+        preloadVideo.load();
+      } catch (error) {
+        cleanup();
+      }
+    });
+
+    return () => {
+      cancelled = true;
+      cleanupFullscreenNextPlayback();
+    };
+  }, [
+    cleanupFullscreenNextPlayback,
+    fullscreenPlayback?.segmentEndTimestamp,
+    fullscreenPlayback?.segmentId,
+    isFullscreenCell,
+    resolveFullscreenPlaybackSample
+  ]);
 
   useEffect(() => {
     if (!isFullscreenCell) {

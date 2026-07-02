@@ -389,7 +389,22 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
   const [layoutEditMode, setLayoutEditMode] = useState(false);
   const [urlStreamHydrated, setUrlStreamHydrated] = useState(false);
   const [removingTileIds, setRemovingTileIds] = useState(new Set());
+  const [isMobileViewport, setIsMobileViewport] = useState(false);
   const removeTimeoutsRef = useRef(new Map());
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia('(max-width: 768px)');
+    const updateMobileViewport = () => setIsMobileViewport(mediaQuery.matches);
+
+    updateMobileViewport();
+    mediaQuery.addEventListener?.('change', updateMobileViewport);
+    mediaQuery.addListener?.(updateMobileViewport);
+
+    return () => {
+      mediaQuery.removeEventListener?.('change', updateMobileViewport);
+      mediaQuery.removeListener?.(updateMobileViewport);
+    };
+  }, []);
 
   // Tag filter: '' means "All"
   const [tagFilter, setTagFilter] = useState(() => {
@@ -1047,6 +1062,7 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
   const startWorkspacePointer = useCallback((event, tile, mode = 'move', edges = '') => {
     if (!workspaceStarted || !tile) return;
     if (workspaceLocked) return;
+    if (isMobileViewport) return;
 
     const target = event.target;
     if (
@@ -1072,7 +1088,7 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
     window.addEventListener('pointermove', handleWorkspacePointerMove);
     window.addEventListener('pointerup', finishWorkspacePointer);
     window.addEventListener('pointercancel', finishWorkspacePointer);
-  }, [finishWorkspacePointer, handleWorkspacePointerMove, workspaceLocked, workspaceStarted]);
+  }, [finishWorkspacePointer, handleWorkspacePointerMove, isMobileViewport, workspaceLocked, workspaceStarted]);
 
   useEffect(() => () => {
     finishWorkspacePointer();
@@ -1751,7 +1767,7 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
         <div
           id="video-grid"
           ref={workspaceGridRef}
-          className={`video-container ${isWorkspaceMode ? 'is-workspace-grid' : gridHasEmptySlots ? 'is-partial-grid' : 'is-filled-grid'} ${visibleWorkspaceTileCount === 1 ? 'is-single-camera' : ''}`}
+          className={`video-container ${isWorkspaceMode ? 'is-workspace-grid' : gridHasEmptySlots ? 'is-partial-grid' : 'is-filled-grid'} ${visibleWorkspaceTileCount === 1 ? 'is-single-camera' : ''} ${isMobileViewport && isWorkspaceMode ? 'is-mobile-workspace-stack' : ''}`}
           style={{ '--grid-cols': workspaceGridCols, '--grid-rows': workspaceGridRows }}
           onDragOver={(event) => {
             if (reorderMode || workspaceLocked) return;
@@ -1893,7 +1909,7 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
                         </svg>
                       </button>
                     )}
-                    {isWorkspaceMode && workspaceTile && !workspaceLocked && (
+                    {isWorkspaceMode && workspaceTile && !workspaceLocked && !isMobileViewport && (
                       <>
                         {['n', 'e', 's', 'w', 'ne', 'se', 'sw', 'nw'].map((handle) => (
                           <span
