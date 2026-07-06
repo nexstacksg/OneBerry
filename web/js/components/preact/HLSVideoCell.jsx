@@ -9,6 +9,7 @@ import { SnapshotButton } from './SnapshotManager.jsx';
 import { LoadingIndicator } from './LoadingIndicator.jsx';
 import { showStatusMessage } from './ToastContainer.jsx';
 import { PTZControls } from './PTZControls.jsx';
+import { PTZToggleButton } from './PTZToggleButton.jsx';
 import { ConfirmDialog } from './UI.jsx';
 import { getGo2rtcBaseUrl, isGo2rtcAvailable, isGo2rtcEnabled, isForceNativeHls } from '../../utils/settings-utils.js';
 import { forceNavigation } from '../../utils/navigation-utils.js';
@@ -19,7 +20,7 @@ import { createPlayerTelemetry } from '../../utils/player-telemetry.js';
 import { StreamQualitySelector } from './StreamQualitySelector.jsx';
 import { useStreamQuality } from './useStreamQuality.js';
 import { updateStreamRecordingQuality } from '../../utils/stream-quality-utils.js';
-import { captureVideoSnapshot, createPrivacyHandlers } from './video-cell-helpers.js';
+import { captureVideoSnapshot, createPrivacyHandlers, refreshStreamRegistration } from './video-cell-helpers.js';
 import { PrivacyModeOverlays, StreamStatusBadge } from './VideoCellOverlays.jsx';
 import { LivePreviewPoster } from './LivePreviewPoster.jsx';
 import Hls from 'hls.js';
@@ -113,41 +114,6 @@ export function HLSVideoCell({
   const recoveringRef = useRef(false);   // True when we're in the middle of error recovery (prevents counter reset)
   const hlsUrlRef = useRef(null);        // Master manifest URL — stored for session-expiry recovery
   const prevStatusRef = useRef(stream.status); // Track previous stream status for transition detection
-
-  /**
-   * Refresh the stream's go2rtc registration
-   * This is useful when HLS connections fail due to stale go2rtc state
-   * @returns {Promise<boolean>} true if refresh was successful
-   */
-  const refreshStreamRegistration = async () => {
-    if (!stream?.name) {
-      console.warn('Cannot refresh stream: no stream name');
-      return false;
-    }
-
-    try {
-      console.log(`Refreshing go2rtc registration for stream ${stream.name}`);
-      const response = await fetch(`/api/streams/${encodeURIComponent(stream.name)}/refresh`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        console.log(`Successfully refreshed go2rtc registration for stream ${stream.name}:`, data);
-        return true;
-      } else {
-        const errorText = await response.text();
-        console.warn(`Failed to refresh stream ${stream.name}: ${response.status} - ${errorText}`);
-        return false;
-      }
-    } catch (err) {
-      console.error(`Error refreshing stream ${stream.name}:`, err);
-      return false;
-    }
-  };
 
   // Initialize HLS player when component mounts or retry is triggered
   useEffect(() => {
@@ -577,7 +543,7 @@ export function HLSVideoCell({
 
     // Refresh the stream's go2rtc registration before retrying
     // This helps recover from stale go2rtc state that causes HLS failures
-    await refreshStreamRegistration();
+    await refreshStreamRegistration(stream?.name);
 
     // Small delay to allow go2rtc to re-register the stream
     await new Promise(resolve => setTimeout(resolve, 500));
@@ -788,29 +754,11 @@ export function HLSVideoCell({
         )}
         {/* PTZ control toggle button */}
         {stream.ptz_enabled && isPlaying && (
-          <button
-            className={`ptz-toggle-btn ${showPTZControls ? 'active' : ''}`}
-            title={showPTZControls ? t('live.hidePtzControls') : t('live.showPtzControls')}
-            onClick={() => setShowPTZControls(!showPTZControls)}
-            style={{
-              backgroundColor: showPTZControls ? 'rgba(59, 130, 246, 0.8)' : 'transparent',
-              border: 'none',
-              padding: '5px',
-              borderRadius: '4px',
-              color: 'white',
-              cursor: 'pointer',
-              transition: 'background-color 0.2s ease'
-            }}
-            onMouseOver={(e) => !showPTZControls && (e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.2)')}
-            onMouseOut={(e) => !showPTZControls && (e.currentTarget.style.backgroundColor = 'transparent')}
-          >
-            {/* PTZ/Joystick icon */}
-            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="3"/>
-              <path d="M12 2v4M12 18v4M2 12h4M18 12h4"/>
-              <path d="M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
-            </svg>
-          </button>
+          <PTZToggleButton
+            active={showPTZControls}
+            onToggle={() => setShowPTZControls(!showPTZControls)}
+            t={t}
+          />
         )}
         {/* Force refresh stream button */}
         {isPlaying && (

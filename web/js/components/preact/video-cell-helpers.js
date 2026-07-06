@@ -2,6 +2,34 @@ import { drawDetectionsOnCanvas } from './DetectionOverlay.jsx';
 import { showStatusMessage } from './ToastContainer.jsx';
 import { formatFilenameTimestamp } from '../../utils/date-utils.js';
 
+export async function refreshStreamRegistration(streamName) {
+  if (!streamName) {
+    console.warn('Cannot refresh stream: no stream name');
+    return false;
+  }
+
+  try {
+    console.log(`Refreshing go2rtc registration for stream ${streamName}`);
+    const response = await fetch(`/api/streams/${encodeURIComponent(streamName)}/refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.warn(`Failed to refresh stream ${streamName}: ${response.status} - ${errorText}`);
+      return false;
+    }
+
+    const data = await response.json();
+    console.log(`Successfully refreshed go2rtc registration for stream ${streamName}:`, data);
+    return true;
+  } catch (err) {
+    console.error(`Error refreshing stream ${streamName}:`, err);
+    return false;
+  }
+}
+
 export function createPrivacyHandlers({
   stream,
   t,

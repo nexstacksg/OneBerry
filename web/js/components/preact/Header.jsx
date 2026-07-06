@@ -203,7 +203,7 @@ const buildResponsiveLayoutTiles = (tiles) => {
   });
 };
 
-const makeLiveHref = (params = {}) => {
+const makePageHref = (page, params = {}) => {
   const search = new URLSearchParams();
   Object.entries(params).forEach(([key, value]) => {
     if (value !== undefined && value !== null && value !== '') {
@@ -211,19 +211,11 @@ const makeLiveHref = (params = {}) => {
     }
   });
   const query = search.toString();
-  return query ? `index.html?${query}` : 'index.html';
+  return query ? `${page}?${query}` : page;
 };
 
-const makeStreamsHref = (params = {}) => {
-  const search = new URLSearchParams();
-  Object.entries(params).forEach(([key, value]) => {
-    if (value !== undefined && value !== null && value !== '') {
-      search.set(key, value);
-    }
-  });
-  const query = search.toString();
-  return query ? `streams.html?${query}` : 'streams.html';
-};
+const makeLiveHref = (params = {}) => makePageHref('index.html', params);
+const makeStreamsHref = (params = {}) => makePageHref('streams.html', params);
 
 const buildProfileFormData = (user = {}) => ({
   username: user.username || '',

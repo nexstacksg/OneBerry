@@ -10,6 +10,7 @@ import { SnapshotButton } from './SnapshotManager.jsx';
 import { LoadingIndicator } from './LoadingIndicator.jsx';
 import { showStatusMessage } from './ToastContainer.jsx';
 import { PTZControls } from './PTZControls.jsx';
+import { PTZToggleButton } from './PTZToggleButton.jsx';
 import { FullscreenTimelineOverlay } from './FullscreenTimelineOverlay.jsx';
 import { ConfirmDialog } from './UI.jsx';
 import { getGo2rtcBaseUrl } from '../../utils/settings-utils.js';
@@ -22,7 +23,7 @@ import { createPlayerTelemetry } from '../../utils/player-telemetry.js';
 import { StreamQualitySelector } from './StreamQualitySelector.jsx';
 import { useStreamQuality } from './useStreamQuality.js';
 import { updateStreamRecordingQuality } from '../../utils/stream-quality-utils.js';
-import { captureVideoSnapshot, createPrivacyHandlers } from './video-cell-helpers.js';
+import { captureVideoSnapshot, createPrivacyHandlers, refreshStreamRegistration } from './video-cell-helpers.js';
 import { PrivacyModeOverlays, StreamStatusBadge } from './VideoCellOverlays.jsx';
 import { LivePreviewPoster } from './LivePreviewPoster.jsx';
 import 'webrtc-adapter';
@@ -1409,7 +1410,7 @@ export function WebRTCVideoCell({
                 );
                 (async () => {
                   try {
-                    await refreshStreamRegistration();
+                    await refreshStreamRegistration(stream?.name);
                     // Brief pause for go2rtc to re-register the RTSP source
                     await new Promise(resolve => setTimeout(resolve, 500));
                   } catch (err) {
@@ -1618,7 +1619,7 @@ export function WebRTCVideoCell({
 
               (async () => {
                 try {
-                  await refreshStreamRegistration();
+                  await refreshStreamRegistration(stream?.name);
                   await new Promise(resolve => setTimeout(resolve, 800));
                 } catch (err) {
                   console.error(`Error refreshing stream ${stream.name} after ICE disconnect:`, err);
@@ -1849,7 +1850,7 @@ export function WebRTCVideoCell({
           );
           (async () => {
             try {
-              await refreshStreamRegistration();
+              await refreshStreamRegistration(stream?.name);
               await new Promise(resolve => setTimeout(resolve, OFFER_FAILURE_REFRESH_DELAY_MS));
             } catch (refreshError) {
               console.error(`Error refreshing stream ${stream.name} after offer failure:`, refreshError);
@@ -2026,41 +2027,6 @@ export function WebRTCVideoCell({
     return cleanupWebRTCResources;
   }, [stream?.name, retryCount, selectedStreamSource, clearStalePlaybackErrorIfActive]);
 
-  /**
-   * Refresh the stream's go2rtc registration
-   * This is useful when WebRTC connections fail due to stale go2rtc state
-   * @returns {Promise<boolean>} true if refresh was successful
-   */
-  const refreshStreamRegistration = async () => {
-    if (!stream?.name) {
-      console.warn('Cannot refresh stream: no stream name');
-      return false;
-    }
-
-    try {
-      console.log(`Refreshing go2rtc registration for stream ${stream.name}`);
-      const response = await fetch(`/api/streams/${encodeURIComponent(stream.name)}/refresh`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        console.log(`Successfully refreshed go2rtc registration for stream ${stream.name}:`, data);
-        return true;
-      } else {
-        const errorText = await response.text();
-        console.warn(`Failed to refresh stream ${stream.name}: ${response.status} - ${errorText}`);
-        return false;
-      }
-    } catch (err) {
-      console.error(`Error refreshing stream ${stream.name}:`, err);
-      return false;
-    }
-  };
-
   // Handle retry button click
   const handleRetry = async () => {
     console.log(`Retry requested for stream ${stream?.name}`);
@@ -2089,7 +2055,7 @@ export function WebRTCVideoCell({
 
     // Refresh the stream's go2rtc registration before retrying
     // This helps recover from stale go2rtc state that causes WebRTC failures
-    await refreshStreamRegistration();
+    await refreshStreamRegistration(stream?.name);
 
     // Delay to allow go2rtc to fully re-register the stream (longer for slow devices)
     await new Promise(resolve => setTimeout(resolve, 2000));
@@ -2655,29 +2621,11 @@ export function WebRTCVideoCell({
         )}
         {/* PTZ control toggle button */}
         {(showFullStreamControls || isFullscreenCell) && stream.ptz_enabled && isPlaying && (
-          <button
-            className={`ptz-toggle-btn ${showPTZControls ? 'active' : ''}`}
-            title={showPTZControls ? t('live.hidePtzControls') : t('live.showPtzControls')}
-            onClick={() => setShowPTZControls(!showPTZControls)}
-            style={{
-              backgroundColor: showPTZControls ? 'rgba(59, 130, 246, 0.8)' : 'transparent',
-              border: 'none',
-              padding: '5px',
-              borderRadius: '4px',
-              color: 'white',
-              cursor: 'pointer',
-              transition: 'background-color 0.2s ease'
-            }}
-            onMouseOver={(e) => !showPTZControls && (e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.2)')}
-            onMouseOut={(e) => !showPTZControls && (e.currentTarget.style.backgroundColor = 'transparent')}
-          >
-            {/* PTZ/Joystick icon */}
-            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="3"/>
-              <path d="M12 2v4M12 18v4M2 12h4M18 12h4"/>
-              <path d="M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
-            </svg>
-          </button>
+          <PTZToggleButton
+            active={showPTZControls}
+            onToggle={() => setShowPTZControls(!showPTZControls)}
+            t={t}
+          />
         )}
         {/* Force refresh stream button - show during connecting (isLoading) or playing */}
         {showFullStreamControls && (isPlaying || isLoading) && (
