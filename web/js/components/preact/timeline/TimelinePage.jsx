@@ -1262,7 +1262,7 @@ export function TimelinePage() {
         <div
           id="timeline-container"
           data-keyboard-nav-preserve
-          className="relative mb-2 w-full overflow-hidden rounded-b-xl rounded-t-none border-x border-b border-white/10 bg-[#070a12] shadow-[0_22px_60px_rgba(15,23,42,0.24)]"
+          className="timeline-scrubber-panel relative mb-2 w-full overflow-hidden rounded-b-xl rounded-t-none border-x border-b border-white/10 bg-[#070a12] shadow-[0_22px_60px_rgba(15,23,42,0.24)]"
           ref={timelineContainerRef}
         >
           <TimelineBarBody
@@ -1303,9 +1303,9 @@ export function TimelinePage() {
   const returnUrl = idsMode ? (sessionStorage.getItem(RECORDINGS_RETURN_URL_KEY) || 'recordings.html') : null;
 
   return (
-    <div className="timeline-page w-full pb-8">
-      <div className="mb-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="flex flex-wrap items-center justify-between gap-3">
+    <div className="timeline-page timeline-review-page w-full pb-8">
+      <div className="timeline-review-header mb-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="timeline-review-header-row flex flex-wrap items-center justify-between gap-3">
           <div className="min-w-0">
             <h1 className="text-xl font-semibold text-slate-950 sm:text-2xl">
               {idsMode ? t('timeline.selectedRecordingsTimeline') : t('timeline.timelinePlayback')}
@@ -1320,7 +1320,7 @@ export function TimelinePage() {
               )}
             </div>
           </div>
-          <div className="flex rounded-lg border border-slate-200 bg-slate-100 p-1">
+          <div className="timeline-view-tabs flex rounded-lg border border-slate-200 bg-slate-100 p-1">
           <a
             href={returnUrl || 'recordings.html'}
             className="rounded-md px-3 py-1.5 text-sm font-medium text-slate-600 transition-colors hover:bg-white hover:text-slate-950"
@@ -1350,7 +1350,7 @@ export function TimelinePage() {
 
       {idsMode ? (
         /* IDs mode: compact info bar */
-        <div className="mt-4 flex flex-wrap items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
+        <div className="timeline-filter-bar mt-4 flex flex-wrap items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
           <span className="font-medium">
             {t('timeline.recordingsCount', { count: segments.length })}
             {idsSegmentInfo?.multi_stream && ` · ${t('timeline.streamsCount', { count: [...new Set(segments.map(s => s.stream))].length })}`}
@@ -1417,7 +1417,7 @@ export function TimelinePage() {
         </div>
       ) : (
         /* Normal mode: compact single-row stream + date selectors */
-        <div className="mt-4 grid gap-3 md:grid-cols-[1fr_auto] md:items-end">
+        <div className="timeline-filter-bar mt-4 grid gap-3 md:grid-cols-[1fr_auto] md:items-end">
           <div className="min-w-[180px]">
             <label htmlFor="stream-selector" className="mb-1 block text-xs font-medium uppercase tracking-[0.08em] text-slate-500">{t('nav.streams')}</label>
             <select

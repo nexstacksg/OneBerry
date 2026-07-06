@@ -3,6 +3,121 @@
  * Uses CSS custom properties for theme-aware colors
  */
 
+.timeline-review-page {
+    --timeline-panel-bg: #070a12;
+    --timeline-panel-border: rgba(255, 255, 255, 0.1);
+    --timeline-panel-muted: rgba(255, 255, 255, 0.58);
+}
+
+.timeline-review-header {
+    border-radius: 0.75rem;
+}
+
+.timeline-filter-bar {
+    align-items: end;
+}
+
+.timeline-view-tabs {
+    flex-shrink: 0;
+}
+
+.timeline-player-toolbar {
+    position: relative;
+    z-index: 2;
+    min-height: 3rem;
+    border-color: hsl(var(--border) / 0.75) !important;
+    background: hsl(var(--card) / 0.98) !important;
+    scrollbar-width: none;
+}
+
+.timeline-player-toolbar::-webkit-scrollbar {
+    display: none;
+}
+
+.timeline-player-toolbar button,
+.timeline-player-toolbar a,
+.timeline-player-toolbar label {
+    min-height: 2.25rem;
+}
+
+.timeline-player-stage {
+    width: 100%;
+    aspect-ratio: auto;
+    border-radius: 0;
+    display: flex;
+    justify-content: center;
+    background:
+        radial-gradient(circle at 50% 0%, rgba(15, 23, 42, 0.34), transparent 46%),
+        #020409;
+}
+
+.timeline-video-surface {
+    --timeline-video-max-height: calc(100dvh - 17rem);
+    aspect-ratio: var(--timeline-video-aspect, 16 / 9);
+    height: auto;
+    width: min(100%, calc(var(--timeline-video-max-height) * var(--timeline-video-aspect-value, 1.7778)));
+    max-width: 100%;
+    max-height: var(--timeline-video-max-height);
+    min-height: 0;
+    display: grid;
+    place-items: center;
+    border-color: rgba(15, 23, 42, 0.85) !important;
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.03), 0 18px 55px rgba(15, 23, 42, 0.24) !important;
+}
+
+.timeline-video-surface video {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    background: #000;
+}
+
+.timeline-transport-panel,
+.timeline-scrubber-panel {
+    border-color: var(--timeline-panel-border) !important;
+    background:
+        linear-gradient(180deg, rgba(11, 16, 27, 0.98), rgba(4, 7, 12, 0.98)),
+        var(--timeline-panel-bg) !important;
+}
+
+.timeline-transport-panel {
+    box-shadow: none !important;
+}
+
+.timeline-transport-panel > div {
+    min-height: 3.25rem;
+}
+
+.timeline-scrubber-panel {
+    margin-bottom: 0.75rem;
+    border-radius: 0 0 0.75rem 0.75rem;
+    box-shadow: 0 18px 48px -32px rgba(2, 6, 23, 0.75) !important;
+}
+
+.timeline-scrubber-panel .timeline-ruler {
+    background: rgba(0, 0, 0, 0.28);
+}
+
+.timeline-scrubber-panel .timeline-segments {
+    min-height: 2.75rem;
+}
+
+.timeline-scrubber-panel .timeline-segment {
+    top: 20%;
+    height: 60%;
+    border-radius: 999px;
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.06);
+}
+
+.timeline-scrubber-panel .timeline-segment:hover {
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.18), 0 6px 16px rgba(0, 0, 0, 0.32);
+}
+
+.timeline-scrubber-panel .timeline-label {
+    color: rgba(255, 255, 255, 0.66);
+}
+
 /* Timeline container */
 .timeline-container {
     position: relative;
@@ -102,6 +217,31 @@
     object-fit: contain;
 }
 
+.timeline-player-container.timeline-player-stage {
+    display: block;
+    width: 100%;
+    height: auto;
+    aspect-ratio: auto;
+    overflow: visible;
+    border-radius: 0;
+    background: transparent;
+}
+
+.timeline-player-container.timeline-player-stage .timeline-video-surface {
+    width: 100%;
+    max-width: 100%;
+    height: auto;
+    max-height: none;
+    aspect-ratio: var(--timeline-video-aspect, 16 / 9);
+    background: #000;
+}
+
+.timeline-player-container.timeline-player-stage .timeline-video-surface video {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+}
+
 /* Timeline controls */
 .timeline-controls {
     display: flex;
@@ -196,8 +336,69 @@
 
 /* Responsive adjustments */
 @media (max-width: 768px) {
+    .timeline-review-page {
+        padding-bottom: 1rem;
+    }
+
+    .timeline-review-header {
+        padding: 0.75rem !important;
+        margin-bottom: 0.75rem !important;
+    }
+
+    .timeline-review-header-row {
+        align-items: stretch;
+    }
+
+    .timeline-view-tabs {
+        width: 100%;
+        overflow-x: auto;
+        scrollbar-width: none;
+    }
+
+    .timeline-view-tabs::-webkit-scrollbar {
+        display: none;
+    }
+
+    .timeline-view-tabs > a {
+        flex: 1 0 auto;
+        text-align: center;
+    }
+
+    .timeline-filter-bar {
+        display: grid !important;
+        grid-template-columns: 1fr;
+        gap: 0.75rem;
+    }
+
+    .timeline-player-toolbar {
+        flex-wrap: wrap;
+        align-items: stretch;
+        gap: 0.5rem;
+        padding: 0.625rem !important;
+        overflow-x: visible;
+    }
+
+    .timeline-player-toolbar > * {
+        flex-wrap: wrap;
+    }
+
+    .timeline-video-surface {
+        --timeline-video-max-height: min(52dvh, 24rem);
+        min-height: 0;
+    }
+
+    .timeline-transport-panel > div {
+        align-items: stretch;
+        padding: 0.625rem !important;
+    }
+
+    .timeline-scrubber-panel {
+        border-radius: 0 0 0.625rem 0.625rem;
+    }
+
     .timeline-container {
         height: 80px;
+        margin-bottom: 12px;
     }
     
     .timeline-ruler {
@@ -210,6 +411,13 @@
     
     .timeline-time-display {
         font-size: 16px;
+        min-width: 0;
+        overflow-wrap: anywhere;
+    }
+
+    .timeline-controls {
+        flex-wrap: wrap;
+        gap: 8px;
     }
     
     .timeline-control-btn {
@@ -220,5 +428,64 @@
     .timeline-zoom-btn {
         width: 26px;
         height: 26px;
+    }
+}
+
+@media (max-width: 480px) {
+    .timeline-player-toolbar button,
+    .timeline-player-toolbar a,
+    .timeline-player-toolbar label {
+        flex: 1 1 auto;
+        justify-content: center;
+    }
+
+    .timeline-video-surface {
+        --timeline-video-max-height: min(48dvh, 19rem);
+        min-height: 0;
+    }
+
+    .timeline-transport-panel > div > div {
+        width: 100%;
+        justify-content: space-between;
+    }
+
+    .timeline-scrubber-panel .timeline-ruler {
+        height: 1.75rem;
+    }
+
+    .timeline-scrubber-panel .timeline-segments {
+        min-height: 2.5rem;
+    }
+
+    .timeline-container {
+        height: 72px;
+        border-radius: 6px;
+    }
+
+    .timeline-ruler {
+        height: 22px;
+    }
+
+    .timeline-label {
+        font-size: 9px;
+        max-width: 44px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .timeline-segments {
+        height: 50px;
+    }
+
+    .timeline-controls {
+        align-items: stretch;
+    }
+
+    .timeline-time-display {
+        order: 3;
+        flex: 1 1 100%;
+        text-align: center;
+        font-size: 14px;
     }
 }

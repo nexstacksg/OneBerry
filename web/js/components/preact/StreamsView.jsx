@@ -1273,7 +1273,7 @@ export function StreamsView() {
         const validatedDevice = variables?.device || selectedDevice;
         if (data.success && validatedDevice) {
           const info = data.info || {};
-          setDeviceProfiles([{
+          const rtspProfile = {
             token: `rtsp-${validatedDevice.ip_address}`,
             name: 'RTSP Main Stream',
             stream_uri: data.url,
@@ -1282,7 +1282,10 @@ export function StreamsView() {
             encoding: info.codec || 'unknown',
             fps: info.fps || 0,
             isRtsp: true
-          }]);
+          };
+          setDeviceProfiles([rtspProfile]);
+          setSelectedProfile(rtspProfile);
+          setSelectedSecondaryProfile(null);
           showStatusMessage(t('streams.connectionSuccessful'), 'success', 3000);
         } else {
           showStatusMessage(
@@ -1298,6 +1301,23 @@ export function StreamsView() {
       }
     }
   );
+
+  const validateRtspDiscoveredDevice = (device) => {
+    if (!device?.rtsp) {
+      return false;
+    }
+
+    const ports = Array.isArray(device.rtsp_ports) ? device.rtsp_ports : [];
+
+    validateRtspDeviceMutation.mutate({
+      device,
+      ip_address: device.ip_address,
+      port: ports[0] || 554,
+      username: onvifCredentials.username,
+      password: onvifCredentials.password
+    });
+    return true;
+  };
 
   /**
    * Validate that an ONVIF device host address is a well-formed hostname, IPv4
@@ -1398,11 +1418,23 @@ export function StreamsView() {
         return attemptFetch(httpFallbackUrl);
       });
     },
-    onSuccess: (data) => {
-      setDeviceProfiles(data.profiles || []);
+    onSuccess: (data, variables) => {
+      const profiles = data.profiles || [];
+      if (profiles.length === 0 &&
+          variables?.device?.rtsp &&
+          validateRtspDiscoveredDevice(variables.device)) {
+        return;
+      }
+
+      setDeviceProfiles(profiles);
       setIsLoadingProfiles(false);
     },
-    onError: (error) => {
+    onError: (error, variables) => {
+      if (variables?.device?.rtsp &&
+          validateRtspDiscoveredDevice(variables.device)) {
+        return;
+      }
+
       showStatusMessage(t('streams.errorLoadingDeviceProfiles', { message: error.message }), 'error', 5000);
       setIsLoadingProfiles(false);
     }
@@ -1419,18 +1451,25 @@ export function StreamsView() {
       onMutate: () => {
         setIsLoadingProfiles(true);
       },
-      onSuccess: (data) => {
+      onSuccess: (data, variables) => {
         if (data.success) {
           showStatusMessage(t('streams.connectionSuccessful'), 'success', 3000);
-          if (selectedDevice) {
-            getDeviceProfiles(selectedDevice);
+          const testedDevice = variables?.device || selectedDevice;
+          if (testedDevice) {
+            getDeviceProfiles(testedDevice);
           }
         } else {
+          if (variables?.fallbackToRtsp && validateRtspDiscoveredDevice(variables.device)) {
+            return;
+          }
           showStatusMessage(t('streams.connectionFailed', { message: data.message }), 'error', 5000);
           setIsLoadingProfiles(false);
         }
       },
-      onError: (error) => {
+      onError: (error, variables) => {
+        if (variables?.fallbackToRtsp && validateRtspDiscoveredDevice(variables.device)) {
+          return;
+        }
         showStatusMessage(t('streams.errorTestingConnection', { message: error.message }), 'error', 5000);
         setIsLoadingProfiles(false);
       }
@@ -1611,17 +1650,11 @@ export function StreamsView() {
     // Store the selected device first
     setSelectedDevice(device);
     setDeviceProfiles([]);
+    setSelectedProfile(null);
     setSelectedSecondaryProfile(null);
 
     if (device.rtsp && !device.onvif) {
-      const ports = Array.isArray(device.rtsp_ports) ? device.rtsp_ports : [];
-      validateRtspDeviceMutation.mutate({
-        device,
-        ip_address: device.ip_address,
-        port: ports[0] || 554,
-        username: onvifCredentials.username,
-        password: onvifCredentials.password
-      });
+      validateRtspDiscoveredDevice(device);
       return;
     }
 
@@ -1637,7 +1670,9 @@ export function StreamsView() {
       url: deviceUrl,
       username: onvifCredentials.username,
       password: onvifCredentials.password,
-      insecure: isInsecure
+      insecure: isInsecure,
+      device,
+      fallbackToRtsp: !!device.rtsp
     });
   };
 
