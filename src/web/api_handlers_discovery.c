@@ -59,6 +59,20 @@ typedef struct {
 } rtsp_stream_info_t;
 
 typedef struct {
+    const char *path;
+    const char *name;
+    const char *role;
+    const char *family;
+} rtsp_path_candidate_t;
+
+typedef struct {
+    char url[MAX_URL_LENGTH];
+    char safe_url[MAX_URL_LENGTH];
+    rtsp_stream_info_t info;
+    const rtsp_path_candidate_t *candidate;
+} rtsp_validated_profile_t;
+
+typedef struct {
     pthread_mutex_t mutex;
     bool running;
     bool completed;
@@ -81,14 +95,19 @@ static discovery_scan_state_t g_camera_discovery = {
     .mutex = PTHREAD_MUTEX_INITIALIZER
 };
 
-static const char *COMMON_RTSP_PATHS[] = {
-    "/stream1",
-    "/live",
-    "/ch0_0.h264",
-    "/cam/realmonitor?channel=1&subtype=0",
-    "/Streaming/Channels/101",
-    "/h264Preview_01_main",
-    NULL
+static const rtsp_path_candidate_t COMMON_RTSP_PATHS[] = {
+    { "/stream1", "RTSP Main Stream", "primary", "generic-stream" },
+    { "/stream2", "RTSP Sub Stream", "secondary", "generic-stream" },
+    { "/live", "RTSP Live Stream", "primary", "generic-live" },
+    { "/ch0_0.h264", "RTSP Main Stream", "primary", "legacy-ch0" },
+    { "/ch0_1.h264", "RTSP Sub Stream", "secondary", "legacy-ch0" },
+    { "/cam/realmonitor?channel=1&subtype=0", "RTSP Main Stream", "primary", "dahua-realmonitor" },
+    { "/cam/realmonitor?channel=1&subtype=1", "RTSP Sub Stream", "secondary", "dahua-realmonitor" },
+    { "/Streaming/Channels/101", "RTSP Main Stream", "primary", "hikvision-channels" },
+    { "/Streaming/Channels/102", "RTSP Sub Stream", "secondary", "hikvision-channels" },
+    { "/h264Preview_01_main", "RTSP Main Stream", "primary", "h264-preview" },
+    { "/h264Preview_01_sub", "RTSP Sub Stream", "secondary", "h264-preview" },
+    { NULL, NULL, NULL, NULL }
 };
 
 static int resolve_scan_network(const char *requested_network, char *network, size_t network_size) {
@@ -644,8 +663,16 @@ void handle_post_validate_rtsp_device(const http_request_t *req, http_response_t
     rtsp_stream_info_t selected_info;
     memset(&selected_info, 0, sizeof(selected_info));
     char last_error[256] = {0};
+    const char *selected_family = NULL;
+    rtsp_validated_profile_t profiles[8];
+    int profile_count = 0;
 
-    for (int i = 0; COMMON_RTSP_PATHS[i] != NULL && !success; i++) {
+    for (int i = 0; COMMON_RTSP_PATHS[i].path != NULL; i++) {
+        const rtsp_path_candidate_t *candidate = &COMMON_RTSP_PATHS[i];
+        if (success && selected_family && strcmp(candidate->family, selected_family) != 0) {
+            break;
+        }
+
         char raw_url[MAX_URL_LENGTH];
         char credentialed_url[MAX_URL_LENGTH];
         char safe_url[MAX_URL_LENGTH];
@@ -653,7 +680,7 @@ void handle_post_validate_rtsp_device(const http_request_t *req, http_response_t
         rtsp_stream_info_t info;
         memset(&info, 0, sizeof(info));
 
-        build_rtsp_url(raw_url, sizeof(raw_url), ip, port, COMMON_RTSP_PATHS[i]);
+        build_rtsp_url(raw_url, sizeof(raw_url), ip, port, candidate->path);
         if (url_apply_credentials(raw_url, username, password, credentialed_url, sizeof(credentialed_url)) != 0) {
             snprintf(credentialed_url, sizeof(credentialed_url), "%s", raw_url);
         }
@@ -665,6 +692,8 @@ void handle_post_validate_rtsp_device(const http_request_t *req, http_response_t
         cJSON *attempt = cJSON_CreateObject();
         if (attempt) {
             cJSON_AddStringToObject(attempt, "url", safe_url);
+            cJSON_AddStringToObject(attempt, "name", candidate->name);
+            cJSON_AddStringToObject(attempt, "stream_role", candidate->role);
             cJSON_AddBoolToObject(attempt, "success", result == 0);
             if (result != 0) {
                 cJSON_AddStringToObject(attempt, "message", error_msg);
@@ -673,9 +702,19 @@ void handle_post_validate_rtsp_device(const http_request_t *req, http_response_t
         }
 
         if (result == 0) {
-            success = true;
-            snprintf(selected_url, sizeof(selected_url), "%s", credentialed_url);
-            selected_info = info;
+            if (!success) {
+                success = true;
+                selected_family = candidate->family;
+                snprintf(selected_url, sizeof(selected_url), "%s", credentialed_url);
+                selected_info = info;
+            }
+            if (profile_count < (int)(sizeof(profiles) / sizeof(profiles[0]))) {
+                snprintf(profiles[profile_count].url, sizeof(profiles[profile_count].url), "%s", credentialed_url);
+                snprintf(profiles[profile_count].safe_url, sizeof(profiles[profile_count].safe_url), "%s", safe_url);
+                profiles[profile_count].info = info;
+                profiles[profile_count].candidate = candidate;
+                profile_count++;
+            }
         } else {
             snprintf(last_error, sizeof(last_error), "%s", error_msg);
         }
@@ -691,6 +730,31 @@ void handle_post_validate_rtsp_device(const http_request_t *req, http_response_t
         cJSON_AddStringToObject(root, "url", selected_url);
         cJSON_AddStringToObject(root, "safe_url", safe_selected_url);
         cJSON_AddStringToObject(root, "status", "Valid RTSP Stream");
+
+        cJSON *profiles_json = cJSON_AddArrayToObject(root, "profiles");
+        if (profiles_json) {
+            for (int i = 0; i < profile_count; i++) {
+                cJSON *profile_json = cJSON_CreateObject();
+                if (!profile_json || !profiles[i].candidate) {
+                    cJSON_Delete(profile_json);
+                    continue;
+                }
+
+                char token[128];
+                snprintf(token, sizeof(token), "rtsp-%s-%s", ip, profiles[i].candidate->role);
+                cJSON_AddStringToObject(profile_json, "token", token);
+                cJSON_AddStringToObject(profile_json, "name", profiles[i].candidate->name);
+                cJSON_AddStringToObject(profile_json, "stream_role", profiles[i].candidate->role);
+                cJSON_AddStringToObject(profile_json, "stream_uri", profiles[i].url);
+                cJSON_AddStringToObject(profile_json, "safe_url", profiles[i].safe_url);
+                cJSON_AddNumberToObject(profile_json, "width", profiles[i].info.width);
+                cJSON_AddNumberToObject(profile_json, "height", profiles[i].info.height);
+                cJSON_AddNumberToObject(profile_json, "fps", (int)profiles[i].info.fps);
+                cJSON_AddStringToObject(profile_json, "encoding", profiles[i].info.codec);
+                cJSON_AddBoolToObject(profile_json, "isRtsp", true);
+                cJSON_AddItemToArray(profiles_json, profile_json);
+            }
+        }
 
         cJSON *info = cJSON_AddObjectToObject(root, "info");
         if (info) {
