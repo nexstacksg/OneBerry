@@ -1296,26 +1296,26 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
     setWorkspaceAutoGrid(true);
   }, [activeLayoutId]);
 
-  useEffect(() => {
-    if (workspaceStarted || !workspaceAutoGrid || workspaceTiles.length === 0) return;
-
-    const targetCells = Math.min(MAX_GRID_CELLS, Math.max(1, workspaceTiles.length));
+  const applyOptimalGridForTiles = useCallback((tileCount, enableAutoGrid = true) => {
+    const targetCells = Math.min(MAX_GRID_CELLS, Math.max(1, tileCount));
     const [optCols, optRows] = computeOptimalGrid(targetCells);
     setCols(optCols);
     setRows(optRows);
     setWorkspaceTiles((previousTiles) => reflowWorkspaceTiles(previousTiles, optCols));
-  }, [workspaceAutoGrid, workspaceTiles.length]);
+    if (enableAutoGrid) {
+      setWorkspaceAutoGrid(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (workspaceStarted || !workspaceAutoGrid || workspaceTiles.length === 0) return;
+    applyOptimalGridForTiles(workspaceTiles.length, false);
+  }, [applyOptimalGridForTiles, workspaceAutoGrid, workspaceTiles.length, workspaceStarted]);
 
   useEffect(() => {
     if (workspaceStarted || workspaceTiles.length <= 2 || rows > 1 || cols <= 3) return;
-
-    const targetCells = Math.min(MAX_GRID_CELLS, Math.max(1, workspaceTiles.length));
-    const [optCols, optRows] = computeOptimalGrid(targetCells);
-    setCols(optCols);
-    setRows(optRows);
-    setWorkspaceTiles((previousTiles) => reflowWorkspaceTiles(previousTiles, optCols));
-    setWorkspaceAutoGrid(true);
-  }, [cols, rows, workspaceStarted, workspaceTiles.length]);
+    applyOptimalGridForTiles(workspaceTiles.length, true);
+  }, [applyOptimalGridForTiles, cols, rows, workspaceStarted, workspaceTiles.length]);
 
   const buildingTree = useMemo(() => buildBuildingTree(
     streams,
