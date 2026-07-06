@@ -214,6 +214,17 @@ const makeLiveHref = (params = {}) => {
   return query ? `index.html?${query}` : 'index.html';
 };
 
+const makeStreamsHref = (params = {}) => {
+  const search = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== '') {
+      search.set(key, value);
+    }
+  });
+  const query = search.toString();
+  return query ? `streams.html?${query}` : 'streams.html';
+};
+
 const buildProfileFormData = (user = {}) => ({
   username: user.username || '',
   password: '',
@@ -609,6 +620,7 @@ export function Header({ version = VERSION }) {
   // While the role is still loading (null) we conservatively show all items
   // so the nav doesn't flash/reorder after load.
   const isAdmin = userRole === null || userRole === 'admin';
+  const canModifyStreams = userRole === null || userRole === 'admin' || userRole === 'user';
   const canEditCurrentUser = authEnabled && !demoMode && Boolean(currentUser?.id);
   const displayUsername = username || (demoMode ? t('auth.demoViewer') : t('auth.user'));
 
@@ -825,6 +837,12 @@ export function Header({ version = VERSION }) {
     forceNavigation(makeLiveHref({ layout: 'none', stream: cameraName }), event);
   }, [activeNav, liveSelection.layout]);
 
+  const handleCameraSettingsClick = useCallback((event, cameraName) => {
+    event.preventDefault();
+    event.stopPropagation();
+    forceNavigation(makeStreamsHref({ editStream: cameraName }), event);
+  }, []);
+
   const renderCameraList = () => {
     if (sidebarCameraList.length === 0) {
       return (
@@ -855,6 +873,17 @@ export function Header({ version = VERSION }) {
                 <TreeIcon type="camera" />
                 <span className="sidebar-camera-name">{stream.name}</span>
               </a>
+              <button
+                type="button"
+                className="sidebar-camera-action-button"
+                aria-label={`Open ${stream.name} stream settings`}
+                title={`Open ${stream.name} stream settings`}
+                onClick={(event) => handleCameraSettingsClick(event, stream.name)}
+              >
+                <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                  <path d="M11.63 1.38a1 1 0 0 0-1.26 0l-1.06.84a6.98 6.98 0 0 0-1.59.93l-1.34-.27a1 1 0 0 0-1.11.53L4.5 5.86a7.02 7.02 0 0 0-.33 1.82l-1.03.83a1 1 0 0 0-.37.78v1.22c0 .29.13.57.37.78l1.03.83c.05.62.16 1.23.33 1.82l.77 1.45a1 1 0 0 0 1.11.53l1.34-.27c.51.37 1.04.68 1.59.93l1.06.84a1 1 0 0 0 1.26 0l1.06-.84c.55-.25 1.08-.56 1.59-.93l1.34.27a1 1 0 0 0 1.11-.53l.77-1.45c.17-.59.28-1.2.33-1.82l1.03-.83a1 1 0 0 0 .37-.78V9.29a1 1 0 0 0-.37-.78l-1.03-.83a7.02 7.02 0 0 0-.33-1.82l-.77-1.45a1 1 0 0 0-1.11-.53l-1.34.27a6.98 6.98 0 0 0-1.59-.93l-1.06-.84ZM10 12.75A2.75 2.75 0 1 1 10 7.25a2.75 2.75 0 0 1 0 5.5Z" />
+                </svg>
+              </button>
             </li>
           );
         })}

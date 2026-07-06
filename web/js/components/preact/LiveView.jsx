@@ -257,15 +257,22 @@ function buildResponsiveWorkspaceLayout(workspaceTiles) {
     const col = index % layoutCols;
     const row = Math.floor(index / layoutCols);
     const x = Math.floor((col * WORKSPACE_GRID_COLS) / layoutCols);
-    const y = Math.floor((row * WORKSPACE_GRID_ROWS) / layoutRows);
+    const rowStart = Math.floor((row * WORKSPACE_GRID_ROWS) / layoutRows);
     const nextX = Math.floor(((col + 1) * WORKSPACE_GRID_COLS) / layoutCols);
-    const nextY = Math.floor(((row + 1) * WORKSPACE_GRID_ROWS) / layoutRows);
+    const rowEnd = Math.floor(((row + 1) * WORKSPACE_GRID_ROWS) / layoutRows);
+    const width = Math.max(1, nextX - x);
+    const rowHeight = Math.max(1, rowEnd - rowStart);
+    const height = Math.min(
+      rowHeight,
+      Math.max(1, Math.round(width * (WORKSPACE_GRID_ROWS / WORKSPACE_GRID_COLS)))
+    );
+    const y = rowStart + Math.floor((rowHeight - height) / 2);
     return normalizeWorkspaceBounds({
       ...tile,
       x,
       y,
-      w: Math.max(1, nextX - x),
-      h: Math.max(1, nextY - y),
+      w: width,
+      h: height,
     }, WORKSPACE_GRID_COLS, WORKSPACE_GRID_ROWS);
   });
 }
@@ -613,7 +620,7 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
               // If the stream from URL exists in the loaded streams, use it
               setSelectedStream(streamParam);
               if (!urlStreamHydrated) {
-                setWorkspaceTiles(buildResponsiveWorkspaceLayout([createWorkspaceTile(streamParam)]));
+                setWorkspaceTiles([normalizeWorkspaceBounds(createWorkspaceTile(streamParam), WORKSPACE_GRID_COLS, WORKSPACE_GRID_ROWS)]);
                 setWorkspaceStarted(true);
                 setWorkspaceAutoGrid(true);
                 setUrlStreamHydrated(true);
@@ -854,6 +861,7 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
     setWorkspaceTiles((previousTiles) => {
       const currentTile = previousTiles.find((tile) => tile.instanceId === instanceId);
       if (!currentTile) return previousTiles;
+      const siblingTiles = previousTiles.filter((tile) => tile.instanceId !== instanceId);
 
       const proposedTile = normalizeWorkspaceBounds(
         typeof updater === 'function' ? updater(currentTile) : { ...currentTile, ...updater },
@@ -876,6 +884,25 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
         });
       }
 
+      const fallbackArea = findBestOpenWorkspaceArea(
+        siblingTiles,
+        workspaceGridCols,
+        workspaceGridRows,
+        { x: proposedTile.x, y: proposedTile.y }
+      );
+
+      if (fallbackArea && fallbackArea.w >= proposedTile.w && fallbackArea.h >= proposedTile.h) {
+        return previousTiles.map((tile) => (
+          tile.instanceId === instanceId
+            ? {
+              ...proposedTile,
+              x: fallbackArea.x,
+              y: fallbackArea.y,
+            }
+            : tile
+        ));
+      }
+
       return previousTiles;
     });
   }, [workspaceGridCols, workspaceGridRows]);
@@ -894,28 +921,25 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
       return;
     }
 
-    const shouldAutoTile = !activeLayoutId && !placement && options.autoFit !== false;
+    const shouldAutoTile = !activeLayoutId && workspaceAutoGrid && options.autoFit !== false;
     setWorkspaceStarted(true);
     setWorkspaceTiles((previousTiles) => {
       const candidateTile = createWorkspaceTile(cameraId);
-      if (shouldAutoTile || (!placement && workspaceAutoGrid && options.autoFit !== false)) {
+      if (shouldAutoTile) {
         return buildResponsiveWorkspaceLayout([...previousTiles, candidateTile]);
       }
 
-      const openArea = findBestOpenWorkspaceArea(
+      const desiredWidth = Math.min(DEFAULT_WORKSPACE_TILE_W, workspaceGridCols);
+      const desiredHeight = Math.min(DEFAULT_WORKSPACE_TILE_H, workspaceGridRows);
+
+      const openSlot = findOpenWorkspaceSlot(
         previousTiles,
-        workspaceGridCols,
-        workspaceGridRows,
-        placement
-      );
-      const openSlot = openArea || findOpenWorkspaceSlot(
-        previousTiles,
-        Math.min(DEFAULT_WORKSPACE_TILE_W, workspaceGridCols),
-        Math.min(DEFAULT_WORKSPACE_TILE_H, workspaceGridRows),
+        desiredWidth,
+        desiredHeight,
         workspaceGridCols,
         workspaceGridRows
       );
-      const point = openArea || placement || {
+      const point = placement || {
         x: openSlot?.x ?? 0,
         y: openSlot?.y ?? 0,
       };
@@ -923,8 +947,8 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
         ...candidateTile,
         x: point.x,
         y: point.y,
-        w: openArea?.w ?? DEFAULT_WORKSPACE_TILE_W,
-        h: openArea?.h ?? DEFAULT_WORKSPACE_TILE_H,
+        w: desiredWidth,
+        h: desiredHeight,
       }, workspaceGridCols, workspaceGridRows);
       const collision = findTileCollision(nextTile, previousTiles);
       if (collision) {
@@ -935,15 +959,15 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
         const fallback = normalizeWorkspaceBounds(createWorkspaceTile(cameraId, {
           x: openSlot.x,
           y: openSlot.y,
-          w: openSlot.w ?? DEFAULT_WORKSPACE_TILE_W,
-          h: openSlot.h ?? DEFAULT_WORKSPACE_TILE_H,
+          w: desiredWidth,
+          h: desiredHeight,
         }), workspaceGridCols, workspaceGridRows);
         return [...previousTiles, fallback];
       }
 
       return [...previousTiles, nextTile];
     });
-    if (placement) {
+    if (placement && !shouldAutoTile) {
       setWorkspaceAutoGrid(false);
     } else if (shouldAutoTile || (workspaceAutoGrid && options.autoFit !== false)) {
       setWorkspaceAutoGrid(true);

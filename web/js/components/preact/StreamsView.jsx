@@ -245,6 +245,10 @@ export function StreamsView() {
   const [onvifNetworkOverride, setOnvifNetworkOverride] = useState('auto');
   const [onvifResolution, setOnvifResolution] = useState('');
   const [onvifFps, setOnvifFps] = useState('');
+  const [pendingEditStream, setPendingEditStream] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get('editStream') || '';
+  });
 
   // Track which stream rows are expanded to show health/status details
   const [expandedStreams, setExpandedStreams] = useState({});
@@ -1045,6 +1049,18 @@ export function StreamsView() {
       showStatusMessage(t('streams.errorLoadingStreamDetails', { message: error.message }));
     }
   };
+
+  useEffect(() => {
+    if (!pendingEditStream || !canModifyStreams) return;
+
+    const streamId = pendingEditStream;
+    setPendingEditStream('');
+    void openEditStreamModal(streamId);
+
+    if (window.history?.replaceState) {
+      window.history.replaceState({}, '', 'streams.html');
+    }
+  }, [canModifyStreams, openEditStreamModal, pendingEditStream]);
 
   // Close modal
   const closeModal = () => {

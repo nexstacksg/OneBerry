@@ -24,6 +24,7 @@ export function computeOptimalGrid(n) {
   const viewportAspect = (typeof window !== 'undefined' && window.innerWidth > 0 && window.innerHeight > 0)
     ? (window.innerWidth / window.innerHeight)
     : 1;
+  const cameraAspect = 16 / 9;
 
   let bestCols = 1;
   let bestRows = 1;
@@ -37,7 +38,8 @@ export function computeOptimalGrid(n) {
 
       const waste = cells - count;
       const layoutAspect = cols / rows;
-      const aspectPenalty = Math.abs(Math.log(layoutAspect / viewportAspect));
+      const tileAspect = viewportAspect / layoutAspect;
+      const aspectPenalty = Math.abs(Math.log(tileAspect / cameraAspect));
       const stripPenalty = count > 2 && (cols === 1 || rows === 1) ? 2.75 : 0;
       const balancePenalty = Math.abs(cols - rows) * 0.08;
       const sizePenalty = cells * 0.01;

@@ -240,6 +240,13 @@ body > .container {
     margin-left: 0;
 }
 
+.sidebar-live-camera-list .sidebar-camera-node {
+    display: flex;
+    align-items: center;
+    gap: 0.2rem;
+    min-width: 0;
+}
+
 .sidebar-building-row,
 .sidebar-area-row {
     display: flex;
@@ -309,6 +316,37 @@ body > .container {
     margin-left: 3.85rem;
     padding: 0.25rem 0.45rem;
     font-size: 0.76rem;
+}
+
+.sidebar-live-camera-list .sidebar-camera-link {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.sidebar-camera-action-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    width: 1.65rem;
+    height: 1.65rem;
+    margin-right: 0.2rem;
+    border: 0;
+    border-radius: 0.45rem;
+    background: transparent;
+    color: hsl(var(--muted-foreground));
+    cursor: pointer;
+    transition: background-color 160ms ease, color 160ms ease;
+}
+
+.sidebar-camera-action-button:hover {
+    background: hsl(var(--muted));
+    color: hsl(var(--foreground));
+}
+
+.sidebar-camera-action-button svg {
+    width: 0.95rem;
+    height: 0.95rem;
 }
 
 .sidebar-building-link:hover,
