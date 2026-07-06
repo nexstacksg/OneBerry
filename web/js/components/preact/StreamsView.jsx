@@ -1257,18 +1257,32 @@ export function StreamsView() {
         const validatedDevice = variables?.device || selectedDevice;
         if (data.success && validatedDevice) {
           const info = data.info || {};
-          const rtspProfile = {
-            token: `rtsp-${validatedDevice.ip_address}`,
-            name: 'RTSP Main Stream',
-            stream_uri: data.url,
-            width: info.width || 0,
-            height: info.height || 0,
-            encoding: info.codec || 'unknown',
-            fps: info.fps || 0,
-            isRtsp: true
-          };
-          setDeviceProfiles([rtspProfile]);
-          setSelectedProfile(rtspProfile);
+          const rtspProfiles = Array.isArray(data.profiles) && data.profiles.length > 0
+            ? data.profiles.map((profile, index) => ({
+                token: profile.token || `rtsp-${validatedDevice.ip_address}-${index}`,
+                name: profile.name || (index === 0 ? 'RTSP Main Stream' : 'RTSP Sub Stream'),
+                stream_uri: profile.stream_uri || profile.url || data.url,
+                width: profile.width || 0,
+                height: profile.height || 0,
+                encoding: profile.encoding || profile.codec || 'unknown',
+                fps: profile.fps || 0,
+                stream_role: profile.stream_role || (index === 0 ? 'primary' : 'secondary'),
+                isRtsp: true
+              }))
+            : [{
+                token: `rtsp-${validatedDevice.ip_address}`,
+                name: 'RTSP Main Stream',
+                stream_uri: data.url,
+                width: info.width || 0,
+                height: info.height || 0,
+                encoding: info.codec || 'unknown',
+                fps: info.fps || 0,
+                stream_role: 'primary',
+                isRtsp: true
+              }];
+          const primaryProfile = rtspProfiles.find(profile => getDiscoveryProfileRole(profile, 0) === 'primary') || rtspProfiles[0];
+          setDeviceProfiles(rtspProfiles);
+          setSelectedProfile(primaryProfile);
           setSelectedSecondaryProfile(null);
           showStatusMessage(t('streams.connectionSuccessful'), 'success', 3000);
         } else {
