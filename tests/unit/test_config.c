@@ -433,6 +433,62 @@ void test_env_integer_whitespace_handling(void) {
     rmdir(dir);
 }
 
+void test_legacy_max_streams_values_are_upgraded(void) {
+    char temp_dir[] = "/tmp/lightnvr_legacy_streams_XXXXXX";
+    char *dir = mkdtemp(temp_dir);
+    TEST_ASSERT_NOT_NULL(dir);
+
+    char config_path[512];
+    char storage_path[512];
+    char models_path[512];
+    char db_path[512];
+    char web_root[512];
+    char log_path[512];
+    char pid_path[512];
+
+    snprintf(config_path, sizeof(config_path), "%s/test.ini", dir);
+    snprintf(storage_path, sizeof(storage_path), "%s/storage", dir);
+    snprintf(models_path, sizeof(models_path), "%s/models", dir);
+    snprintf(db_path, sizeof(db_path), "%s/lightnvr.db", dir);
+    snprintf(web_root, sizeof(web_root), "%s/web", dir);
+    snprintf(log_path, sizeof(log_path), "%s/lightnvr.log", dir);
+    snprintf(pid_path, sizeof(pid_path), "%s/lightnvr.pid", dir);
+
+    FILE *config_file = fopen(config_path, "w");
+    TEST_ASSERT_NOT_NULL(config_file);
+    fprintf(config_file,
+            "[general]\n"
+            "pid_file = %s\n"
+            "log_file = %s\n\n"
+            "[storage]\n"
+            "path = %s\n\n"
+            "[models]\n"
+            "path = %s\n\n"
+            "[database]\n"
+            "path = %s\n\n"
+            "[web]\n"
+            "root = %s\n\n"
+            "[streams]\n"
+            "max_streams = 32\n",
+            pid_path, log_path, storage_path, models_path, db_path, web_root);
+    fclose(config_file);
+
+    TEST_ASSERT_EQUAL_INT(0, mkdir(web_root, 0755));
+
+    set_custom_config_path(config_path);
+    TEST_ASSERT_EQUAL_INT(0, load_config(&cfg));
+    TEST_ASSERT_EQUAL_INT(128, cfg.max_streams);
+    TEST_ASSERT_NOT_NULL(cfg.streams);
+
+    unlink(config_path);
+    unlink(db_path);
+    unlink(log_path);
+    rmdir(storage_path);
+    rmdir(models_path);
+    rmdir(web_root);
+    rmdir(dir);
+}
+
 /* ================================================================
  * main
  * ================================================================ */
@@ -490,9 +546,9 @@ int main(void) {
     RUN_TEST(test_get_loaded_config_path_initially);
     RUN_TEST(test_save_config_accepts_hidden_ini_dotfile);
     RUN_TEST(test_env_integer_whitespace_handling);
+    RUN_TEST(test_legacy_max_streams_values_are_upgraded);
 
     int result = UNITY_END();
     shutdown_logger();
     return result;
 }
-

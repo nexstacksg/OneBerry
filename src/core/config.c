@@ -21,6 +21,8 @@
 // Global configuration variable
 config_t g_config;
 
+#define DEFAULT_MAX_STREAMS 128
+
 /**
  * Safe integer conversion from string using strtol.
  * Returns the converted value, or fallback on failure (empty string, non-numeric, overflow).
@@ -276,7 +278,7 @@ void load_default_config(config_t *config) {
     memset(config, 0, sizeof(config_t));
 
     // --- Runtime stream limit ---
-    config->max_streams = 128; // default; overridden by [streams] max_streams in INI
+    config->max_streams = DEFAULT_MAX_STREAMS; // overridden by [streams] max_streams in INI
     config->streams = calloc(config->max_streams, sizeof(stream_config_t));
     if (!config->streams) {
         // Fatal: we can't run without a streams array. Caller will detect NULL.
@@ -1004,6 +1006,40 @@ static int load_config_from_file(const char *filename, config_t *config) {
     return 0;
 }
 
+static int resize_stream_slots(config_t *config, int new_max) {
+    if (!config || new_max < 1 || new_max > MAX_STREAMS) return -1;
+    if (new_max == config->max_streams) return 0;
+
+    stream_config_t *p = realloc(config->streams, (size_t)new_max * sizeof(stream_config_t));
+    if (!p) {
+        log_error("Failed to realloc streams array for max_streams=%d, keeping %d",
+                  new_max, config->max_streams);
+        return -1;
+    }
+
+    if (new_max > config->max_streams) {
+        memset(p + config->max_streams, 0,
+               (size_t)(new_max - config->max_streams) * sizeof(stream_config_t));
+    }
+
+    config->streams = p;
+    config->max_streams = new_max;
+    return 0;
+}
+
+static void normalize_legacy_stream_capacity(config_t *config) {
+    if (!config) return;
+
+    if (config->max_streams == 32 || config->max_streams == 64) {
+        int old_max = config->max_streams;
+        if (resize_stream_slots(config, DEFAULT_MAX_STREAMS) == 0) {
+            log_warn("Legacy max_streams value %d detected; upgraded runtime capacity to %d. "
+                     "Save settings to persist the new value.",
+                     old_max, config->max_streams);
+        }
+    }
+}
+
 // Load stream configurations from database
 int load_stream_configs(config_t *config) {
     if (!config || !config->streams) return -1;
@@ -1300,6 +1336,8 @@ int load_config(config_t *config) {
     // This allows LIGHTNVR_ prefixed env vars to set config values
     // that are not already set in the config file (useful for container deployments)
     apply_env_overrides(config);
+
+    normalize_legacy_stream_capacity(config);
 
     // Set default web root if not specified
     if (strlen(config->web_root) == 0) {
@@ -1685,8 +1723,8 @@ int save_config(const config_t *config, const char *path) {
 
     // Write stream settings
     fprintf(file, "[streams]\n");
-    fprintf(file, "max_streams = %d  ; Runtime stream slot limit (default: 32, ceiling: %d; requires restart)\n\n",
-            config->max_streams, MAX_STREAMS);
+    fprintf(file, "max_streams = %d  ; Runtime stream slot limit (default: %d, ceiling: %d; requires restart)\n\n",
+            config->max_streams, DEFAULT_MAX_STREAMS, MAX_STREAMS);
     
     // Write memory optimization settings
     fprintf(file, "[memory]\n");
