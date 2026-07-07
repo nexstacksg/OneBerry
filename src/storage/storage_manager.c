@@ -23,7 +23,7 @@
 #include "core/path_utils.h"
 
 // Maximum number of streams to process at once
-#define MAX_STREAMS_BATCH 64
+#define MAX_STREAMS_BATCH MAX_STREAMS
 // Maximum recordings to delete per stream per run
 #define MAX_RECORDINGS_PER_STREAM 100
 
