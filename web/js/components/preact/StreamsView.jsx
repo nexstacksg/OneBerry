@@ -514,8 +514,8 @@ export function StreamsView() {
     ptzMaxZ: 0,
     ptzHasHome: false,
     // Retention policy settings
-    retentionDays: 0,
-    detectionRetentionDays: 0,
+    retentionDays: 1,
+    detectionRetentionDays: 1,
     maxStorageMb: 0,
     // Recording schedule
     recordOnSchedule: false,
@@ -1046,8 +1046,8 @@ export function StreamsView() {
       ptzMaxY: 0,
       ptzMaxZ: 0,
       ptzHasHome: false,
-      retentionDays: 0,
-      detectionRetentionDays: 0,
+      retentionDays: 1,
+      detectionRetentionDays: 1,
       maxStorageMb: 0,
       // Recording schedule
       recordOnSchedule: false,
@@ -1599,6 +1599,8 @@ export function StreamsView() {
       record: true,
       record_audio: false,
       backchannel_enabled: false,
+      retention_days: 1,
+      detection_retention_days: 1,
       // Backend expects camelCase key 'isOnvif'
       isOnvif: isOnvifProfile,
       onvif_username: isOnvifProfile ? onvifCredentials.username : '',

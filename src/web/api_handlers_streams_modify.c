@@ -567,6 +567,8 @@ void handle_post_stream(const http_request_t *req, http_response_t *res) {
     config.post_detection_buffer = 5;
     config.protocol = STREAM_PROTOCOL_TCP;
     config.record_audio = false; // Default to false for new streams; users can enable if the camera has audio
+    config.retention_days = 1;
+    config.detection_retention_days = 1;
 
     // Override with provided values
     cJSON *enabled = cJSON_GetObjectItem(stream_json, "enabled");

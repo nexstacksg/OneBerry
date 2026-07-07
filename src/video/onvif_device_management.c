@@ -628,6 +628,8 @@ int add_onvif_device_as_stream(const onvif_device_info_t *device_info,
     config.pre_detection_buffer = 5;
     config.post_detection_buffer = 10;
     config.streaming_enabled = true;  // Enable live streaming by default
+    config.retention_days = 1;
+    config.detection_retention_days = 1;
     
     // Set default detection model to "motion" which doesn't require a separate model file
     strncpy(config.detection_model, "motion", sizeof(config.detection_model) - 1);
