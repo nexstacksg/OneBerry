@@ -111,6 +111,35 @@ function applyCredentialsToStreamUrl(url, username, password) {
   }
 }
 
+function getCredentialsFromStreamUrl(url) {
+  const rawUrl = String(url || '').trim();
+  if (!rawUrl) {
+    return null;
+  }
+
+  try {
+    const parsed = new URL(rawUrl);
+    const username = parsed.username ? decodeURIComponent(parsed.username) : '';
+    const password = parsed.password ? decodeURIComponent(parsed.password) : '';
+    return username || password ? { username, password } : null;
+  } catch {
+    const match = rawUrl.match(/^[a-z][a-z0-9+.-]*:\/\/([^/@]+)@/i);
+    if (!match) {
+      return null;
+    }
+
+    const [username = '', password = ''] = match[1].split(':');
+    try {
+      return {
+        username: decodeURIComponent(username),
+        password: decodeURIComponent(password)
+      };
+    } catch {
+      return { username, password };
+    }
+  }
+}
+
 function getDiscoveryProfileSortScore(profile) {
   if (!profile) {
     return 0;
@@ -240,6 +269,7 @@ export function StreamsView() {
   const [selectedSecondaryProfile, setSelectedSecondaryProfile] = useState(null);
   const [customStreamName, setCustomStreamName] = useState('');
   const [onvifCredentials, setOnvifCredentials] = useState({ username: '', password: '' });
+  const [showDiscoveryPassword, setShowDiscoveryPassword] = useState(false);
   const [isDiscovering, setIsDiscovering] = useState(false);
   const [isLoadingProfiles, setIsLoadingProfiles] = useState(false);
   const [onvifNetworkOverride, setOnvifNetworkOverride] = useState('auto');
@@ -370,6 +400,53 @@ export function StreamsView() {
 
   // Process the response to handle both array and object formats
   const streams = Array.isArray(streamsResponse) ? streamsResponse : (streamsResponse.streams || []);
+
+  const streamMatchesDiscoveredDevice = (stream, device) => {
+    if (!stream || !device?.ip_address) {
+      return false;
+    }
+
+    return [stream.url, stream.secondary_url].some((streamUrl) => {
+      if (!streamUrl) return false;
+      try {
+        return new URL(streamUrl).hostname === device.ip_address;
+      } catch {
+        return String(streamUrl).includes(device.ip_address);
+      }
+    });
+  };
+
+  const getStoredCredentialsForDiscoveredDevice = (device) => {
+    const existingStream = streams.find(stream => streamMatchesDiscoveredDevice(stream, device));
+    if (!existingStream) {
+      return null;
+    }
+
+    const onvifUsername = existingStream.onvif_username || existingStream.onvifUsername || '';
+    const onvifPassword = existingStream.onvif_password || existingStream.onvifPassword || '';
+    if (onvifUsername || onvifPassword) {
+      return {
+        username: onvifUsername,
+        password: onvifPassword
+      };
+    }
+
+    return getCredentialsFromStreamUrl(existingStream.url) ||
+      getCredentialsFromStreamUrl(existingStream.secondary_url);
+  };
+
+  const selectDiscoveredDevice = (device) => {
+    setSelectedDevice(device);
+    setSelectedProfile(null);
+    setSelectedSecondaryProfile(null);
+    setDeviceProfiles([]);
+    setShowCustomNameInput(false);
+
+    const storedCredentials = getStoredCredentialsForDiscoveredDevice(device);
+    if (storedCredentials) {
+      setOnvifCredentials(storedCredentials);
+    }
+  };
 
   const DEFAULT_SORT_COLUMN = null;
   const {
@@ -1065,6 +1142,8 @@ export function StreamsView() {
     setSelectedProfile(null);
     setSelectedSecondaryProfile(null);
     setCustomStreamName('');
+    setOnvifCredentials({ username: '', password: '' });
+    setShowDiscoveryPassword(false);
     setShowCustomNameInput(false);
     setOnvifResolution('');
     setOnvifFps('');
@@ -1599,15 +1678,7 @@ export function StreamsView() {
 
   // Check if a discovered ONVIF device is already added as a stream
   const isDeviceAlreadyAdded = (device) => {
-    return streams.some(stream => {
-      if (!stream.url || !device.ip_address) return false;
-      try {
-        const url = new URL(stream.url);
-        return url.hostname === device.ip_address;
-      } catch {
-        return stream.url.includes(device.ip_address);
-      }
-    });
+    return streams.some(stream => streamMatchesDiscoveredDevice(stream, device));
   };
 
   /**
@@ -2356,20 +2427,12 @@ export function StreamsView() {
                               : 'border-border bg-background hover:bg-muted/40'
                           }`}
                           onClick={() => {
-                            setSelectedDevice(device);
-                            setSelectedProfile(null);
-                            setSelectedSecondaryProfile(null);
-                            setDeviceProfiles([]);
-                            setShowCustomNameInput(false);
+                            selectDiscoveredDevice(device);
                           }}
                           onKeyDown={(event) => {
                             if (event.key === 'Enter' || event.key === ' ') {
                               event.preventDefault();
-                              setSelectedDevice(device);
-                              setSelectedProfile(null);
-                              setSelectedSecondaryProfile(null);
-                              setDeviceProfiles([]);
-                              setShowCustomNameInput(false);
+                              selectDiscoveredDevice(device);
                             }
                           }}
                         >
@@ -2400,11 +2463,7 @@ export function StreamsView() {
                                 className={isSelected || alreadyAdded ? 'btn-secondary focus:outline-none' : 'btn-primary focus:outline-none'}
                                 onClick={(event) => {
                                   event.stopPropagation();
-                                  setSelectedDevice(device);
-                                  setSelectedProfile(null);
-                                  setSelectedSecondaryProfile(null);
-                                  setDeviceProfiles([]);
-                                  setShowCustomNameInput(false);
+                                  selectDiscoveredDevice(device);
                                 }}
                                 type="button"
                                 title={alreadyAdded ? t('streams.deviceAlreadyInUseTitle') : undefined}
@@ -2461,15 +2520,38 @@ export function StreamsView() {
                             </div>
                             <div className="form-group">
                               <label htmlFor="onvif-password" className="block text-sm font-medium mb-1">{t('auth.password')}</label>
-                              <input
-                                type="password"
-                                id="onvif-password"
-                                name="password"
-                                className="w-full px-3 py-2 border border-input rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-primary bg-background text-foreground"
-                                placeholder="password"
-                                value={onvifCredentials.password}
-                                onChange={handleCredentialChange}
-                              />
+                              <div className="relative">
+                                <input
+                                  type={showDiscoveryPassword ? 'text' : 'password'}
+                                  id="onvif-password"
+                                  name="password"
+                                  className="w-full rounded-md border border-input bg-background px-3 py-2 pr-11 text-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                                  placeholder="password"
+                                  value={onvifCredentials.password}
+                                  onChange={handleCredentialChange}
+                                />
+                                <button
+                                  type="button"
+                                  className="absolute inset-y-0 right-0 flex w-10 items-center justify-center rounded-r-md text-muted-foreground hover:text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                                  onClick={() => setShowDiscoveryPassword(prev => !prev)}
+                                  aria-label={showDiscoveryPassword ? 'Hide password' : 'Show password'}
+                                  title={showDiscoveryPassword ? 'Hide password' : 'Show password'}
+                                >
+                                  {showDiscoveryPassword ? (
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                                      <path d="M17.94 17.94A10.94 10.94 0 0 1 12 20C7 20 2.73 16.89 1 12c.74-2.1 2.05-3.89 3.72-5.19" />
+                                      <path d="M9.9 4.24A10.68 10.68 0 0 1 12 4c5 0 9.27 3.11 11 8a11.45 11.45 0 0 1-2.16 3.19" />
+                                      <path d="M14.12 14.12A3 3 0 0 1 9.88 9.88" />
+                                      <path d="M1 1l22 22" />
+                                    </svg>
+                                  ) : (
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                                      <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" />
+                                      <circle cx="12" cy="12" r="3" />
+                                    </svg>
+                                  )}
+                                </button>
+                              </div>
                             </div>
                           </div>
                         </div>
