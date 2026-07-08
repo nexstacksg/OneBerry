@@ -86,6 +86,7 @@ const SIDEBAR_COLLAPSED_WIDTH_REM = 5.25;
 const SIDEBAR_MIN_WIDTH_REM = 14;
 const SIDEBAR_MAX_WIDTH_REM = 22;
 const SIDEBAR_COLLAPSE_THRESHOLD_REM = 9;
+const CAMERA_LIST_COLLAPSED_STORAGE_KEY = 'oneberry.sidebarCameraListCollapsed';
 
 const getStoredSidebarState = () => {
   try {
@@ -123,6 +124,14 @@ const getStoredExpandedTree = (storageKey) => {
     return parsed;
   } catch (error) {
     return {};
+  }
+};
+
+const getStoredCameraListCollapsed = () => {
+  try {
+    return localStorage.getItem(CAMERA_LIST_COLLAPSED_STORAGE_KEY) === 'true';
+  } catch (error) {
+    return false;
   }
 };
 
@@ -246,6 +255,7 @@ export function Header({ version = VERSION }) {
   const [userRole, _setUserRole] = useState(localStorage.getItem('userrole') || null); // null = still loading
   const [sidebarState, setSidebarState] = useState(getStoredSidebarState);
   const [isDraggingSidebar, setIsDraggingSidebar] = useState(false);
+  const [cameraListCollapsed, setCameraListCollapsed] = useState(getStoredCameraListCollapsed);
   const [expandedLayouts, setExpandedLayouts] = useState(() => getStoredExpandedTree(LAYOUT_TREE_STORAGE_KEY));
   const [liveLayouts, setLiveLayouts] = useState({ layouts: [] });
   const [openMenu, setOpenMenu] = useState(null);
@@ -465,6 +475,14 @@ export function Header({ version = VERSION }) {
       // Ignore storage failures.
     }
   }, [expandedLayouts]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(CAMERA_LIST_COLLAPSED_STORAGE_KEY, cameraListCollapsed ? 'true' : 'false');
+    } catch (error) {
+      // Ignore storage failures.
+    }
+  }, [cameraListCollapsed]);
 
   useEffect(() => {
     const closeMenus = () => setOpenMenu(null);
@@ -862,6 +880,31 @@ export function Header({ version = VERSION }) {
     );
   };
 
+  const renderCameraListSection = () => (
+    <div className={`sidebar-camera-list-section ${cameraListCollapsed ? 'is-collapsed' : ''}`}>
+      <button
+        type="button"
+        className="sidebar-section-heading sidebar-section-toggle"
+        aria-expanded={!cameraListCollapsed}
+        aria-controls="sidebar-camera-list-panel"
+        onClick={() => setCameraListCollapsed((collapsed) => !collapsed)}
+      >
+        <span className="sidebar-section-label">Camera List</span>
+        <span className="sidebar-tree-count">{sidebarCameraList.length}</span>
+        <span className="sidebar-tree-toggle" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 6l6 6-6 6" />
+          </svg>
+        </span>
+      </button>
+      {!cameraListCollapsed && (
+        <div id="sidebar-camera-list-panel">
+          {renderCameraList()}
+        </div>
+      )}
+    </div>
+  );
+
   const renderLayoutMenu = (layout) => {
     if (!isAdmin) return null;
 
@@ -1079,8 +1122,7 @@ export function Header({ version = VERSION }) {
 
         <div className="sidebar-content">
           <nav className="sidebar-main-nav" aria-label="Primary navigation">
-            <div className="sidebar-section-label">Camera List</div>
-            {renderCameraList()}
+            {renderCameraListSection()}
             {renderLayouts()}
 
             <div className="sidebar-section-label">Workspace</div>
