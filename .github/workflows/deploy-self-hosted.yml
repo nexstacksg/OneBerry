@@ -1,41 +1,41 @@
-name: Deploy to Self-Hosted Proxmox VM
+name: Auto Deploy
 
 on:
   push:
-    branches: [development]
+    branches:
+      - development
 
 jobs:
   deploy:
-    name: Build and Deploy
-    runs-on: self-hosted
+    runs-on: oneberry-vms
+
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
+      - name: Update Source
+        run: |
+          cd ~/Documents/oneberry-vms
+          git fetch origin
+          git reset --hard origin/development
+          git clean -fd
 
       - name: Build Web UI
         run: |
-          # Ensure Node.js and npm are available
-          # the build script checks for them
+          cd ~/Documents/oneberry-vms
           bash scripts/build_web_vite.sh
 
       - name: Prep Dependencies (llhttp)
         run: |
-          # The backend build requires llhttp. If skip/fail download occurs,
-          # we use the local archive provided in the repository.
+          cd ~/Documents/oneberry-vms
           mkdir -p external/llhttp
           tar -xzf llhttp.tar.gz -C external/llhttp --strip-components=1
 
       - name: Build Backend
         run: |
-          # Build the C backend in release mode
+          cd ~/Documents/oneberry-vms
           bash scripts/build.sh --release
 
       - name: Install and Restart Service
         run: |
-          # Use sudo to run the install script and restart the service.
-          # The runner user must have passwordless sudo for these commands.
+          cd ~/Documents/oneberry-vms
           sudo bash scripts/install.sh
           sudo systemctl restart lightnvr
-          sudo systemctl status lightnvr
+          sudo systemctl status lightnvr --no-pager
