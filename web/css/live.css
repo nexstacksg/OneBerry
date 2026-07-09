@@ -179,6 +179,10 @@
     gap: 0.5rem;
 }
 
+.live-workspace-add-wrap {
+    position: relative;
+}
+
 .live-workspace-add-button,
 .live-workspace-menu-button {
     display: inline-flex;
@@ -235,6 +239,21 @@
     box-shadow: 0 18px 40px -24px hsl(var(--foreground) / 0.65);
 }
 
+.live-workspace-add-menu {
+    position: absolute;
+    right: 0;
+    top: calc(100% + 0.35rem);
+    z-index: 80;
+    display: flex;
+    min-width: 10.5rem;
+    flex-direction: column;
+    border: 1px solid hsl(var(--border) / 0.78);
+    border-radius: 0.5rem;
+    background: hsl(var(--popover, var(--card)) / 0.98);
+    padding: 0.35rem;
+    box-shadow: 0 18px 40px -24px hsl(var(--foreground) / 0.65);
+}
+
 .live-workspace-menu button {
     width: 100%;
     border-radius: 0.35rem;
@@ -244,13 +263,33 @@
     text-align: left;
 }
 
-.live-workspace-menu button:hover:not(:disabled) {
+.live-workspace-add-menu button {
+    width: 100%;
+    border-radius: 0.35rem;
+    color: hsl(var(--foreground));
+    padding: 0.45rem 0.55rem;
+    font-size: 0.78rem;
+    text-align: left;
+}
+
+.live-workspace-menu button:hover:not(:disabled),
+.live-workspace-add-menu button:hover:not(:disabled) {
     background: hsl(var(--muted) / 0.75);
 }
 
-.live-workspace-menu button:disabled {
+.live-workspace-menu button:disabled,
+.live-workspace-add-menu button:disabled {
     cursor: not-allowed;
     opacity: 0.42;
+}
+
+.live-workspace-menu-label {
+    padding: 0.4rem 0.55rem 0.22rem;
+    color: hsl(var(--muted-foreground));
+    font-size: 0.68rem;
+    font-weight: 800;
+    letter-spacing: 0;
+    text-transform: uppercase;
 }
 
 .live-workspace-main .video-container {
@@ -1106,6 +1145,19 @@
     .live-workspace-add-button {
         min-height: 2.25rem;
         flex: 1 1 9rem;
+    }
+
+    .live-workspace-add-wrap {
+        flex: 1 1 9rem;
+    }
+
+    .live-workspace-add-wrap .live-workspace-add-button {
+        width: 100%;
+    }
+
+    .live-workspace-add-menu {
+        left: 0;
+        right: auto;
     }
 
     .live-workspace-menu-wrap {
