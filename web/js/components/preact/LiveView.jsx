@@ -1068,7 +1068,24 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
       showStatusMessage('Click Edit Layout before changing this saved layout', 'error', 5000);
       return;
     }
-    setWorkspaceTiles(buildWorkspacePresetSlots(preset));
+    setWorkspaceTiles((previousTiles) => {
+      const presetSlots = buildWorkspacePresetSlots(preset);
+      const existingCameraTiles = previousTiles.filter((tile) => tile.type !== 'slot' && tile.cameraId);
+      const arrangedTiles = existingCameraTiles.slice(0, presetSlots.length).map((tile, index) => {
+        const targetSlot = presetSlots[index];
+        return normalizeWorkspaceBounds({
+          ...tile,
+          x: targetSlot.x,
+          y: targetSlot.y,
+          w: targetSlot.w,
+          h: targetSlot.h,
+        }, WORKSPACE_GRID_COLS, WORKSPACE_GRID_ROWS);
+      });
+      const remainingSlots = presetSlots.slice(arrangedTiles.length);
+      const overflowTiles = existingCameraTiles.slice(presetSlots.length);
+
+      return [...arrangedTiles, ...remainingSlots, ...overflowTiles];
+    });
     setWorkspaceStarted(true);
     setWorkspaceAutoGrid(false);
     setCurrentPage(0);
@@ -2012,6 +2029,7 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
                         const types = Array.from(event.dataTransfer.types || []);
                         if (!types.includes('application/x-oneberry-camera')) return;
                         event.preventDefault();
+                        event.stopPropagation();
                         event.dataTransfer.dropEffect = 'copy';
                       }}
                       onDrop={(event) => {
@@ -2021,6 +2039,7 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
                         const cameraName = event.dataTransfer.getData('application/x-oneberry-camera') || event.dataTransfer.getData('text/plain');
                         if (!cameraName) return;
                         event.preventDefault();
+                        event.stopPropagation();
                         addWorkspaceTile(cameraName, { x: workspaceTile.x, y: workspaceTile.y });
                       }}
                     >
