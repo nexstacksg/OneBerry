@@ -61,27 +61,53 @@ typedef struct {
     bool retention_policy_changed;             // Whether retention/quota policy changed
 } put_stream_task_t;
 
-static void format_stream_capacity_error(char *buf, size_t buf_size,
-                                         int runtime_capacity,
-                                         int configured_capacity,
-                                         int current_total) {
-    if (!buf || buf_size == 0) {
+static void add_storage_capacity_warning(cJSON *response) {
+    if (!response) {
         return;
     }
 
-    if (configured_capacity > runtime_capacity) {
-        snprintf(buf, buf_size,
-                 "Max streams limit reached (%d/%d in the current runtime). "
-                 "Settings are already saved for %d streams, but you must restart "
-                 "LightNVR before adding more cameras.",
-                 current_total, runtime_capacity, configured_capacity);
+    storage_stats_t stats;
+    if (get_storage_stats(&stats) != 0 || stats.total_space == 0) {
         return;
     }
 
-    snprintf(buf, buf_size,
-             "Max streams limit reached (%d/%d). Increase Settings -> Max Streams "
-             "and restart LightNVR before adding more cameras.",
-             current_total, runtime_capacity);
+    double used_pct = ((double)stats.used_space / (double)stats.total_space) * 100.0;
+    if (used_pct < 80.0) {
+        return;
+    }
+
+    cJSON_AddBoolToObject(response, "warning", true);
+    cJSON_AddStringToObject(response, "warning_type", "storage_capacity");
+    cJSON_AddNumberToObject(response, "storage_used_percent", used_pct);
+    cJSON_AddNumberToObject(response, "storage_free_bytes", (double)stats.free_space);
+    cJSON_AddNumberToObject(response, "storage_total_bytes", (double)stats.total_space);
+    cJSON_AddStringToObject(response, "warning_message",
+                            "Storage is 80% full or higher. Add more disk capacity before adding many more cameras.");
+}
+
+static void sync_new_stream_to_runtime_config(const stream_config_t *config) {
+    if (!config || config->name[0] == '\0') {
+        return;
+    }
+
+    int slot = -1;
+    for (int i = 0; i < g_config.max_streams; i++) {
+        if (g_config.streams[i].name[0] == '\0') {
+            slot = i;
+            break;
+        }
+    }
+
+    if (slot < 0) {
+        int old_capacity = g_config.max_streams;
+        if (ensure_stream_config_capacity(&g_config, old_capacity + 1) != 0) {
+            log_warn("Failed to expand runtime config array after adding stream %s", config->name);
+            return;
+        }
+        slot = old_capacity;
+    }
+
+    memcpy(&g_config.streams[slot], config, sizeof(stream_config_t));
 }
 
 /**
@@ -872,17 +898,6 @@ void handle_post_stream(const http_request_t *req, http_response_t *res) {
         return;
     }
 
-    int runtime_capacity = get_stream_capacity();
-    int current_total = get_total_stream_count();
-    if (runtime_capacity > 0 && current_total >= runtime_capacity) {
-        char error_message[256];
-        format_stream_capacity_error(error_message, sizeof(error_message),
-                                     runtime_capacity, g_config.max_streams, current_total);
-        log_warn("Rejecting stream '%s': %s", config.name, error_message);
-        http_response_set_json_error(res, 409, error_message);
-        return;
-    }
-
     // Add stream to database
     uint64_t stream_id = add_stream_config(&config);
     if (stream_id == 0) {
@@ -899,19 +914,11 @@ void handle_post_stream(const http_request_t *req, http_response_t *res) {
         // Delete from database since we couldn't create it in memory
         delete_stream_config(config.name);
 
-        runtime_capacity = get_stream_capacity();
-        current_total = get_total_stream_count();
-        if (runtime_capacity > 0 && current_total >= runtime_capacity) {
-            char error_message[256];
-            format_stream_capacity_error(error_message, sizeof(error_message),
-                                         runtime_capacity, g_config.max_streams, current_total);
-            http_response_set_json_error(res, 409, error_message);
-            return;
-        }
-
         http_response_set_json_error(res, 500, "Failed to create stream");
         return;
     }
+
+    sync_new_stream_to_runtime_config(&config);
 
     // Note: Stream is already registered with go2rtc by add_stream()
     // No need to call go2rtc_sync_streams_from_database() which would sync ALL streams
@@ -953,6 +960,7 @@ void handle_post_stream(const http_request_t *req, http_response_t *res) {
     }
 
     cJSON_AddBoolToObject(success, "success", true);
+    add_storage_capacity_warning(success);
 
     // Add ONVIF detection result if applicable
     if (onvif_test_performed) {

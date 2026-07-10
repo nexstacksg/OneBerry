@@ -22,8 +22,6 @@
 #include "core/mqtt_client.h"
 #include "core/path_utils.h"
 
-// Maximum number of streams to process at once
-#define MAX_STREAMS_BATCH MAX_STREAMS
 // Maximum recordings to delete per stream per run
 #define MAX_RECORDINGS_PER_STREAM 100
 
@@ -313,16 +311,24 @@ int apply_retention_policy(void) {
     uint64_t total_freed = 0;
 
     // Get list of all stream names
-    char stream_names[MAX_STREAMS_BATCH][MAX_STREAM_NAME];
-    int stream_count = get_all_stream_names(stream_names, MAX_STREAMS_BATCH);
+    int stream_name_capacity = g_config.max_streams > 0 ? g_config.max_streams : 128;
+    char (*stream_names)[MAX_STREAM_NAME] = calloc((size_t)stream_name_capacity, MAX_STREAM_NAME);
+    if (!stream_names) {
+        log_error("Failed to allocate stream names for retention policy");
+        return -1;
+    }
+
+    int stream_count = get_all_stream_names(stream_names, stream_name_capacity);
 
     if (stream_count < 0) {
         log_error("Failed to get stream names for retention policy");
+        free(stream_names);
         return -1;
     }
 
     if (stream_count == 0) {
         log_debug("No streams found for retention policy");
+        free(stream_names);
         return 0;
     }
 
@@ -573,6 +579,7 @@ int apply_retention_policy(void) {
     log_info("Retention policy complete: deleted %d recordings, freed %lu bytes",
              total_deleted, (unsigned long)total_freed);
 
+    free(stream_names);
     return total_deleted;
 }
 
@@ -936,8 +943,9 @@ static void standard_cleanup_cycle(void) {
     recording_metadata_t *tier_recs = calloc(MAX_RECORDINGS_PER_STREAM, sizeof(recording_metadata_t));
     if (tier_recs) {
         // Get all stream names
-        char stream_names[MAX_STREAMS_BATCH][MAX_STREAM_NAME];
-        int stream_count = get_all_stream_names(stream_names, MAX_STREAMS_BATCH);
+        int stream_name_capacity = g_config.max_streams > 0 ? g_config.max_streams : 128;
+        char (*stream_names)[MAX_STREAM_NAME] = calloc((size_t)stream_name_capacity, MAX_STREAM_NAME);
+        int stream_count = stream_names ? get_all_stream_names(stream_names, stream_name_capacity) : -1;
 
         for (int s = 0; s < stream_count && unified_ctrl.running; s++) {
             // Get stream config for tier multipliers
@@ -981,6 +989,7 @@ static void standard_cleanup_cycle(void) {
                 }
             }
         }
+        free(stream_names);
         free(tier_recs);
     }
 

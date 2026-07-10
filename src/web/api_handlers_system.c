@@ -1222,10 +1222,16 @@ void handle_get_system_info(const http_request_t *req, http_response_t *res) {
     if (streams_obj) {
         // Get count of enabled streams from the database
         int enabled_streams = get_enabled_stream_count();
+        int configured_streams = count_stream_configs();
+        if (configured_streams < 0) {
+            configured_streams = 0;
+        }
         log_debug("Enabled streams count from database: %d", enabled_streams);
 
         cJSON_AddNumberToObject(streams_obj, "active", enabled_streams);
-        cJSON_AddNumberToObject(streams_obj, "total", g_config.max_streams);
+        cJSON_AddNumberToObject(streams_obj, "configured", configured_streams);
+        cJSON_AddNumberToObject(streams_obj, "total", configured_streams);
+        cJSON_AddNumberToObject(streams_obj, "capacity_hint", g_config.max_streams);
 
         // Add streams object to info
         cJSON_AddItemToObject(info, "streams", streams_obj);

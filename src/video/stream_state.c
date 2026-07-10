@@ -5,6 +5,7 @@
 #include <unistd.h>
 #include <time.h>
 #include <sys/time.h>
+#include <limits.h>
 
 #include "video/stream_state.h"
 #include "core/logger.h"
@@ -33,6 +34,37 @@ static int states_capacity = 0;  // allocated slot count
 static pthread_mutex_t states_mutex = PTHREAD_MUTEX_INITIALIZER;
 static bool initialized = false;
 
+static int ensure_stream_state_capacity_locked(int min_capacity) {
+    if (min_capacity <= states_capacity) {
+        return 0;
+    }
+
+    int old_capacity = states_capacity;
+    int new_capacity = old_capacity > 0 ? old_capacity : 1;
+    while (new_capacity < min_capacity) {
+        if (new_capacity > INT_MAX / 2) {
+            new_capacity = min_capacity;
+            break;
+        }
+        new_capacity *= 2;
+    }
+
+    stream_state_manager_t **expanded = realloc(stream_states,
+                                                (size_t)new_capacity * sizeof(stream_state_manager_t *));
+    if (!expanded) {
+        log_error("Failed to expand stream state capacity from %d to %d",
+                  old_capacity, new_capacity);
+        return -1;
+    }
+
+    stream_states = expanded;
+    memset(stream_states + old_capacity, 0,
+           (size_t)(new_capacity - old_capacity) * sizeof(stream_state_manager_t *));
+    states_capacity = new_capacity;
+    log_info("Stream state capacity expanded to %d slots", states_capacity);
+    return 0;
+}
+
 /**
  * Initialize the stream state management system
  */
@@ -41,8 +73,7 @@ int init_stream_state_manager(int max_streams) {
         return 0;  // Already initialized
     }
 
-    if (max_streams < 1)           max_streams = 1;
-    if (max_streams > MAX_STREAMS) max_streams = MAX_STREAMS;
+    if (max_streams < 1) max_streams = 1;
 
     pthread_mutex_lock(&states_mutex);
 
@@ -126,9 +157,13 @@ stream_state_manager_t *create_stream_state(const stream_config_t *config) {
     }
 
     if (slot == -1) {
-        log_error("No available slots for new stream state");
-        pthread_mutex_unlock(&states_mutex);
-        return NULL;
+        int old_capacity = states_capacity;
+        if (ensure_stream_state_capacity_locked(states_capacity + 1) != 0) {
+            log_error("No available slots for new stream state");
+            pthread_mutex_unlock(&states_mutex);
+            return NULL;
+        }
+        slot = old_capacity;
     }
 
     // Check if stream with same name already exists

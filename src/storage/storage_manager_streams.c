@@ -37,11 +37,17 @@ int get_stream_storage_usage(const char *storage_path, stream_storage_info_t *st
     }
 
     // Get all stream names from database
-    char stream_names[MAX_STREAMS][MAX_STREAM_NAME];
-    int name_count = get_all_stream_names(stream_names, MAX_STREAMS < max_streams ? MAX_STREAMS : max_streams);
+    char (*stream_names)[MAX_STREAM_NAME] = calloc((size_t)max_streams, MAX_STREAM_NAME);
+    if (!stream_names) {
+        log_error("Failed to allocate stream names for storage usage");
+        return -1;
+    }
+
+    int name_count = get_all_stream_names(stream_names, max_streams);
 
     if (name_count <= 0) {
         log_debug("No streams found in database for storage usage");
+        free(stream_names);
         return 0;
     }
 
@@ -69,6 +75,7 @@ int get_stream_storage_usage(const char *storage_path, stream_storage_info_t *st
         stream_count++;
     }
 
+    free(stream_names);
     return stream_count;
 }
 

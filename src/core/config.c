@@ -811,8 +811,7 @@ static int config_ini_handler(void* user, const char* section, const char* name,
     else if (strcmp(section, "streams") == 0) {
         if (strcmp(name, "max_streams") == 0) {
             int new_max = safe_atoi(value, 0);
-            if (new_max < 1)          new_max = 1;
-            if (new_max > MAX_STREAMS) new_max = MAX_STREAMS;
+            if (new_max < 1) new_max = 1;
             if (new_max != config->max_streams) {
                 stream_config_t *p = realloc(config->streams, new_max * sizeof(stream_config_t));
                 if (p) {
@@ -1006,8 +1005,45 @@ static int load_config_from_file(const char *filename, config_t *config) {
     return 0;
 }
 
+int ensure_stream_config_capacity(config_t *config, int min_streams) {
+    if (!config || min_streams < 1) return -1;
+    if (min_streams <= config->max_streams) return 0;
+
+    int new_max = config->max_streams > 0 ? config->max_streams : DEFAULT_MAX_STREAMS;
+    while (new_max < min_streams) {
+        if (new_max > INT_MAX / 2) {
+            new_max = min_streams;
+            break;
+        }
+        new_max *= 2;
+    }
+
+    size_t new_size = (size_t)new_max;
+    if (new_size > SIZE_MAX / sizeof(stream_config_t)) {
+        log_error("ensure_stream_config_capacity: requested stream capacity is too large");
+        return -1;
+    }
+
+    stream_config_t *p = realloc(config->streams, new_size * sizeof(stream_config_t));
+    if (!p) {
+        log_error("Failed to realloc streams array for capacity=%d, keeping %d",
+                  new_max, config->max_streams);
+        return -1;
+    }
+
+    if (new_max > config->max_streams) {
+        memset(p + config->max_streams, 0,
+               (size_t)(new_max - config->max_streams) * sizeof(stream_config_t));
+    }
+
+    config->streams = p;
+    config->max_streams = new_max;
+    log_info("Stream config capacity expanded to %d", new_max);
+    return 0;
+}
+
 static int resize_stream_slots(config_t *config, int new_max) {
-    if (!config || new_max < 1 || new_max > MAX_STREAMS) return -1;
+    if (!config || new_max < 1) return -1;
     if (new_max == config->max_streams) return 0;
 
     stream_config_t *p = realloc(config->streams, (size_t)new_max * sizeof(stream_config_t));
@@ -1044,7 +1080,7 @@ static void normalize_legacy_stream_capacity(config_t *config) {
 int load_stream_configs(config_t *config) {
     if (!config || !config->streams) return -1;
 
-    if (config->max_streams <= 0 || config->max_streams > MAX_STREAMS) {
+    if (config->max_streams <= 0) {
         log_error("load_stream_configs: invalid max_streams value (%d)", config->max_streams);
         return -1;
     }
@@ -1070,11 +1106,15 @@ int load_stream_configs(config_t *config) {
         return 0;
     }
 
-    size_t load_capacity = (size_t)count < max_streams ? (size_t)count : max_streams;
-    if ((size_t)count > max_streams) {
-        log_warn("load_stream_configs: database has %d streams, truncating to configured limit %zu",
-                 count, max_streams);
+    if (count > config->max_streams) {
+        if (ensure_stream_config_capacity(config, count) != 0) {
+            log_error("load_stream_configs: failed to expand stream capacity to %d", count);
+            return -1;
+        }
+        max_streams = (size_t)config->max_streams;
     }
+
+    size_t load_capacity = (size_t)count;
 
     // Heap-allocate temporary buffer (stream_config_t is ~2 KB; stack array at 256 overflows)
     stream_config_t *db_streams = calloc(load_capacity, sizeof(stream_config_t));
@@ -1723,8 +1763,8 @@ int save_config(const config_t *config, const char *path) {
 
     // Write stream settings
     fprintf(file, "[streams]\n");
-    fprintf(file, "max_streams = %d  ; Runtime stream slot limit (default: %d, ceiling: %d; requires restart)\n\n",
-            config->max_streams, DEFAULT_MAX_STREAMS, MAX_STREAMS);
+    fprintf(file, "max_streams = %d  ; Initial stream config capacity hint (auto-expands as cameras are added)\n\n",
+            config->max_streams);
     
     // Write memory optimization settings
     fprintf(file, "[memory]\n");
@@ -1860,8 +1900,7 @@ void print_config(const config_t *config) {
     printf("    Login Rate Limit Window: %d seconds\n", config->login_rate_limit_window_seconds);
 
     printf("  Stream Settings:\n");
-    printf("    Max Streams: %d (runtime) / %d (compile-time ceiling)\n",
-           config->max_streams, MAX_STREAMS);
+    printf("    Stream Config Capacity: %d (auto-expands)\n", config->max_streams);
     printf("  Web Thread Pool Size: %d\n", config->web_thread_pool_size);
     
     printf("  Memory Optimization:\n");

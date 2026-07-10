@@ -161,8 +161,8 @@ int metrics_init(int max_streams) {
         log_warn("metrics_init called but already initialized");
         return 0;
     }
-    if (max_streams <= 0 || max_streams > MAX_STREAMS) {
-        max_streams = MAX_STREAMS;
+    if (max_streams <= 0) {
+        max_streams = 128;
     }
 
     g_max_streams = max_streams;

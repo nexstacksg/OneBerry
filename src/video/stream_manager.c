@@ -4,6 +4,7 @@
 #include <pthread.h>
 #include <unistd.h>
 #include <time.h>
+#include <limits.h>
 
 #include "video/stream_manager.h"
 #include "core/logger.h"
@@ -79,6 +80,42 @@ static const char* recording_mode_to_string(recording_mode_t mode) {
 static stream_t *streams = NULL;
 static int streams_capacity = 0;  // actual allocated slot count
 static bool initialized = false;
+
+static int ensure_stream_manager_capacity(int min_capacity) {
+    if (min_capacity <= streams_capacity) {
+        return 0;
+    }
+
+    int old_capacity = streams_capacity;
+    int new_capacity = old_capacity > 0 ? old_capacity : 1;
+    while (new_capacity < min_capacity) {
+        if (new_capacity > INT_MAX / 2) {
+            new_capacity = min_capacity;
+            break;
+        }
+        new_capacity *= 2;
+    }
+
+    stream_t *expanded = realloc(streams, (size_t)new_capacity * sizeof(stream_t));
+    if (!expanded) {
+        log_error("Failed to expand stream manager capacity from %d to %d",
+                  old_capacity, new_capacity);
+        return -1;
+    }
+
+    streams = expanded;
+    memset(&streams[old_capacity], 0, (size_t)(new_capacity - old_capacity) * sizeof(stream_t));
+    for (int i = old_capacity; i < new_capacity; i++) {
+        pthread_mutex_init(&streams[i].mutex, NULL);
+        streams[i].status = STREAM_STATUS_STOPPED;
+        memset(&streams[i].stats, 0, sizeof(stream_stats_t));
+        streams[i].recording_enabled = false;
+        streams[i].detection_recording_enabled = false;
+    }
+    streams_capacity = new_capacity;
+    log_info("Stream manager capacity expanded to %d slots", streams_capacity);
+    return 0;
+}
 
 // Schedule monitor thread state
 static pthread_t schedule_monitor_thread;
@@ -195,9 +232,7 @@ int init_stream_manager(int max_streams) {
         return 0;  // Already initialized
     }
 
-    // Clamp to a sane range
-    if (max_streams < 1)           max_streams = 1;
-    if (max_streams > MAX_STREAMS) max_streams = MAX_STREAMS;
+    if (max_streams < 1) max_streams = 1;
 
     // Allocate the stream array dynamically
     streams = calloc(max_streams, sizeof(stream_t));
@@ -360,7 +395,15 @@ stream_handle_t get_stream_by_name(const char *name) {
                 return (stream_handle_t)&streams[i];
             }
         }
-        // No empty slots available
+        int old_capacity = streams_capacity;
+        if (ensure_stream_manager_capacity(old_capacity + 1) == 0) {
+            int slot = old_capacity;
+            memcpy(&streams[slot].config, &db_config, sizeof(stream_config_t));
+            streams[slot].status = STREAM_STATUS_STOPPED;
+            streams[slot].recording_enabled = db_config.record;
+            streams[slot].detection_recording_enabled = db_config.detection_based_recording;
+            return (stream_handle_t)&streams[slot];
+        }
         log_error("No available slots for stream from database: %s", name);
     }
 
@@ -596,8 +639,12 @@ stream_handle_t add_stream(const stream_config_t *config) {
     }
 
     if (slot == -1) {
-        log_error("No available slots for new stream");
-        return NULL;
+        int old_capacity = streams_capacity;
+        if (ensure_stream_manager_capacity(streams_capacity + 1) != 0) {
+            log_error("No available slots for new stream");
+            return NULL;
+        }
+        slot = old_capacity;
     }
 
     // Check if stream with same name already exists

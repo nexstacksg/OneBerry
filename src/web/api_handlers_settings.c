@@ -886,7 +886,6 @@ void handle_get_settings(const http_request_t *req, http_response_t *res) {
     cJSON_AddBoolToObject(settings, "auto_delete_oldest", g_config.auto_delete_oldest);
     cJSON_AddBoolToObject(settings, "generate_thumbnails", g_config.generate_thumbnails);
     cJSON_AddNumberToObject(settings, "max_streams", g_config.max_streams);
-    cJSON_AddNumberToObject(settings, "max_streams_ceiling", MAX_STREAMS);
     cJSON_AddStringToObject(settings, "log_file", g_config.log_file);
     cJSON_AddNumberToObject(settings, "log_level", g_config.log_level);
     cJSON_AddStringToObject(settings, "pid_file", g_config.pid_file);
@@ -1030,7 +1029,6 @@ void handle_post_settings(const http_request_t *req, http_response_t *res) {
     bool settings_changed = false;
     bool restart_required = false;
     bool web_thread_pool_restart_required = false;
-    bool max_streams_restart_required = false;
     bool storage_manager_changed = false;
     bool go2rtc_config_changed = false;  // Track if go2rtc-related settings changed
     bool go2rtc_becoming_enabled = false;  // Track transition direction
@@ -1292,18 +1290,19 @@ void handle_post_settings(const http_request_t *req, http_response_t *res) {
         log_info("Updated models_path: %s", g_config.models_path);
     }
     
-    // max_streams — runtime stream slot limit (requires restart to take effect)
+    // max_streams is retained as an initial runtime capacity hint. The stream
+    // managers now grow when more cameras are added.
     cJSON *max_streams_j = cJSON_GetObjectItem(settings, "max_streams");
     if (max_streams_j && cJSON_IsNumber(max_streams_j)) {
         int new_max = max_streams_j->valueint;
-        if (new_max < 1)           new_max = 1;
-        if (new_max > MAX_STREAMS) new_max = MAX_STREAMS;
+        if (new_max < 1) new_max = 1;
         if (new_max != g_config.max_streams) {
-            g_config.max_streams = new_max;
-            settings_changed = true;
-            restart_required = true;
-            max_streams_restart_required = true;
-            log_info("Updated max_streams: %d (restart required)", new_max);
+            if (ensure_stream_config_capacity(&g_config, new_max) == 0) {
+                settings_changed = true;
+                log_info("Updated stream config capacity hint: %d", new_max);
+            } else {
+                log_warn("Failed to update stream config capacity hint to %d", new_max);
+            }
         }
     }
 
@@ -2329,15 +2328,9 @@ void handle_post_settings(const http_request_t *req, http_response_t *res) {
     cJSON_AddBoolToObject(success, "restart_required", restart_required);
 
     if (restart_required) {
-        if (web_thread_pool_restart_required && max_streams_restart_required) {
-            cJSON_AddStringToObject(success, "restart_required_message",
-                                    "Worker thread pool size and Max Streams were saved, but LightNVR must be restarted before the new runtime capacity takes effect.");
-        } else if (web_thread_pool_restart_required) {
+        if (web_thread_pool_restart_required) {
             cJSON_AddStringToObject(success, "restart_required_message",
                                     "Worker thread pool size was saved, but LightNVR must be restarted before the new thread pool takes effect.");
-        } else if (max_streams_restart_required) {
-            cJSON_AddStringToObject(success, "restart_required_message",
-                                    "Max Streams was saved, but LightNVR must be restarted before the new camera capacity takes effect.");
         }
     }
     

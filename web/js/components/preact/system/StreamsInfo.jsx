@@ -14,6 +14,8 @@ import { useI18n } from '../../../i18n.js';
  */
 export function StreamsInfo({ systemInfo, formatBytes }) {
   const { t } = useI18n();
+  const activeStreams = systemInfo.streams?.active || 0;
+  const configuredStreams = systemInfo.streams?.configured ?? systemInfo.streams?.total ?? 0;
 
   return (
     <div className="bg-card text-card-foreground rounded-lg shadow p-4">
@@ -21,7 +23,11 @@ export function StreamsInfo({ systemInfo, formatBytes }) {
       <div className="space-y-2">
         <div className="flex justify-between">
           <span className="font-medium">{t('system.activeStreams')}:</span>
-          <span>{systemInfo.streams?.active || 0} / {systemInfo.streams?.total || 0}</span>
+          <span>{activeStreams}</span>
+        </div>
+        <div className="flex justify-between">
+          <span className="font-medium">{t('system.configuredCameras')}:</span>
+          <span>{configuredStreams}</span>
         </div>
         <div className="flex justify-between">
           <span className="font-medium">{t('nav.recordings')}:</span>

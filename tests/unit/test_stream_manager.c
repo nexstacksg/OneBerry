@@ -107,8 +107,8 @@ void test_get_total_stream_count(void) {
     shutdown_stream_manager();
 }
 
-/* stream manager exposes runtime capacity and enforces it */
-void test_stream_capacity_limit_is_enforced(void) {
+/* stream manager exposes runtime capacity and expands it on demand */
+void test_stream_capacity_expands_on_demand(void) {
     init_stream_manager(1);
     TEST_ASSERT_EQUAL_INT(1, get_stream_capacity());
 
@@ -116,8 +116,9 @@ void test_stream_capacity_limit_is_enforced(void) {
     stream_config_t second = make_config("cam_second");
 
     TEST_ASSERT_NOT_NULL(add_stream(&first));
-    TEST_ASSERT_NULL(add_stream(&second));
-    TEST_ASSERT_EQUAL_INT(1, get_total_stream_count());
+    TEST_ASSERT_NOT_NULL(add_stream(&second));
+    TEST_ASSERT_GREATER_OR_EQUAL_INT(2, get_stream_capacity());
+    TEST_ASSERT_EQUAL_INT(2, get_total_stream_count());
 
     shutdown_stream_manager();
 }
@@ -201,7 +202,7 @@ int main(void) {
     RUN_TEST(test_get_stream_by_name_not_found);
     RUN_TEST(test_get_stream_by_index);
     RUN_TEST(test_get_total_stream_count);
-    RUN_TEST(test_stream_capacity_limit_is_enforced);
+    RUN_TEST(test_stream_capacity_expands_on_demand);
     RUN_TEST(test_remove_stream_decreases_count);
     RUN_TEST(test_get_stream_config);
     RUN_TEST(test_set_stream_priority);
@@ -209,4 +210,3 @@ int main(void) {
     RUN_TEST(test_get_active_stream_count);
     return UNITY_END();
 }
-

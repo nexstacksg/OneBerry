@@ -13,7 +13,6 @@ import { useState, useEffect, useCallback } from 'preact/hooks';
 import { showStatusMessage } from './ToastContainer.jsx';
 
 const MAX_STREAMS_DEFAULT = 128;
-const MAX_STREAMS_CEILING_FALLBACK = 128;
 
 /* ─────────────────────────────────────────────
    Tiny shared sub-components
@@ -154,13 +153,12 @@ function PerformanceStep({ form, onChange, cpuCores }) {
         />
       </Field>
       <Field
-        label="Maximum concurrent streams"
-        hint="How many cameras Oneberry can keep active at once. Default 128, max 128. If you expect 100 cameras, choose at least 100. Requires restart to take effect."
+        label="Initial stream capacity"
+        hint="Startup allocation hint for the stream engine. Oneberry can expand beyond this when cameras are added; actual capacity depends on CPU, RAM, network, and storage."
       >
         <input
           type="number"
           min="1"
-          max={MAX_STREAMS_CEILING_FALLBACK}
           class="w-full p-2 border border-input rounded bg-background text-foreground"
           value={form.maxStreams}
           onInput={e => onChange('maxStreams', e.target.value)}

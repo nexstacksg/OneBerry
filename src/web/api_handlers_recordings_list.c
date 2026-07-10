@@ -224,13 +224,14 @@ void handle_get_recordings(const http_request_t *req, http_response_t *res) {
 
     // --- Tag-based RBAC: build list of allowed streams for this user ---
     stream_config_t *all_stream_cfgs = NULL;
-    const char *allowed_streams[MAX_STREAMS];
+    const char **allowed_streams = NULL;
     int allowed_streams_count = 0;
     bool tag_restricted = have_auth_user && auth_user.has_tag_restriction;
 
     if (tag_restricted) {
         all_stream_cfgs = calloc(g_config.max_streams, sizeof(stream_config_t));
-        if (all_stream_cfgs) {
+        allowed_streams = calloc((size_t)g_config.max_streams, sizeof(char *));
+        if (all_stream_cfgs && allowed_streams) {
             int sc = get_all_stream_configs(all_stream_cfgs, g_config.max_streams);
             for (int i = 0; i < sc; i++) {
                 if (db_auth_stream_allowed_for_user(&auth_user, all_stream_cfgs[i].tags)) {
@@ -264,6 +265,7 @@ void handle_get_recordings(const http_request_t *req, http_response_t *res) {
                 // Return an empty result set rather than an error to avoid leaking stream existence
                 free(recordings);
                 if (all_stream_cfgs) free(all_stream_cfgs);
+                free(allowed_streams);
                 cJSON *empty_resp = cJSON_CreateObject();
                 cJSON *empty_arr  = cJSON_CreateArray();
                 cJSON *empty_pg   = cJSON_CreateObject();
@@ -290,6 +292,7 @@ void handle_get_recordings(const http_request_t *req, http_response_t *res) {
             // User has tag restriction but no accessible streams at all
             free(recordings);
             if (all_stream_cfgs) free(all_stream_cfgs);
+            free(allowed_streams);
             cJSON *empty_resp = cJSON_CreateObject();
             cJSON *empty_arr  = cJSON_CreateArray();
             cJSON *empty_pg   = cJSON_CreateObject();
@@ -330,6 +333,7 @@ void handle_get_recordings(const http_request_t *req, http_response_t *res) {
     if (total_count < 0) {
         log_error("Failed to get total recording count from database");
         if (all_stream_cfgs) free(all_stream_cfgs);
+        free(allowed_streams);
         http_response_set_json_error(res, 500, "Failed to get recording count from database");
         return;
     }
@@ -345,6 +349,7 @@ void handle_get_recordings(const http_request_t *req, http_response_t *res) {
     if (!recordings) {
         log_error("Failed to allocate memory for recordings");
         if (all_stream_cfgs) free(all_stream_cfgs);
+        free(allowed_streams);
         http_response_set_json_error(res, 500, "Failed to allocate memory for recordings");
         return;
     }
@@ -363,6 +368,7 @@ void handle_get_recordings(const http_request_t *req, http_response_t *res) {
         log_error("Failed to get recordings from database");
         free(recordings);
         if (all_stream_cfgs) free(all_stream_cfgs);
+        free(allowed_streams);
         http_response_set_json_error(res, 500, "Failed to get recordings from database");
         return;
     }
@@ -523,6 +529,7 @@ void handle_get_recordings(const http_request_t *req, http_response_t *res) {
     // Free recordings and stream config buffer (if allocated for tag-based RBAC)
     free(recordings);
     if (all_stream_cfgs) free(all_stream_cfgs);
+    free(allowed_streams);
 
     // Convert to JSON string
     char *json_str = cJSON_PrintUnformatted(response);
@@ -542,4 +549,3 @@ void handle_get_recordings(const http_request_t *req, http_response_t *res) {
 
     log_debug("Successfully handled GET /api/recordings request");
 }
-

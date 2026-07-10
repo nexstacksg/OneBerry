@@ -13,7 +13,6 @@ import { formatLocalDateTime } from '../../utils/date-utils.js';
 import { useI18n } from '../../i18n.js';
 
 const MAX_STREAMS_DEFAULT = 128;
-const MAX_STREAMS_CEILING_FALLBACK = 128;
 
 /**
  * SettingsView component
@@ -821,7 +820,6 @@ export function SettingsView() {
           <div class="setting grid grid-cols-1 md:grid-cols-3 gap-4 items-center mb-4">
             <label for="setting-max-streams" class="font-medium">
               {t('settings.maxStreams')}
-              <span class="ml-1 text-xs text-muted-foreground">({t('settings.requiresRestart')})</span>
             </label>
             <div class="col-span-2">
               <input
@@ -829,14 +827,13 @@ export function SettingsView() {
                 id="setting-max-streams"
                 name="maxStreams"
                 min="1"
-                max={settingsData?.max_streams_ceiling || MAX_STREAMS_CEILING_FALLBACK}
                 class="w-full p-2 border border-input rounded bg-background text-foreground disabled:opacity-60 disabled:cursor-not-allowed"
                 value={settings.maxStreams}
                 onChange={handleInputChange}
                 disabled={!canModifySettings}
               />
               <p class="text-xs text-muted-foreground mt-1">
-                {t('settings.maxStreamsHelpBefore')} <strong>{t('settings.serviceRestart')}</strong>. {t('settings.maxStreamsHelpAfter')}
+                {t('settings.maxStreamsHelpBefore')}
               </p>
             </div>
           </div>

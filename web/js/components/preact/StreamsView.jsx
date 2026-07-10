@@ -588,6 +588,9 @@ export function StreamsView() {
         );
       } else {
         showStatusMessage(t('streams.streamAddedSuccessfully'));
+        if (data?.warning_message) {
+          showStatusMessage(data.warning_message, 'warning', 9000);
+        }
       }
       closeModal();
       // Invalidate and refetch streams data
@@ -597,13 +600,10 @@ export function StreamsView() {
       const forcedMode = variables?.__mode;
       const didUpdate = forcedMode === 'update' || (forcedMode !== 'create' && isEditing);
       if (!didUpdate) {
-        const isStreamLimitError = error?.status === 409 &&
-          typeof error?.message === 'string' &&
-          error.message.includes('Max streams limit reached');
         showStatusMessage(
-          isStreamLimitError ? error.message : t('streams.errorAddingStream', { message: error.message }),
+          t('streams.errorAddingStream', { message: error.message }),
           'error',
-          isStreamLimitError ? 9000 : 5000
+          5000
         );
       } else {
         showStatusMessage(
