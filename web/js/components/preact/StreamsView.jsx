@@ -1390,6 +1390,9 @@ export function StreamsView() {
       device,
       ip_address: device.ip_address,
       port: ports[0] || 554,
+      ports,
+      manufacturer: device.manufacturer || '',
+      model: device.model || '',
       username: onvifCredentials.username,
       password: onvifCredentials.password
     });
@@ -1459,7 +1462,9 @@ export function StreamsView() {
           headers: {
             'X-Device-URL': deviceUrl,
             'X-Username': credentials.username,
-            'X-Password': credentials.password
+            'X-Password': credentials.password,
+            'X-Device-Manufacturer': device.manufacturer || '',
+            'X-Device-Model': device.model || ''
           }
         }).then(response => {
           if (!response.ok) {

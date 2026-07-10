@@ -26,6 +26,76 @@ static bool string_contains_case_insensitive(const char *haystack, const char *n
     return strcasestr(haystack, needle) != NULL;
 }
 
+static bool onvif_device_hint_is_dahua_family(const char *manufacturer, const char *model) {
+    return string_contains_case_insensitive(manufacturer, "dahua") ||
+           string_contains_case_insensitive(model, "dahua") ||
+           string_contains_case_insensitive(manufacturer, "amcrest") ||
+           string_contains_case_insensitive(model, "amcrest") ||
+           string_contains_case_insensitive(model, "networkvideotransmitter");
+}
+
+static bool rtsp_uri_uses_generic_live_path(const char *uri) {
+    if (!uri) {
+        return false;
+    }
+
+    const char *scheme = strstr(uri, "://");
+    const char *path = scheme ? strpbrk(scheme + 3, "/?#") : NULL;
+    if (!path) {
+        return false;
+    }
+
+    return strncmp(path, "/live", 5) == 0 ||
+           strncmp(path, "/stream", 7) == 0 ||
+           strncmp(path, "/ch0_", 5) == 0;
+}
+
+static bool build_dahua_rtsp_uri_from_base(const char *source_uri,
+                                           bool secondary,
+                                           char *out_uri,
+                                           size_t out_size) {
+    char stripped_uri[MAX_URL_LENGTH];
+
+    if (!source_uri || !out_uri || out_size == 0) {
+        return false;
+    }
+
+    if (url_strip_credentials(source_uri, stripped_uri, sizeof(stripped_uri)) != 0) {
+        snprintf(stripped_uri, sizeof(stripped_uri), "%s", source_uri);
+    }
+
+    const char *scheme = strstr(stripped_uri, "://");
+    if (!scheme) {
+        return false;
+    }
+
+    const char *authority_start = scheme + 3;
+    const char *path_start = strpbrk(authority_start, "/?#");
+    size_t base_len = path_start ? (size_t)(path_start - stripped_uri) : strlen(stripped_uri);
+    int subtype = secondary ? 1 : 0;
+    int written = snprintf(out_uri, out_size, "%.*s/cam/realmonitor?channel=1&subtype=%d",
+                           (int)base_len, stripped_uri, subtype);
+    return written > 0 && (size_t)written < out_size;
+}
+
+static void normalize_dahua_profile_stream_uri(const char *manufacturer,
+                                               const char *model,
+                                               bool secondary,
+                                               char *stream_uri,
+                                               size_t stream_uri_size) {
+    if (!onvif_device_hint_is_dahua_family(manufacturer, model) ||
+        !rtsp_uri_uses_generic_live_path(stream_uri)) {
+        return;
+    }
+
+    char normalized_uri[MAX_URL_LENGTH];
+    if (!build_dahua_rtsp_uri_from_base(stream_uri, secondary, normalized_uri, sizeof(normalized_uri))) {
+        return;
+    }
+
+    snprintf(stream_uri, stream_uri_size, "%s", normalized_uri);
+}
+
 static double profile_rank_score(const onvif_profile_t *profile) {
     if (!profile) {
         return 0.0;
@@ -310,6 +380,8 @@ void handle_get_onvif_device_profiles(const http_request_t *req, http_response_t
     const char *device_url_param = http_request_get_header(req, "X-Device-URL");
     const char *username_param = http_request_get_header(req, "X-Username");
     const char *password_param = http_request_get_header(req, "X-Password");
+    const char *manufacturer_param = http_request_get_header(req, "X-Device-Manufacturer");
+    const char *model_param = http_request_get_header(req, "X-Device-Model");
 
     if (!device_url_param) {
         log_error("Missing device_url parameter");
@@ -385,13 +457,21 @@ void handle_get_onvif_device_profiles(const http_request_t *req, http_response_t
         cJSON_AddStringToObject(profile, "name", profile_info->name);
         char safe_snapshot_uri[MAX_URL_LENGTH];
         char safe_stream_uri[MAX_URL_LENGTH];
+        char normalized_stream_uri[MAX_URL_LENGTH];
+
+        snprintf(normalized_stream_uri, sizeof(normalized_stream_uri), "%s", profile_info->stream_uri);
+        normalize_dahua_profile_stream_uri(manufacturer_param,
+                                           model_param,
+                                           i == 1,
+                                           normalized_stream_uri,
+                                           sizeof(normalized_stream_uri));
 
         if (url_strip_credentials(profile_info->snapshot_uri, safe_snapshot_uri, sizeof(safe_snapshot_uri)) != 0) {
             strncpy(safe_snapshot_uri, profile_info->snapshot_uri, sizeof(safe_snapshot_uri) - 1);
             safe_snapshot_uri[sizeof(safe_snapshot_uri) - 1] = '\0';
         }
-        if (url_strip_credentials(profile_info->stream_uri, safe_stream_uri, sizeof(safe_stream_uri)) != 0) {
-            strncpy(safe_stream_uri, profile_info->stream_uri, sizeof(safe_stream_uri) - 1);
+        if (url_strip_credentials(normalized_stream_uri, safe_stream_uri, sizeof(safe_stream_uri)) != 0) {
+            strncpy(safe_stream_uri, normalized_stream_uri, sizeof(safe_stream_uri) - 1);
             safe_stream_uri[sizeof(safe_stream_uri) - 1] = '\0';
         }
 

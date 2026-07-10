@@ -26,6 +26,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/select.h>
 #include <sys/socket.h>
 #include <sys/time.h>
@@ -35,7 +36,10 @@
 #define MAX_SCAN_HOSTS 1024
 #define MAX_RTSP_BATCH_PROBES 256
 #define MAX_RTSP_PORTS 3
+#define MAX_RTSP_VALIDATE_PORTS 8
+#define MAX_RTSP_VALIDATED_PROFILES 16
 #define RTSP_DISCOVERY_CONNECT_TIMEOUT_MS 75
+#define RTSP_VALIDATION_TIMEOUT_US "2500000"
 
 typedef struct {
     char ip_address[64];
@@ -70,6 +74,7 @@ typedef struct {
     char safe_url[MAX_URL_LENGTH];
     rtsp_stream_info_t info;
     const rtsp_path_candidate_t *candidate;
+    int port;
 } rtsp_validated_profile_t;
 
 typedef struct {
@@ -96,17 +101,30 @@ static discovery_scan_state_t g_camera_discovery = {
 };
 
 static const rtsp_path_candidate_t COMMON_RTSP_PATHS[] = {
+    { "/cam/realmonitor?channel=1&subtype=0", "Dahua/Amcrest Main Stream", "primary", "dahua-realmonitor" },
+    { "/cam/realmonitor?channel=1&subtype=1", "Dahua/Amcrest Sub Stream", "secondary", "dahua-realmonitor" },
+    { "/Streaming/Channels/101", "Hikvision Main Stream", "primary", "hikvision-channels" },
+    { "/Streaming/Channels/102", "Hikvision Sub Stream", "secondary", "hikvision-channels" },
+    { "/media/video1", "Uniview Main Stream", "primary", "uniview-media" },
+    { "/media/video2", "Uniview Sub Stream", "secondary", "uniview-media" },
+    { "/unicast/c1/s0/live", "Uniview Main Stream", "primary", "uniview-unicast" },
+    { "/unicast/c1/s1/live", "Uniview Sub Stream", "secondary", "uniview-unicast" },
+    { "/h264Preview_01_main", "Reolink Main Stream", "primary", "reolink-preview" },
+    { "/h264Preview_01_sub", "Reolink Sub Stream", "secondary", "reolink-preview" },
+    { "/axis-media/media.amp", "Axis Main Stream", "primary", "axis-media" },
+    { "/axis-media/media.amp?videocodec=h264", "Axis H.264 Stream", "secondary", "axis-media" },
+    { "/profile1/media.smp", "Hanwha Main Stream", "primary", "hanwha-profile" },
+    { "/profile2/media.smp", "Hanwha Sub Stream", "secondary", "hanwha-profile" },
+    { "/videoMain", "Foscam Main Stream", "primary", "foscam-video" },
+    { "/videoSub", "Foscam Sub Stream", "secondary", "foscam-video" },
     { "/stream1", "RTSP Main Stream", "primary", "generic-stream" },
     { "/stream2", "RTSP Sub Stream", "secondary", "generic-stream" },
     { "/live", "RTSP Live Stream", "primary", "generic-live" },
+    { "/live.sdp", "RTSP Live Stream", "primary", "generic-live" },
+    { "/live/ch0", "RTSP Main Stream", "primary", "generic-live-channel" },
+    { "/live/ch1", "RTSP Sub Stream", "secondary", "generic-live-channel" },
     { "/ch0_0.h264", "RTSP Main Stream", "primary", "legacy-ch0" },
     { "/ch0_1.h264", "RTSP Sub Stream", "secondary", "legacy-ch0" },
-    { "/cam/realmonitor?channel=1&subtype=0", "RTSP Main Stream", "primary", "dahua-realmonitor" },
-    { "/cam/realmonitor?channel=1&subtype=1", "RTSP Sub Stream", "secondary", "dahua-realmonitor" },
-    { "/Streaming/Channels/101", "RTSP Main Stream", "primary", "hikvision-channels" },
-    { "/Streaming/Channels/102", "RTSP Sub Stream", "secondary", "hikvision-channels" },
-    { "/h264Preview_01_main", "RTSP Main Stream", "primary", "h264-preview" },
-    { "/h264Preview_01_sub", "RTSP Sub Stream", "secondary", "h264-preview" },
     { NULL, NULL, NULL, NULL }
 };
 
@@ -417,7 +435,7 @@ static int validate_rtsp_stream(const char *url, rtsp_stream_info_t *info, char 
     int ret = -1;
 
     av_dict_set(&options, "rtsp_transport", "tcp", 0);
-    av_dict_set(&options, "timeout", "5000000", 0);
+    av_dict_set(&options, "timeout", RTSP_VALIDATION_TIMEOUT_US, 0);
 
     ret = avformat_open_input(&format_ctx, url, NULL, &options);
     if (ret < 0) {
@@ -470,6 +488,104 @@ cleanup:
 static void build_rtsp_url(char *dst, size_t size, const char *ip, int port, const char *path) {
     const char *normalized_path = path && path[0] == '/' ? path : "/";
     snprintf(dst, size, "rtsp://%s:%d%s", ip, port, normalized_path);
+}
+
+static void append_validation_port(int *ports, int *port_count, int port) {
+    if (!ports || !port_count || port <= 0 || port > 65535) {
+        return;
+    }
+
+    for (int i = 0; i < *port_count; i++) {
+        if (ports[i] == port) {
+            return;
+        }
+    }
+
+    if (*port_count < MAX_RTSP_VALIDATE_PORTS) {
+        ports[(*port_count)++] = port;
+    }
+}
+
+static bool rtsp_candidate_is_generic(const rtsp_path_candidate_t *candidate) {
+    if (!candidate || !candidate->family) {
+        return false;
+    }
+
+    return strncmp(candidate->family, "generic-", 8) == 0 ||
+           strncmp(candidate->family, "legacy-", 7) == 0;
+}
+
+static bool text_contains_token(const char *text, const char *token) {
+    return text && token && strcasestr(text, token) != NULL;
+}
+
+static bool rtsp_candidate_matches_device_hint(const rtsp_path_candidate_t *candidate,
+                                               const char *manufacturer,
+                                               const char *model) {
+    if (!candidate || !candidate->family) {
+        return false;
+    }
+
+    if ((text_contains_token(manufacturer, "hikvision") || text_contains_token(model, "hikvision")) &&
+        strcmp(candidate->family, "hikvision-channels") == 0) {
+        return true;
+    }
+    if ((text_contains_token(manufacturer, "dahua") || text_contains_token(model, "dahua") ||
+         text_contains_token(model, "networkvideotransmitter") ||
+         text_contains_token(manufacturer, "amcrest") || text_contains_token(model, "amcrest")) &&
+        strcmp(candidate->family, "dahua-realmonitor") == 0) {
+        return true;
+    }
+    if ((text_contains_token(manufacturer, "uniview") || text_contains_token(model, "uniview") ||
+         text_contains_token(manufacturer, "unv") || text_contains_token(model, "unv")) &&
+        (strcmp(candidate->family, "uniview-media") == 0 ||
+         strcmp(candidate->family, "uniview-unicast") == 0)) {
+        return true;
+    }
+    if ((text_contains_token(manufacturer, "reolink") || text_contains_token(model, "reolink")) &&
+        strcmp(candidate->family, "reolink-preview") == 0) {
+        return true;
+    }
+    if ((text_contains_token(manufacturer, "axis") || text_contains_token(model, "axis")) &&
+        strcmp(candidate->family, "axis-media") == 0) {
+        return true;
+    }
+    if ((text_contains_token(manufacturer, "hanwha") || text_contains_token(model, "hanwha") ||
+         text_contains_token(manufacturer, "samsung") || text_contains_token(model, "samsung") ||
+         text_contains_token(manufacturer, "wisenet") || text_contains_token(model, "wisenet")) &&
+        strcmp(candidate->family, "hanwha-profile") == 0) {
+        return true;
+    }
+    if ((text_contains_token(manufacturer, "foscam") || text_contains_token(model, "foscam")) &&
+        strcmp(candidate->family, "foscam-video") == 0) {
+        return true;
+    }
+
+    return false;
+}
+
+static bool rtsp_should_try_candidate_on_pass(const rtsp_path_candidate_t *candidate,
+                                              const char *manufacturer,
+                                              const char *model,
+                                              bool has_device_hint,
+                                              int pass) {
+    bool is_generic = rtsp_candidate_is_generic(candidate);
+    bool matches_hint = rtsp_candidate_matches_device_hint(candidate, manufacturer, model);
+
+    if (has_device_hint) {
+        if (pass == 0) {
+            return matches_hint;
+        }
+        if (pass == 1) {
+            return is_generic;
+        }
+        return !matches_hint && !is_generic;
+    }
+
+    if (pass == 0) {
+        return is_generic;
+    }
+    return !is_generic;
 }
 
 static char *build_discovery_status_json_locked(void) {
@@ -635,6 +751,9 @@ void handle_post_validate_rtsp_device(const http_request_t *req, http_response_t
 
     const cJSON *ip_json = cJSON_GetObjectItem(body, "ip_address");
     const cJSON *port_json = cJSON_GetObjectItem(body, "port");
+    const cJSON *ports_json = cJSON_GetObjectItem(body, "ports");
+    const cJSON *manufacturer_json = cJSON_GetObjectItem(body, "manufacturer");
+    const cJSON *model_json = cJSON_GetObjectItem(body, "model");
     const cJSON *username_json = cJSON_GetObjectItem(body, "username");
     const cJSON *password_json = cJSON_GetObjectItem(body, "password");
 
@@ -648,6 +767,25 @@ void handle_post_validate_rtsp_device(const http_request_t *req, http_response_t
     int port = cJSON_IsNumber(port_json) ? port_json->valueint : 554;
     const char *username = cJSON_IsString(username_json) ? username_json->valuestring : NULL;
     const char *password = cJSON_IsString(password_json) ? password_json->valuestring : NULL;
+    const char *manufacturer = cJSON_IsString(manufacturer_json) ? manufacturer_json->valuestring : NULL;
+    const char *model = cJSON_IsString(model_json) ? model_json->valuestring : NULL;
+    bool has_device_hint = (manufacturer && manufacturer[0] != '\0' && strcasecmp(manufacturer, "Unknown") != 0) ||
+                           (model && model[0] != '\0' && strcasecmp(model, "Unknown") != 0);
+    int path_pass_count = has_device_hint ? 3 : 2;
+    int validation_ports[MAX_RTSP_VALIDATE_PORTS];
+    int validation_port_count = 0;
+
+    memset(validation_ports, 0, sizeof(validation_ports));
+    append_validation_port(validation_ports, &validation_port_count, port);
+    if (cJSON_IsArray(ports_json)) {
+        cJSON *port_item = NULL;
+        cJSON_ArrayForEach(port_item, ports_json) {
+            if (cJSON_IsNumber(port_item)) {
+                append_validation_port(validation_ports, &validation_port_count, port_item->valueint);
+            }
+        }
+    }
+    append_validation_port(validation_ports, &validation_port_count, 554);
 
     cJSON *root = cJSON_CreateObject();
     cJSON *attempts = root ? cJSON_AddArrayToObject(root, "attempts") : NULL;
@@ -664,59 +802,81 @@ void handle_post_validate_rtsp_device(const http_request_t *req, http_response_t
     memset(&selected_info, 0, sizeof(selected_info));
     char last_error[256] = {0};
     const char *selected_family = NULL;
-    rtsp_validated_profile_t profiles[8];
+    int selected_port = 0;
+    rtsp_validated_profile_t profiles[MAX_RTSP_VALIDATED_PROFILES];
     int profile_count = 0;
 
-    for (int i = 0; COMMON_RTSP_PATHS[i].path != NULL; i++) {
-        const rtsp_path_candidate_t *candidate = &COMMON_RTSP_PATHS[i];
-        if (success && selected_family && strcmp(candidate->family, selected_family) != 0) {
+    for (int p = 0; p < validation_port_count; p++) {
+        int candidate_port = validation_ports[p];
+
+        for (int pass = 0; pass < path_pass_count; pass++) {
+            for (int i = 0; COMMON_RTSP_PATHS[i].path != NULL; i++) {
+                const rtsp_path_candidate_t *candidate = &COMMON_RTSP_PATHS[i];
+                if (!rtsp_should_try_candidate_on_pass(candidate, manufacturer, model, has_device_hint, pass)) {
+                    continue;
+                }
+                if (success && selected_family && strcmp(candidate->family, selected_family) != 0) {
+                    break;
+                }
+
+                char raw_url[MAX_URL_LENGTH];
+                char credentialed_url[MAX_URL_LENGTH];
+                char safe_url[MAX_URL_LENGTH];
+                char error_msg[256] = {0};
+                rtsp_stream_info_t info;
+                memset(&info, 0, sizeof(info));
+
+                build_rtsp_url(raw_url, sizeof(raw_url), ip, candidate_port, candidate->path);
+                if (url_apply_credentials(raw_url, username, password, credentialed_url, sizeof(credentialed_url)) != 0) {
+                    snprintf(credentialed_url, sizeof(credentialed_url), "%s", raw_url);
+                }
+                if (url_redact_for_logging(credentialed_url, safe_url, sizeof(safe_url)) != 0) {
+                    snprintf(safe_url, sizeof(safe_url), "%s", "rtsp://[invalid]");
+                }
+
+                int result = validate_rtsp_stream(credentialed_url, &info, error_msg, sizeof(error_msg));
+                cJSON *attempt = cJSON_CreateObject();
+                if (attempt) {
+                    cJSON_AddStringToObject(attempt, "url", safe_url);
+                    cJSON_AddStringToObject(attempt, "name", candidate->name);
+                    cJSON_AddStringToObject(attempt, "stream_role", candidate->role);
+                    cJSON_AddNumberToObject(attempt, "port", candidate_port);
+                    cJSON_AddStringToObject(attempt, "family", candidate->family);
+                    cJSON_AddBoolToObject(attempt, "success", result == 0);
+                    if (result != 0) {
+                        cJSON_AddStringToObject(attempt, "message", error_msg);
+                    }
+                    cJSON_AddItemToArray(attempts, attempt);
+                }
+
+                if (result == 0) {
+                    if (!success) {
+                        success = true;
+                        selected_family = candidate->family;
+                        selected_port = candidate_port;
+                        snprintf(selected_url, sizeof(selected_url), "%s", credentialed_url);
+                        selected_info = info;
+                    }
+                    if (profile_count < (int)(sizeof(profiles) / sizeof(profiles[0]))) {
+                        snprintf(profiles[profile_count].url, sizeof(profiles[profile_count].url), "%s", credentialed_url);
+                        snprintf(profiles[profile_count].safe_url, sizeof(profiles[profile_count].safe_url), "%s", safe_url);
+                        profiles[profile_count].info = info;
+                        profiles[profile_count].candidate = candidate;
+                        profiles[profile_count].port = candidate_port;
+                        profile_count++;
+                    }
+                } else {
+                    snprintf(last_error, sizeof(last_error), "%s", error_msg);
+                }
+            }
+
+            if (success && selected_port == candidate_port) {
+                break;
+            }
+        }
+
+        if (success && selected_port == candidate_port) {
             break;
-        }
-
-        char raw_url[MAX_URL_LENGTH];
-        char credentialed_url[MAX_URL_LENGTH];
-        char safe_url[MAX_URL_LENGTH];
-        char error_msg[256] = {0};
-        rtsp_stream_info_t info;
-        memset(&info, 0, sizeof(info));
-
-        build_rtsp_url(raw_url, sizeof(raw_url), ip, port, candidate->path);
-        if (url_apply_credentials(raw_url, username, password, credentialed_url, sizeof(credentialed_url)) != 0) {
-            snprintf(credentialed_url, sizeof(credentialed_url), "%s", raw_url);
-        }
-        if (url_redact_for_logging(credentialed_url, safe_url, sizeof(safe_url)) != 0) {
-            snprintf(safe_url, sizeof(safe_url), "%s", "rtsp://[invalid]");
-        }
-
-        int result = validate_rtsp_stream(credentialed_url, &info, error_msg, sizeof(error_msg));
-        cJSON *attempt = cJSON_CreateObject();
-        if (attempt) {
-            cJSON_AddStringToObject(attempt, "url", safe_url);
-            cJSON_AddStringToObject(attempt, "name", candidate->name);
-            cJSON_AddStringToObject(attempt, "stream_role", candidate->role);
-            cJSON_AddBoolToObject(attempt, "success", result == 0);
-            if (result != 0) {
-                cJSON_AddStringToObject(attempt, "message", error_msg);
-            }
-            cJSON_AddItemToArray(attempts, attempt);
-        }
-
-        if (result == 0) {
-            if (!success) {
-                success = true;
-                selected_family = candidate->family;
-                snprintf(selected_url, sizeof(selected_url), "%s", credentialed_url);
-                selected_info = info;
-            }
-            if (profile_count < (int)(sizeof(profiles) / sizeof(profiles[0]))) {
-                snprintf(profiles[profile_count].url, sizeof(profiles[profile_count].url), "%s", credentialed_url);
-                snprintf(profiles[profile_count].safe_url, sizeof(profiles[profile_count].safe_url), "%s", safe_url);
-                profiles[profile_count].info = info;
-                profiles[profile_count].candidate = candidate;
-                profile_count++;
-            }
-        } else {
-            snprintf(last_error, sizeof(last_error), "%s", error_msg);
         }
     }
 
@@ -730,6 +890,7 @@ void handle_post_validate_rtsp_device(const http_request_t *req, http_response_t
         cJSON_AddStringToObject(root, "url", selected_url);
         cJSON_AddStringToObject(root, "safe_url", safe_selected_url);
         cJSON_AddStringToObject(root, "status", "Valid RTSP Stream");
+        cJSON_AddNumberToObject(root, "port", selected_port);
 
         cJSON *profiles_json = cJSON_AddArrayToObject(root, "profiles");
         if (profiles_json) {
@@ -741,10 +902,12 @@ void handle_post_validate_rtsp_device(const http_request_t *req, http_response_t
                 }
 
                 char token[128];
-                snprintf(token, sizeof(token), "rtsp-%s-%s", ip, profiles[i].candidate->role);
+                snprintf(token, sizeof(token), "rtsp-%s-%d-%s", ip, profiles[i].port, profiles[i].candidate->role);
                 cJSON_AddStringToObject(profile_json, "token", token);
                 cJSON_AddStringToObject(profile_json, "name", profiles[i].candidate->name);
                 cJSON_AddStringToObject(profile_json, "stream_role", profiles[i].candidate->role);
+                cJSON_AddNumberToObject(profile_json, "port", profiles[i].port);
+                cJSON_AddStringToObject(profile_json, "family", profiles[i].candidate->family);
                 cJSON_AddStringToObject(profile_json, "stream_uri", profiles[i].url);
                 cJSON_AddStringToObject(profile_json, "safe_url", profiles[i].safe_url);
                 cJSON_AddNumberToObject(profile_json, "width", profiles[i].info.width);
