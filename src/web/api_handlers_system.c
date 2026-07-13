@@ -376,6 +376,44 @@ static bool read_ull_from_file(const char *path, unsigned long long *out) {
 }
 
 /**
+ * Read a memory value from /proc/meminfo. Values are returned in bytes.
+ */
+static bool read_meminfo_bytes(const char *key, unsigned long long *out) {
+    if (!key || !out) {
+        return false;
+    }
+
+    FILE *fp = fopen("/proc/meminfo", "r");
+    if (!fp) {
+        return false;
+    }
+
+    char line[256];
+    size_t key_len = strlen(key);
+    bool found = false;
+
+    while (fgets(line, sizeof(line), fp)) {
+        if (strncmp(line, key, key_len) == 0 && line[key_len] == ':') {
+            char *ptr = line + key_len + 1;
+            while (*ptr == ' ' || *ptr == '\t') {
+                ptr++;
+            }
+
+            char *endptr;
+            unsigned long long value_kb = strtoull(ptr, &endptr, 10);
+            if (endptr != ptr) {
+                *out = value_kb * 1024ULL;
+                found = true;
+            }
+            break;
+        }
+    }
+
+    fclose(fp);
+    return found;
+}
+
+/**
  * Get the effective number of CPU cores available to this process.
  *
  * Checks cgroup v2 (cpu.max) then cgroup v1 (cpu.cfs_quota_us / period)
@@ -527,6 +565,14 @@ static unsigned long long get_effective_memory_used(void) {
     }
 
     // Fall back to host-wide calculation
+    unsigned long long mem_total = 0;
+    unsigned long long mem_available = 0;
+    if (read_meminfo_bytes("MemTotal", &mem_total) &&
+        read_meminfo_bytes("MemAvailable", &mem_available) &&
+        mem_total > mem_available) {
+        return mem_total - mem_available;
+    }
+
     struct sysinfo si;
     if (sysinfo(&si) == 0) {
         used = ((unsigned long long)si.totalram - (unsigned long long)si.freeram) * si.mem_unit;

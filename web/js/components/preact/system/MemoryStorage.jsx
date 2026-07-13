@@ -19,6 +19,8 @@ export function MemoryStorage({ systemInfo, formatBytes }) {
   const go2rtcMemoryUsed = systemInfo.go2rtcMemory?.used || 0;
   const detectorMemoryUsed = systemInfo.detectorMemory?.used || 0;
   const totalSystemMemory = systemInfo.memory?.total || 0;
+  const systemMemoryUsedPercent = systemInfo.systemMemory?.total ?
+    (systemInfo.systemMemory.used / systemInfo.systemMemory.total * 100).toFixed(1) : 0;
 
   // Calculate combined memory usage (all three processes)
   const combinedMemoryUsed = lightNvrMemoryUsed + go2rtcMemoryUsed + detectorMemoryUsed;
@@ -77,6 +79,7 @@ export function MemoryStorage({ systemInfo, formatBytes }) {
             <span>
               {systemInfo.systemMemory?.used ? formatBytes(systemInfo.systemMemory.used) : '0'} /
               {systemInfo.systemMemory?.total ? formatBytes(systemInfo.systemMemory.total) : '0'}
+              {' '}({systemMemoryUsedPercent}%)
             </span>
           </div>
           <div className="w-full bg-gray-200 rounded-full h-2.5 dark:bg-gray-700">
@@ -84,8 +87,7 @@ export function MemoryStorage({ systemInfo, formatBytes }) {
               className="h-2.5 rounded-full"
               style={{
                 backgroundColor: 'hsl(var(--primary))',
-                width: `${systemInfo.systemMemory?.total ?
-                  (systemInfo.systemMemory.used / systemInfo.systemMemory.total * 100).toFixed(1) : 0}%`
+                width: `${systemMemoryUsedPercent}%`
               }}
             ></div>
           </div>
