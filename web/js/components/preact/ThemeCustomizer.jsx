@@ -13,7 +13,7 @@ import { useI18n } from '../../i18n.js';
  * @returns {JSX.Element} ThemeCustomizer component
  */
 export function ThemeCustomizer() {
-  const VISIBLE_THEME_IDS = new Set(['default', 'oneberry']);
+  const VISIBLE_THEME_IDS = new Set(['default']);
   const visibleThemes = Object.entries(COLOR_THEMES).filter(([themeId]) => VISIBLE_THEME_IDS.has(themeId));
 
   const [mounted, setMounted] = useState(false);

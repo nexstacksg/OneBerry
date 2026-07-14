@@ -41,7 +41,7 @@ function extractColorThemes() {
  */
 function generateThemeScript(colorThemes) {
   const themesJson = JSON.stringify(colorThemes);
-  const visibleThemeIds = JSON.stringify(['default', 'oneberry']);
+  const visibleThemeIds = JSON.stringify(['default']);
   
   return `<script>
     (function() {

@@ -13,13 +13,6 @@ export const COLOR_THEMES = {
     dark: { hue: 357, saturation: 72 },
     icon: '🍓'
   },
-  oneberry: {
-    name: 'Oneberry Red',
-    nameKey: 'theme.oneberry',
-    light: { hue: 357, saturation: 84 },
-    dark: { hue: 357, saturation: 72 },
-    icon: '🍓'
-  },
   blue: {
     name: 'Ocean Blue',
     nameKey: 'theme.blue',
@@ -71,7 +64,7 @@ export const COLOR_THEMES = {
   }
 };
 
-const VISIBLE_THEME_IDS = ['default', 'oneberry'];
+const VISIBLE_THEME_IDS = ['default'];
 const SIDEBAR_STORAGE_KEY = 'oneberry.dashboardSidebar';
 const SIDEBAR_EXPANDED_WIDTH_REM = 17;
 const SIDEBAR_COLLAPSED_WIDTH_REM = 5.25;
@@ -248,6 +241,7 @@ export function getThemeInitScript() {
 (function() {
   try {
     const COLOR_THEMES = ${JSON.stringify(COLOR_THEMES)};
+    const VISIBLE_THEME_IDS = ${JSON.stringify(VISIBLE_THEME_IDS)};
     const SIDEBAR_STORAGE_KEY = ${JSON.stringify(SIDEBAR_STORAGE_KEY)};
     const SIDEBAR_EXPANDED_WIDTH_REM = ${SIDEBAR_EXPANDED_WIDTH_REM};
     const SIDEBAR_COLLAPSED_WIDTH_REM = ${SIDEBAR_COLLAPSED_WIDTH_REM};
@@ -294,7 +288,7 @@ export function getThemeInitScript() {
     }
     
     if (savedColorIntensity && savedColorTheme) {
-      const colorTheme = savedColorTheme in COLOR_THEMES ? savedColorTheme : 'default';
+      const colorTheme = VISIBLE_THEME_IDS.includes(savedColorTheme) && savedColorTheme in COLOR_THEMES ? savedColorTheme : 'default';
       const colorIntensity = parseInt(savedColorIntensity) || 50;
       const isDark = finalTheme === 'dark';
       const selectedTheme = COLOR_THEMES[colorTheme];
