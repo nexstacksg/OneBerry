@@ -228,10 +228,10 @@
 }
 
 .timeline-player-container.timeline-player-stage .timeline-video-surface {
-    width: 100%;
+    width: min(100%, calc(var(--timeline-video-max-height) * var(--timeline-video-aspect-value, 1.7778)));
     max-width: 100%;
     height: auto;
-    max-height: none;
+    max-height: var(--timeline-video-max-height);
     aspect-ratio: var(--timeline-video-aspect, 16 / 9);
     background: #000;
 }

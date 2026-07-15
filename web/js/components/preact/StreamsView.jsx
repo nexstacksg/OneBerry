@@ -258,6 +258,10 @@ export function StreamsView() {
 
   // State for streams data
   const [activeTab, setActiveTab] = useState('streams');
+  const [streamsViewMode, setStreamsViewMode] = useState(() => {
+    if (typeof window === 'undefined') return 'table';
+    return localStorage.getItem('oneberry.streamsViewMode') === 'grid' ? 'grid' : 'table';
+  });
   const [modalVisible, setModalVisible] = useState(false);
   const [onvifModalVisible, setOnvifModalVisible] = useState(false);
   const [showCustomNameInput, setShowCustomNameInput] = useState(false);
@@ -285,6 +289,14 @@ export function StreamsView() {
       [streamName]: !prev[streamName]
     }));
   };
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('oneberry.streamsViewMode', streamsViewMode);
+    } catch {
+      // Ignore storage failures in private or locked-down browser contexts.
+    }
+  }, [streamsViewMode]);
 
   // Track which stream URL credentials are currently revealed (by stream name).
   // By default every URL with credentials is masked, even for admins.
@@ -1833,6 +1845,310 @@ export function StreamsView() {
     );
   };
 
+  const getStreamStatusMeta = (stream) => {
+    const statusColor =
+      stream.status === 'Running'      ? 'hsl(var(--success))' :
+      stream.status === 'Starting'     ? 'hsl(var(--warning, 45 93% 47%))' :
+      stream.status === 'Reconnecting' ? 'hsl(var(--warning, 45 93% 47%))' :
+      stream.status === 'Error'        ? 'hsl(var(--danger))' :
+      stream.status === 'Stopping'     ? 'hsl(var(--warning, 45 93% 47%))' :
+      stream.status === 'Stopped'      ? 'hsl(var(--danger))' :
+      'hsl(var(--muted-foreground))';
+    const statusLabel =
+      stream.status === 'Running'      ? t('streams.running')      :
+      stream.status === 'Starting'     ? t('streams.starting')     :
+      stream.status === 'Reconnecting' ? t('streams.reconnecting') :
+      stream.status === 'Error'        ? t('streams.error')        :
+      stream.status === 'Stopping'     ? t('streams.stopping')     :
+      stream.status === 'Stopped'      ? t('streams.stopped')      :
+      (stream.status || t('common.unknown'));
+
+    return { statusColor, statusLabel };
+  };
+
+  const getRecordingSummary = (stream) => {
+    if (!stream.record && !stream.detection_based_recording) {
+      return t('common.disabled');
+    }
+
+    const parts = [];
+    if (stream.record) {
+      parts.push(stream.record_on_schedule ? t('streams.schedule') : t('streams.continuous'));
+    }
+    if (stream.detection_based_recording) {
+      parts.push(t('streams.detection'));
+    }
+    return parts.join(' + ') || t('common.enabled');
+  };
+
+  const renderUrlValue = (stream, maxWidthClass = 'max-w-xs') => (
+    <div className="flex min-w-0 items-center gap-1.5">
+      <span
+        className={`min-w-0 truncate font-mono text-xs ${maxWidthClass}`}
+        title={revealedUrls.has(stream.name) ? stream.url : obfuscateUrlCredentials(stream.url)}
+      >
+        {revealedUrls.has(stream.name) ? stream.url : obfuscateUrlCredentials(stream.url)}
+      </span>
+      {urlHasCredentials(stream.url) && !shouldHideCredentials && (
+        <button
+          type="button"
+          className="flex-shrink-0 rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground focus:outline-none"
+          onClick={(e) => toggleUrlReveal(stream.name, e)}
+          title={revealedUrls.has(stream.name) ? t('streams.hideCredentials') : t('streams.showCredentials')}
+        >
+          {revealedUrls.has(stream.name) ? (
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 4.411m0 0L21 21" />
+            </svg>
+          ) : (
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+            </svg>
+          )}
+        </button>
+      )}
+    </div>
+  );
+
+  const renderStreamActions = (stream, className = 'flex space-x-2') => {
+    const hasAdminLauncher = !shouldHideCredentials && /^https?:\/\//i.test(stream.admin_url || '');
+
+    return (
+      <div className={className}>
+        {hasAdminLauncher && (
+          <a
+            className="rounded-full p-1 focus:outline-none"
+            style={{color: 'hsl(var(--primary))'}}
+            onMouseOver={(e) => e.currentTarget.style.backgroundColor = 'hsl(var(--primary) / 0.1)'}
+            onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+            href={stream.admin_url}
+            target="_blank"
+            rel="noopener noreferrer"
+            title={t('streams.openCameraAdminPage')}
+            aria-label={t('streams.openAdminPageFor', { name: stream.name })}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M14 3h7m0 0v7m0-7L10 14"></path>
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 5h5M5 5v14h14v-5"></path>
+            </svg>
+          </a>
+        )}
+        {canModifyStreams && (
+          <button
+            className="rounded-full p-1 focus:outline-none"
+            style={{color: 'hsl(var(--primary))'}}
+            onMouseOver={(e) => e.currentTarget.style.backgroundColor = 'hsl(var(--primary) / 0.1)'}
+            onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+            onClick={(e) => { e.stopPropagation(); openEditStreamModal(stream.name); }}
+            title={t('common.edit')}
+          >
+            <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
+              <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z"></path>
+            </svg>
+          </button>
+        )}
+        {canCreateStreams && (
+          <button
+            className="rounded-full p-1 focus:outline-none"
+            style={{color: 'hsl(var(--success))'}}
+            onMouseOver={(e) => e.currentTarget.style.backgroundColor = 'hsl(var(--success) / 0.1)'}
+            onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+            onClick={(e) => { e.stopPropagation(); openCloneStreamModal(stream.name); }}
+            title={t('streams.cloneStream')}
+          >
+            <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+            </svg>
+          </button>
+        )}
+        {canModifyStreams && (
+          <button
+            className="rounded-full p-1 focus:outline-none"
+            style={{color: stream.enabled ? 'hsl(var(--success))' : 'hsl(var(--muted-foreground))'}}
+            onMouseOver={(e) => e.currentTarget.style.backgroundColor = stream.enabled ? 'hsl(var(--success) / 0.1)' : 'hsl(var(--muted-foreground) / 0.1)'}
+            onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+            onClick={(e) => { e.stopPropagation(); handleToggleStreamEnabled(stream); }}
+            title={stream.enabled ? t('streams.toggleDisable') : t('streams.toggleEnable')}
+          >
+            <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+            </svg>
+          </button>
+        )}
+        {canModifyStreams && (
+          <button
+            className="rounded-full p-1 focus:outline-none"
+            style={{color: 'hsl(var(--danger))'}}
+            onMouseOver={(e) => e.currentTarget.style.backgroundColor = 'hsl(var(--danger) / 0.1)'}
+            onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+            onClick={(e) => { e.stopPropagation(); openDeleteModal(stream); }}
+            title={t('common.delete')}
+          >
+            <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
+              <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd"></path>
+            </svg>
+          </button>
+        )}
+        {!canModifyStreams && !hasAdminLauncher && (
+          <span className="text-muted-foreground">-</span>
+        )}
+      </div>
+    );
+  };
+
+  const renderStreamDetailChips = (stream) => (
+    <div className="grid gap-2 text-sm sm:grid-cols-2">
+      <div className="rounded-md bg-muted/35 px-3 py-2">
+        <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{t('common.enabled')}</div>
+        <div className="mt-1 font-medium" style={{color: stream.enabled ? 'hsl(var(--success))' : 'hsl(var(--danger))'}}>
+          {stream.enabled ? t('common.yes') : t('common.no')}
+        </div>
+      </div>
+      <div className="rounded-md bg-muted/35 px-3 py-2">
+        <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{t('streams.streaming')}</div>
+        <div className="mt-1 font-medium" style={{color: stream.streaming_enabled ? 'hsl(var(--success))' : 'hsl(var(--muted-foreground))'}}>
+          {stream.streaming_enabled ? t('common.active') : t('streams.off')}
+        </div>
+      </div>
+      <div className="rounded-md bg-muted/35 px-3 py-2">
+        <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{t('streams.codec')}</div>
+        <div className="mt-1 font-medium">{stream.codec || t('streams.notAvailable')}</div>
+      </div>
+      <div className="rounded-md bg-muted/35 px-3 py-2">
+        <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{t('streams.priority')}</div>
+        <div className="mt-1 font-medium">{stream.priority || t('streams.notAvailable')}</div>
+      </div>
+      {stream.record && (
+        <div className="rounded-md bg-muted/35 px-3 py-2 sm:col-span-2">
+          <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{t('streams.segment')}</div>
+          <div className="mt-1 font-medium">
+            {stream.segment_duration
+              ? (stream.segment_duration >= 60 ? `${Math.round(stream.segment_duration / 60)}min` : `${stream.segment_duration}s`)
+              : t('streams.notAvailable')}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
+  const renderStreamGridCard = (stream) => {
+    const isExpanded = expandedStreams[stream.name];
+    const { statusColor, statusLabel } = getStreamStatusMeta(stream);
+    const tags = String(stream.tags || '').split(',').map(tag => tag.trim()).filter(Boolean);
+
+    return (
+      <article
+        key={stream.name}
+        className={`rounded-lg border bg-card p-4 shadow-sm transition-all hover:border-primary/30 hover:shadow-md ${
+          selectedStreams.has(stream.name) ? 'border-primary ring-2 ring-primary/20' : 'border-border'
+        }`}
+        onClick={() => toggleStreamExpand(stream.name)}
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex min-w-0 items-center gap-2">
+              {canModifyStreams && selectionMode && (
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 flex-shrink-0 rounded cursor-pointer"
+                  checked={selectedStreams.has(stream.name)}
+                  onClick={(event) => event.stopPropagation()}
+                  onChange={(event) => toggleSelect(event, stream.name)}
+                />
+              )}
+              <span
+                className="h-2.5 w-2.5 flex-shrink-0 rounded-full"
+                style={{backgroundColor: stream.enabled ? 'hsl(var(--success))' : 'hsl(var(--danger))'}}
+                title={stream.enabled ? t('common.enabled') : t('common.disabled')}
+              />
+              <h3 className="min-w-0 truncate text-base font-semibold text-foreground" title={stream.name}>{stream.name}</h3>
+            </div>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <span
+                className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium text-white"
+                style={{backgroundColor: statusColor, opacity: stream.enabled ? 1 : 0.6}}
+              >
+                {statusLabel}
+              </span>
+              <span className="inline-flex items-center rounded-full border border-border bg-muted/35 px-2 py-0.5 text-xs text-muted-foreground">
+                {stream.width || 0}x{stream.height || 0}
+              </span>
+              <span className="inline-flex items-center rounded-full border border-border bg-muted/35 px-2 py-0.5 text-xs text-muted-foreground">
+                {stream.fps || 0} {t('streams.fps')}
+              </span>
+            </div>
+          </div>
+          <button
+            type="button"
+            className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            aria-label={isExpanded ? 'Collapse stream details' : 'Expand stream details'}
+            onClick={(event) => {
+              event.stopPropagation();
+              toggleStreamExpand(stream.name);
+            }}
+          >
+            <svg
+              className={`h-4 w-4 transition-transform duration-200 ${isExpanded ? 'rotate-90' : ''}`}
+              fill="none" stroke="currentColor" viewBox="0 0 24 24"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7" />
+            </svg>
+          </button>
+        </div>
+
+        <div className="mt-4 space-y-3">
+          <div>
+            <div className="mb-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{t('common.url')}</div>
+            <div onClick={(event) => event.stopPropagation()}>
+              {renderUrlValue(stream, 'max-w-full')}
+            </div>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div>
+              <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{t('streams.recording')}</div>
+              <div className="mt-1 text-sm font-medium">{getRecordingSummary(stream)}</div>
+            </div>
+            <div>
+              <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{t('streams.detection')}</div>
+              <div className="mt-1 text-sm font-medium">
+                {stream.detection_based_recording
+                  ? (stream.detection_model ? stream.detection_model.split('/').pop() : t('common.enabled'))
+                  : t('streams.off')}
+              </div>
+            </div>
+          </div>
+          {tags.length > 0 && (
+            <div className="flex flex-wrap gap-1.5">
+              {tags.slice(0, 4).map(tag => (
+                <span key={tag} className="rounded-full border border-border bg-muted/40 px-2 py-0.5 text-xs text-muted-foreground">
+                  {tag}
+                </span>
+              ))}
+              {tags.length > 4 && (
+                <span className="rounded-full border border-border bg-muted/40 px-2 py-0.5 text-xs text-muted-foreground">
+                  +{tags.length - 4}
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+
+        {isExpanded && (
+          <div className="mt-4 border-t border-border pt-4">
+            {renderStreamDetailChips(stream)}
+          </div>
+        )}
+
+        <div className="mt-4 flex items-center justify-between gap-3 border-t border-border pt-3">
+          <span className="text-xs text-muted-foreground">{isExpanded ? 'Details open' : 'Click for details'}</span>
+          {renderStreamActions(stream, 'flex items-center gap-1')}
+        </div>
+      </article>
+    );
+  };
+
   return (
     <section id="streams-page" className="page">
       <div className="page-header flex justify-between items-center mb-4 p-4 bg-card text-card-foreground rounded-lg shadow">
@@ -1976,6 +2292,51 @@ export function StreamsView() {
               </button>
             </div>
           )}
+          <div className="flex flex-col gap-3 border-b border-border px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <div className="text-sm font-semibold text-foreground">
+                {sortedStreams.length} {sortedStreams.length === 1 ? 'stream' : 'streams'}
+              </div>
+              <div className="mt-0.5 text-xs text-muted-foreground">
+                {streamsViewMode === 'grid' ? 'Card view for quick scanning' : 'Table view for dense comparison'}
+              </div>
+            </div>
+            <div className="inline-flex w-fit rounded-md border border-border bg-muted/30 p-1">
+              <button
+                type="button"
+                className={`inline-flex items-center gap-1.5 rounded px-3 py-1.5 text-sm font-medium transition-colors ${
+                  streamsViewMode === 'table'
+                    ? 'bg-card text-foreground shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+                aria-pressed={streamsViewMode === 'table'}
+                onClick={() => setStreamsViewMode('table')}
+                title="Table view"
+              >
+                <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16M4 18h16" />
+                </svg>
+                Table
+              </button>
+              <button
+                type="button"
+                className={`inline-flex items-center gap-1.5 rounded px-3 py-1.5 text-sm font-medium transition-colors ${
+                  streamsViewMode === 'grid'
+                    ? 'bg-card text-foreground shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+                aria-pressed={streamsViewMode === 'grid'}
+                onClick={() => setStreamsViewMode('grid')}
+                title="Grid view"
+              >
+                <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4h7v7H4V4Zm9 0h7v7h-7V4ZM4 13h7v7H4v-7Zm9 0h7v7h-7v-7Z" />
+                </svg>
+                Grid
+              </button>
+            </div>
+          </div>
+          {streamsViewMode === 'table' ? (
           <div className="overflow-x-auto">
             <table id="streams-table" className="min-w-full divide-y divide-border">
               <thead className="bg-muted">
@@ -2278,6 +2639,11 @@ export function StreamsView() {
               </tbody>
             </table>
           </div>
+          ) : (
+          <div id="streams-grid" className="grid gap-4 p-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+            {sortedStreams.map(stream => renderStreamGridCard(stream))}
+          </div>
+          )}
         </div>
       </ContentLoader>
         </div>

@@ -264,6 +264,7 @@ export function Header({ version = VERSION }) {
   const [renamingLayoutId, setRenamingLayoutId] = useState('');
   const [renameLayoutName, setRenameLayoutName] = useState('');
   const [dragOverLayoutId, setDragOverLayoutId] = useState('');
+  const [liveLayoutEditState, setLiveLayoutEditState] = useState({ layoutId: '', editing: false });
   const [locationSearch, setLocationSearch] = useState(() => (typeof window !== 'undefined' ? window.location.search : ''));
   const { t } = useI18n();
   const sidebarCollapsed = sidebarState.collapsed;
@@ -489,6 +490,27 @@ export function Header({ version = VERSION }) {
     window.addEventListener('click', closeMenus);
     return () => window.removeEventListener('click', closeMenus);
   }, []);
+
+  useEffect(() => {
+    const handleLiveLayoutEditMode = (event) => {
+      const detail = event.detail || {};
+      setLiveLayoutEditState({
+        layoutId: String(detail.layoutId || ''),
+        editing: detail.editing === true,
+      });
+    };
+
+    window.addEventListener('oneberry:live-layout-edit-mode', handleLiveLayoutEditMode);
+    return () => window.removeEventListener('oneberry:live-layout-edit-mode', handleLiveLayoutEditMode);
+  }, []);
+
+  useEffect(() => {
+    if (!liveLayoutEditState.editing) return;
+    if (activeNav !== 'nav-live' || liveSelection.layout !== liveLayoutEditState.layoutId) {
+      setLiveLayoutEditState({ layoutId: '', editing: false });
+      setDragOverLayoutId('');
+    }
+  }, [activeNav, liveLayoutEditState.editing, liveLayoutEditState.layoutId, liveSelection.layout]);
 
   const toggleLayoutNode = useCallback((nodeKey) => {
     setExpandedLayouts((prevState) => ({
@@ -795,9 +817,24 @@ export function Header({ version = VERSION }) {
     await saveLiveLayouts(next, previous);
   }, [isAdmin, liveLayouts, saveLiveLayouts]);
 
+  const canEditSidebarLayout = useCallback((layoutId) => (
+    isAdmin &&
+    activeNav === 'nav-live' &&
+    liveSelection.layout === layoutId &&
+    liveLayoutEditState.editing &&
+    liveLayoutEditState.layoutId === layoutId
+  ), [activeNav, isAdmin, liveLayoutEditState.editing, liveLayoutEditState.layoutId, liveSelection.layout]);
+
   const addCameraToLayout = useCallback(async (layoutId, cameraName) => {
     const camera = String(cameraName || '').trim();
     if (!camera || !isAdmin) return;
+
+    if (canEditSidebarLayout(layoutId)) {
+      window.dispatchEvent(new CustomEvent('oneberry:add-live-camera', {
+        detail: { cameraName: camera, autoFit: false },
+      }));
+      return;
+    }
 
     const previous = liveLayouts;
     const next = {
@@ -818,7 +855,18 @@ export function Header({ version = VERSION }) {
     };
 
     await saveLiveLayouts(next, previous);
-  }, [isAdmin, liveLayouts, saveLiveLayouts]);
+  }, [canEditSidebarLayout, isAdmin, liveLayouts, saveLiveLayouts]);
+
+  const removeCameraFromLayout = useCallback((layoutId, tile) => {
+    if (!canEditSidebarLayout(layoutId) || !tile) return;
+    window.dispatchEvent(new CustomEvent('oneberry:remove-live-layout-camera', {
+      detail: {
+        layoutId,
+        tileId: tile.id,
+        cameraName: tile.camera,
+      },
+    }));
+  }, [canEditSidebarLayout]);
 
   const handleCameraDragStart = useCallback((event, cameraName) => {
     event.dataTransfer.effectAllowed = 'copy';
@@ -985,20 +1033,26 @@ export function Header({ version = VERSION }) {
         <ul className="sidebar-layout-tree">
           {liveLayouts.layouts.map((layout) => {
             const expanded = expandedLayouts[layout.id] !== false;
-            const isDropTarget = dragOverLayoutId === layout.id;
+            const layoutEditable = canEditSidebarLayout(layout.id);
+            const isDropTarget = layoutEditable && dragOverLayoutId === layout.id;
 
             return (
               <li
                 key={layout.id}
                 className={`sidebar-layout-node ${isDropTarget ? 'is-drop-target' : ''}`}
                 onDragOver={(event) => {
-                  if (!isAdmin) return;
+                  if (!layoutEditable) return;
+                  const types = Array.from(event.dataTransfer.types || []);
+                  if (!types.includes('application/x-oneberry-camera')) return;
                   event.preventDefault();
                   event.dataTransfer.dropEffect = 'copy';
                   setDragOverLayoutId(layout.id);
                 }}
                 onDragLeave={() => setDragOverLayoutId('')}
                 onDrop={(event) => {
+                  if (!layoutEditable) return;
+                  const types = Array.from(event.dataTransfer.types || []);
+                  if (!types.includes('application/x-oneberry-camera')) return;
                   event.preventDefault();
                   const cameraName = event.dataTransfer.getData('application/x-oneberry-camera') || event.dataTransfer.getData('text/plain');
                   setDragOverLayoutId('');
@@ -1070,6 +1124,19 @@ export function Header({ version = VERSION }) {
                             <TreeIcon type="camera" />
                             <span className="sidebar-camera-name">{cameraName}</span>
                           </a>
+                          {layoutEditable && (
+                            <button
+                              type="button"
+                              className="sidebar-layout-camera-remove"
+                              aria-label={`Remove ${cameraName} from ${layout.name}`}
+                              title={`Remove ${cameraName}`}
+                              onClick={() => removeCameraFromLayout(layout.id, tile)}
+                            >
+                              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" aria-hidden="true">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4l8 8M12 4l-8 8" />
+                              </svg>
+                            </button>
+                          )}
                         </li>
                       );
                     })}
