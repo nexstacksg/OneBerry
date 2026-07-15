@@ -6,27 +6,33 @@ function GroupCard({ group, selected, onSelect }) {
   return (
     <button
       type="button"
-      className={`min-w-[11rem] rounded-lg border p-3 text-left transition ${
+      className={`min-w-[12rem] rounded-xl border p-4 text-left transition ${
         selected
-          ? 'border-primary bg-primary/10 text-foreground shadow-sm'
-          : 'border-border bg-card text-card-foreground hover:border-primary/30 hover:bg-muted/35'
+          ? 'border-primary bg-primary/10 text-foreground shadow-md shadow-primary/10'
+          : 'border-border bg-card text-card-foreground shadow-sm hover:border-primary/40 hover:bg-muted/35'
       }`}
       onClick={() => onSelect(group.key)}
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="truncate text-sm font-semibold">{group.label}</div>
-          <div className="mt-1 text-xs text-muted-foreground">
+          <div className="truncate text-base font-semibold">{group.label}</div>
+          <div className="mt-1 text-xs leading-5 text-muted-foreground">
             {t('users.groupUserCount', { count: group.users.length })}
           </div>
         </div>
-        <span className="rounded-full bg-background px-2 py-0.5 text-xs font-bold text-muted-foreground">
+        <span className={`rounded-full px-2.5 py-1 text-xs font-bold ${
+          selected ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
+        }`}>
           {group.users.length}
         </span>
       </div>
-      <div className="mt-3 flex gap-2 text-[11px] text-muted-foreground">
-        <span>{t('users.groupActiveCount', { count: group.activeCount })}</span>
-        {group.adminCount > 0 && <span>{t('users.groupAdminCount', { count: group.adminCount })}</span>}
+      <div className="mt-4 grid grid-cols-2 gap-2 text-[11px]">
+        <span className="rounded-md bg-background px-2 py-1 text-muted-foreground">
+          {t('users.groupActiveCount', { count: group.activeCount })}
+        </span>
+        <span className="rounded-md bg-background px-2 py-1 text-muted-foreground">
+          {t('users.groupAdminCount', { count: group.adminCount })}
+        </span>
       </div>
     </button>
   );
@@ -43,20 +49,20 @@ export function UserGroupsPanel({ groups, totalUsers, activeUserCount, adminUser
   };
 
   return (
-    <section className="mb-4">
-      <div className="mb-2 flex items-center justify-between gap-3">
+    <section className="mb-5 rounded-xl border border-border bg-card p-4 shadow-sm">
+      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+          <h3 className="text-sm font-semibold uppercase tracking-wide text-foreground">
             {t('users.userGroups')}
           </h3>
-          <p className="text-xs text-muted-foreground">
+          <p className="mt-1 text-sm text-muted-foreground">
             {t('users.userGroupsDescription')}
           </p>
         </div>
         {selectedGroup !== ALL_USERS_GROUP_KEY && (
           <button
             type="button"
-            className="btn-secondary text-sm"
+            className="btn-secondary inline-flex min-h-9 items-center rounded-lg px-3 text-sm"
             onClick={() => onSelectGroup(ALL_USERS_GROUP_KEY)}
           >
             {t('users.clearGroupFilter')}
@@ -64,7 +70,7 @@ export function UserGroupsPanel({ groups, totalUsers, activeUserCount, adminUser
         )}
       </div>
 
-      <div className="flex gap-3 overflow-x-auto pb-1">
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <GroupCard
           group={allGroup}
           selected={selectedGroup === ALL_USERS_GROUP_KEY}

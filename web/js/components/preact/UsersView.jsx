@@ -99,9 +99,33 @@ export function UsersView() {
   }, [selectedUserGroup, userGroups]);
 
   const renderPageHeader = (actionButton = null) => (
-    <div className="page-header flex justify-between items-center mb-4 p-4 bg-card text-card-foreground rounded-lg shadow">
-      <h2 className="text-xl font-semibold">{t('users.userManagement')}</h2>
-      {actionButton}
+    <div className="page-header mb-5 rounded-xl border border-border bg-card p-4 text-card-foreground shadow-sm">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <div>
+          <h2 className="text-2xl font-semibold tracking-tight">{t('users.userManagement')}</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Manage operator access, roles, API keys, and multi-factor authentication.
+          </p>
+        </div>
+
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <div className="grid grid-cols-3 overflow-hidden rounded-lg border border-border bg-background text-center shadow-sm">
+            <div className="min-w-[5.25rem] px-3 py-2">
+              <div className="text-lg font-semibold leading-none">{users.length}</div>
+              <div className="mt-1 text-[11px] uppercase text-muted-foreground">Users</div>
+            </div>
+            <div className="min-w-[5.25rem] border-x border-border px-3 py-2">
+              <div className="text-lg font-semibold leading-none text-[hsl(var(--success))]">{activeUserCount}</div>
+              <div className="mt-1 text-[11px] uppercase text-muted-foreground">{t('users.active')}</div>
+            </div>
+            <div className="min-w-[5.25rem] px-3 py-2">
+              <div className="text-lg font-semibold leading-none">{adminUserCount}</div>
+              <div className="mt-1 text-[11px] uppercase text-muted-foreground">Admins</div>
+            </div>
+          </div>
+          {actionButton}
+        </div>
+      </div>
     </div>
   );
 
@@ -450,7 +474,7 @@ export function UsersView() {
       <div>
         {renderPageHeader(
           <button
-            className="btn-primary"
+            className="btn-primary inline-flex min-h-10 items-center justify-center rounded-lg px-4 font-semibold shadow-sm"
             onClick={() => refetchUsers()}
           >
             {t('common.retry')}
@@ -471,7 +495,7 @@ export function UsersView() {
       <div>
         {renderPageHeader(
           <button
-            className="btn-primary"
+            className="btn-primary inline-flex min-h-10 items-center justify-center rounded-lg px-4 font-semibold shadow-sm"
             onClick={handleAddUserClick}
           >
             {t('users.addUser')}
@@ -500,7 +524,7 @@ export function UsersView() {
     <div>
       {renderPageHeader(
         <button
-          className="btn-primary"
+          className="btn-primary inline-flex min-h-10 items-center justify-center rounded-lg px-4 font-semibold shadow-sm"
           onClick={handleAddUserClick}
         >
           {t('users.addUser')}

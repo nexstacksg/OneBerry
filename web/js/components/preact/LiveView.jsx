@@ -1225,6 +1225,23 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
   }, []);
 
   useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.dispatchEvent(new CustomEvent('oneberry:live-layout-edit-mode', {
+      detail: {
+        layoutId: activeLayoutId,
+        editing: Boolean(activeLayoutId && layoutEditMode),
+      },
+    }));
+  }, [activeLayoutId, layoutEditMode]);
+
+  useEffect(() => () => {
+    if (typeof window === 'undefined') return;
+    window.dispatchEvent(new CustomEvent('oneberry:live-layout-edit-mode', {
+      detail: { layoutId: activeLayoutId, editing: false },
+    }));
+  }, [activeLayoutId]);
+
+  useEffect(() => {
     if (!activeLayoutId || !activeLayout || !workspaceStarted || hydratedLayoutId !== activeLayoutId) return;
     if (localStorage.getItem('userrole') === 'viewer') return;
 
@@ -1297,6 +1314,29 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
     window.addEventListener('oneberry:add-live-camera', handleAddCamera);
     return () => window.removeEventListener('oneberry:add-live-camera', handleAddCamera);
   }, [addWorkspaceTile]);
+
+  useEffect(() => {
+    const handleRemoveLayoutCamera = (event) => {
+      const detail = event.detail || {};
+      if (detail.layoutId !== activeLayoutId || workspaceLocked) return;
+
+      const tileId = String(detail.tileId || '');
+      const cameraName = String(detail.cameraName || '');
+      const tile = workspaceTiles.find((candidate) => (
+        candidate.type !== 'slot' &&
+        (
+          (tileId && candidate.instanceId === tileId) ||
+          (!tileId && cameraName && candidate.cameraId === cameraName)
+        )
+      ));
+      if (tile) {
+        removeWorkspaceTile(tile.instanceId);
+      }
+    };
+
+    window.addEventListener('oneberry:remove-live-layout-camera', handleRemoveLayoutCamera);
+    return () => window.removeEventListener('oneberry:remove-live-layout-camera', handleRemoveLayoutCamera);
+  }, [activeLayoutId, removeWorkspaceTile, workspaceLocked, workspaceTiles]);
 
   const saveCurrentWorkspaceAsLayout = useCallback(async (layoutName) => {
     const name = String(layoutName || '').trim();
