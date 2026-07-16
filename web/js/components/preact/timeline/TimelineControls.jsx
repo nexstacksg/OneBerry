@@ -17,7 +17,8 @@ import {
   MIN_TIMELINE_VIEW_HOURS,
   resolveActiveSegmentIndex,
   resolvePlaybackStreamName,
-  scaleTimelineWindowHours
+  timestampToTimelineOffset,
+  zoomTimelineRange
 } from './timelineUtils.js';
 import { useI18n } from '../../../i18n.js';
 
@@ -154,7 +155,31 @@ export function TimelineControls() {
     });
   };
 
-  // Zoom in — halve the visible window while keeping the right edge anchored.
+  const setZoomedRange = (zoomFactor) => {
+    const dayLengthHours = getTimelineDayLengthHours(timelineState.selectedDate);
+    const startHour = timelineState.timelineStartHour ?? 0;
+    const endHour = timelineState.timelineEndHour ?? dayLengthHours;
+    const activeHour = timestampToTimelineOffset(timelineState.currentTime, timelineState.selectedDate);
+    const anchorHour = Number.isFinite(activeHour)
+      ? activeHour
+      : ((startHour + endHour) / 2);
+    const nextRange = zoomTimelineRange(
+      startHour,
+      endHour,
+      zoomFactor,
+      anchorHour,
+      dayLengthHours,
+      MIN_TIMELINE_VIEW_HOURS
+    );
+
+    timelineState.setState({
+      timelineStartHour: nextRange.startHour,
+      timelineEndHour: nextRange.endHour,
+      timelineWindowHours: nextRange.endHour - nextRange.startHour
+    });
+  };
+
+  // Zoom in — halve the visible window around the active cursor, matching fullscreen.
   const zoomIn = () => {
     const dayLengthHours = getTimelineDayLengthHours(timelineState.selectedDate);
     const range = timelineState.timelineWindowHours ?? getTimelineRangeHours(
@@ -162,11 +187,10 @@ export function TimelineControls() {
       timelineState.timelineEndHour ?? dayLengthHours
     );
     if (range <= MIN_TIMELINE_VIEW_HOURS) return;
-    const nextRange = scaleTimelineWindowHours(range, 0.5, dayLengthHours, MIN_TIMELINE_VIEW_HOURS);
-    timelineState.setState({ timelineWindowHours: nextRange });
+    setZoomedRange(0.5);
   };
 
-  // Zoom out — double the visible window while keeping the right edge anchored.
+  // Zoom out — double the visible window around the active cursor, matching fullscreen.
   const zoomOut = () => {
     const dayLengthHours = getTimelineDayLengthHours(timelineState.selectedDate);
     const range = timelineState.timelineWindowHours ?? getTimelineRangeHours(
@@ -174,8 +198,7 @@ export function TimelineControls() {
       timelineState.timelineEndHour ?? dayLengthHours
     );
     if (range >= dayLengthHours) return;
-    const nextRange = scaleTimelineWindowHours(range, 2, dayLengthHours, MIN_TIMELINE_VIEW_HOURS);
-    timelineState.setState({ timelineWindowHours: nextRange });
+    setZoomedRange(2);
   };
 
   // Fit — reset to the auto-fit range computed on data load
@@ -183,6 +206,8 @@ export function TimelineControls() {
     const fs = timelineState.autoFitStartHour ?? 0;
     const fe = timelineState.autoFitEndHour ?? getTimelineDayLengthHours(timelineState.selectedDate);
     timelineState.setState({
+      timelineStartHour: fs,
+      timelineEndHour: fe,
       timelineWindowHours: Math.max(fe - fs, MIN_TIMELINE_VIEW_HOURS)
     });
   };

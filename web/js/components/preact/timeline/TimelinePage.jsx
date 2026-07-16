@@ -36,10 +36,12 @@ import {
   getTimelineRangeHours,
   MIN_TIMELINE_VIEW_HOURS,
   localClockTimeToTimestamp,
+  normalizeTimelineRange,
+  panTimelineRange,
   resolveActiveSegmentIndex,
   timelineOffsetToTimestamp,
   timestampToTimelineOffset,
-  scaleTimelineWindowHours
+  zoomTimelineRange
 } from './timelineUtils.js';
 
 const RECORDINGS_RETURN_URL_KEY = 'lightnvr_recordings_return_url';
@@ -131,25 +133,60 @@ const timelineState = {
 
     const selectedDate = this.selectedDate;
     const dayLengthHours = getTimelineDayLengthHours(selectedDate);
-    const derivedRangeHours = Number.isFinite(this.timelineWindowHours) && this.timelineWindowHours > 0
-      ? this.timelineWindowHours
-      : getTimelineRangeHours(this.timelineStartHour, this.timelineEndHour);
-    const normalizedWindowHours = Math.min(
-      Math.max(derivedRangeHours || dayLengthHours, MIN_TIMELINE_VIEW_HOURS),
+    const hasExplicitRange = newState.timelineStartHour !== undefined ||
+      newState.timelineEndHour !== undefined;
+    const hasExplicitWindow = newState.timelineWindowHours !== undefined;
+    const currentRange = normalizeTimelineRange(
+      this.timelineStartHour,
+      this.timelineEndHour,
       dayLengthHours
     );
-    this.timelineWindowHours = normalizedWindowHours;
 
-    const currentHour = Number.isFinite(this.currentTime)
-      ? timestampToTimelineOffset(this.currentTime, selectedDate)
-      : null;
-
-    if (Number.isFinite(currentHour)) {
-      this.timelineEndHour = currentHour;
-      this.timelineStartHour = currentHour - normalizedWindowHours;
-    } else if (!Number.isFinite(this.timelineStartHour) || !Number.isFinite(this.timelineEndHour)) {
-      this.timelineStartHour = 0;
-      this.timelineEndHour = normalizedWindowHours;
+    if (hasExplicitRange) {
+      const nextRange = normalizeTimelineRange(
+        this.timelineStartHour,
+        this.timelineEndHour,
+        dayLengthHours
+      );
+      this.timelineStartHour = nextRange.startHour;
+      this.timelineEndHour = nextRange.endHour;
+      this.timelineWindowHours = getTimelineRangeHours(nextRange.startHour, nextRange.endHour);
+    } else if (hasExplicitWindow) {
+      const nextWindowHours = Math.min(
+        Math.max(
+          Number.isFinite(this.timelineWindowHours) && this.timelineWindowHours > 0
+            ? this.timelineWindowHours
+            : getTimelineRangeHours(currentRange.startHour, currentRange.endHour),
+          MIN_TIMELINE_VIEW_HOURS
+        ),
+        dayLengthHours
+      );
+      const currentWindowHours = Math.max(
+        getTimelineRangeHours(currentRange.startHour, currentRange.endHour),
+        MIN_TIMELINE_VIEW_HOURS
+      );
+      const activeHour = Number.isFinite(this.currentTime)
+        ? timestampToTimelineOffset(this.currentTime, selectedDate)
+        : null;
+      const anchorHour = Number.isFinite(activeHour)
+        ? activeHour
+        : ((currentRange.startHour + currentRange.endHour) / 2);
+      const zoomFactor = nextWindowHours / currentWindowHours;
+      const nextRange = zoomTimelineRange(
+        currentRange.startHour,
+        currentRange.endHour,
+        zoomFactor,
+        anchorHour,
+        dayLengthHours,
+        MIN_TIMELINE_VIEW_HOURS
+      );
+      this.timelineStartHour = nextRange.startHour;
+      this.timelineEndHour = nextRange.endHour;
+      this.timelineWindowHours = getTimelineRangeHours(nextRange.startHour, nextRange.endHour);
+    } else {
+      this.timelineStartHour = currentRange.startHour;
+      this.timelineEndHour = currentRange.endHour;
+      this.timelineWindowHours = getTimelineRangeHours(currentRange.startHour, currentRange.endHour);
     }
 
     this.lastUpdateTime = now;
@@ -631,13 +668,21 @@ export function TimelinePage() {
       if (event.ctrlKey || event.metaKey) {
         event.preventDefault();
         const zoomFactor = event.deltaY < 0 ? 0.8 : 1.25;
-        const nextWindowHours = scaleTimelineWindowHours(
-          currentRange,
+        const clickRatio = Math.max(0, Math.min((event.clientX - rect.left) / rect.width, 1));
+        const anchorHour = (timelineState.timelineStartHour ?? 0) + (clickRatio * currentRange);
+        const nextRange = zoomTimelineRange(
+          timelineState.timelineStartHour ?? 0,
+          timelineState.timelineEndHour ?? getTimelineDayLengthHours(timelineState.selectedDate),
           zoomFactor,
+          anchorHour,
           getTimelineDayLengthHours(timelineState.selectedDate),
           MIN_TIMELINE_VIEW_HOURS
         );
-        timelineState.setState({ timelineWindowHours: nextWindowHours });
+        timelineState.setState({
+          timelineStartHour: nextRange.startHour,
+          timelineEndHour: nextRange.endHour,
+          timelineWindowHours: nextRange.endHour - nextRange.startHour
+        });
         return;
       }
 
@@ -645,27 +690,19 @@ export function TimelinePage() {
         ? event.deltaX
         : (event.shiftKey ? event.deltaY : 0);
 
-      if (horizontalDelta !== 0 && timelineState.currentTime !== null) {
+      if (horizontalDelta !== 0) {
         event.preventDefault();
         const deltaHours = (horizontalDelta / rect.width) * currentRange;
-        const bounds = getLocalDayBounds(timelineState.selectedDate);
-        if (!bounds) {
-          return;
-        }
-
-        const nextTimestamp = Math.max(
-          bounds.startTimestamp,
-          Math.min(timelineState.currentTime + (deltaHours * 3600), bounds.endTimestamp)
+        const nextRange = panTimelineRange(
+          timelineState.timelineStartHour ?? 0,
+          timelineState.timelineEndHour ?? getTimelineDayLengthHours(timelineState.selectedDate),
+          deltaHours,
+          getTimelineDayLengthHours(timelineState.selectedDate)
         );
         timelineState.setState({
-          currentTime: nextTimestamp,
-          currentSegmentIndex: resolveActiveSegmentIndex(
-            timelineState.timelineSegments,
-            timelineState.currentSegmentIndex,
-            nextTimestamp
-          ),
-          prevCurrentTime: timelineState.currentTime,
-          isPlaying: false
+          timelineStartHour: nextRange.startHour,
+          timelineEndHour: nextRange.endHour,
+          timelineWindowHours: nextRange.endHour - nextRange.startHour
         });
       }
     };
@@ -862,15 +899,15 @@ export function TimelinePage() {
       }
     }
 
-    const fitWindowHours = Math.max(fitEnd - fitStart, MIN_TIMELINE_VIEW_HOURS);
-
     // Push to global state
     timelineState.setState({
       timelineSegments: segmentsCopy,
       currentSegmentIndex: initialSegmentIndex,
       currentTime: initialTime,
       prevCurrentTime: initialTime,
-      timelineWindowHours: fitWindowHours,
+      timelineStartHour: 0,
+      timelineEndHour: dayLengthHours,
+      timelineWindowHours: dayLengthHours,
       isPlaying: !preserveExistingPlayback ? true : timelineState.isPlaying,
       forceReload: !preserveExistingPlayback,
       autoFitStartHour: fitStart,
