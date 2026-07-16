@@ -41,6 +41,7 @@
 }
 
 .timeline-player-stage {
+    container-type: inline-size;
     width: 100%;
     aspect-ratio: auto;
     border-radius: 0;
@@ -53,9 +54,13 @@
 
 .timeline-video-surface {
     --timeline-video-max-height: calc(100dvh - 17rem);
+    --timeline-stage-width: 100vw;
     aspect-ratio: var(--timeline-video-aspect, 16 / 9);
-    height: auto;
-    width: min(100%, calc(var(--timeline-video-max-height) * var(--timeline-video-aspect-value, 1.7778)));
+    height: min(
+        calc(var(--timeline-stage-width) / var(--timeline-video-aspect-value, 1.7778)),
+        var(--timeline-video-max-height)
+    );
+    width: 100%;
     max-width: 100%;
     max-height: var(--timeline-video-max-height);
     min-height: 0;
@@ -228,12 +233,21 @@
 }
 
 .timeline-player-container.timeline-player-stage .timeline-video-surface {
-    width: min(100%, calc(var(--timeline-video-max-height) * var(--timeline-video-aspect-value, 1.7778)));
+    width: 100%;
     max-width: 100%;
-    height: auto;
+    height: min(
+        calc(var(--timeline-stage-width) / var(--timeline-video-aspect-value, 1.7778)),
+        var(--timeline-video-max-height)
+    );
     max-height: var(--timeline-video-max-height);
     aspect-ratio: var(--timeline-video-aspect, 16 / 9);
     background: #000;
+}
+
+@supports (width: 1cqw) {
+    .timeline-video-surface {
+        --timeline-stage-width: 100cqw;
+    }
 }
 
 .timeline-player-container.timeline-player-stage .timeline-video-surface video {
