@@ -8,12 +8,9 @@ import { timelineState } from './TimelinePage.jsx';
 import {
   findContainingSegmentIndex,
   findNearestSegmentIndex,
-  getClippedSegmentHourRange,
   getPlayableSegmentTimestamp
 } from './timelineUtils.js';
-import { formatLocalTime } from '../../../utils/date-utils.js';
-
-const CONTINUOUS_SEGMENT_GAP_SECONDS = 10;
+import { TimelineTrack } from './TimelineTrack.jsx';
 
 /**
  * TimelineSegments component
@@ -154,101 +151,14 @@ export function TimelineSegments({ segments: propSegments, interactive = true })
     });
   };
 
-  // ── Merge adjacent segments and render ──
-  const renderSegments = () => {
-    if (!segments || segments.length === 0) {
-      return (
-        <div className="absolute inset-0 flex items-center justify-center text-sm text-white/45">
-          No segments to display
-        </div>
-      );
-    }
-
-    const hourRange = endHour - startHour;
-    if (hourRange <= 0) return null;
-
-    // Sort + merge adjacent segments.  Recorder boundaries can have a small
-    // keyframe/timestamp gap even though playback should be treated as continuous.
-    const sorted = [...segments].sort((a, b) => a.start_timestamp - b.start_timestamp);
-    const merged = [];
-    let cur = { ...sorted[0] };
-
-    for (let i = 1; i < sorted.length; i++) {
-      const seg = sorted[i];
-      if (seg.start_timestamp - cur.end_timestamp <= CONTINUOUS_SEGMENT_GAP_SECONDS) {
-        // extend current merged segment
-        cur.end_timestamp = Math.max(cur.end_timestamp, seg.end_timestamp);
-        if (seg.has_detection) cur.has_detection = true;
-      } else {
-        merged.push(cur);
-        cur = { ...seg };
-      }
-    }
-    merged.push(cur);
-
-    // Render each merged segment as a positioned bar
-    const rendered = [];
-    merged.forEach((seg, i) => {
-      const visibleRange = getClippedSegmentHourRange(seg, timelineState.selectedDate);
-      if (!visibleRange) return;
-
-      const sh = visibleRange.startHour;
-      const eh = visibleRange.endHour;
-
-      // Clip to visible range
-      if (eh <= startHour || sh >= endHour) return;
-      const vStart = Math.max(sh, startHour);
-      const vEnd   = Math.min(eh, endHour);
-
-      const leftPct  = ((vStart - startHour) / hourRange) * 100;
-      const widthPct = ((vEnd - vStart) / hourRange) * 100;
-
-      // Tooltip
-      const t0 = formatLocalTime(seg.start_timestamp);
-      const t1 = formatLocalTime(seg.end_timestamp);
-      const dur = Math.round(seg.end_timestamp - seg.start_timestamp);
-      const durLabel = dur >= 3600
-        ? `${Math.floor(dur / 3600)}h ${Math.floor((dur % 3600) / 60)}m`
-        : dur >= 60
-          ? `${Math.floor(dur / 60)}m ${dur % 60}s`
-          : `${dur}s`;
-
-      rendered.push(
-        <div
-          key={`seg-${i}`}
-          className="absolute top-1/2 -translate-y-1/2 rounded-sm"
-          style={{
-            left: `${leftPct}%`,
-            width: `${Math.max(widthPct, 0.15)}%`,   // min width so tiny segments stay visible
-            height: '8px',
-            background: seg.has_detection
-              ? 'linear-gradient(180deg, rgba(245, 158, 11, 0.98) 0%, rgba(34, 197, 94, 0.95) 100%)'
-              : 'linear-gradient(180deg, rgba(100, 220, 118, 0.95) 0%, rgba(58, 181, 74, 0.92) 100%)',
-            boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.08)'
-          }}
-          title={`${t0} – ${t1}  (${durLabel})`}
-        />
-      );
-    });
-
-    return rendered;
-  };
-
   return (
-    <div
-      className="timeline-segments relative h-11 w-full overflow-hidden rounded-xl border border-white/10 bg-gradient-to-b from-[#121417] via-[#0d0f12] to-[#07080a] shadow-inner"
-      ref={containerRef}
-      aria-label="Recording timeline"
-      style={{ pointerEvents: interactive ? 'auto' : 'none' }}
-    >
-      <div
-        className="absolute inset-0 opacity-45"
-        style={{
-          backgroundImage: 'repeating-linear-gradient(90deg, rgba(255,255,255,0.03) 0 1px, transparent 1px 3.125%)'
-        }}
-      />
-      <div className="absolute inset-x-0 bottom-0 h-[2px] bg-gradient-to-r from-emerald-500/40 via-emerald-300/70 to-emerald-500/40" />
-      {renderSegments()}
-    </div>
+    <TimelineTrack
+      segments={segments}
+      selectedDate={timelineState.selectedDate}
+      startHour={startHour}
+      endHour={endHour}
+      interactive={interactive}
+      containerRef={containerRef}
+    />
   );
 }

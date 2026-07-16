@@ -14,12 +14,12 @@ import { currentDateInputValue, getLocalDayIsoRange, shiftDateInputValue } from 
 import { forceNavigation } from '../../utils/navigation-utils.js';
 import { formatUtils } from './recordings/formatUtils.js';
 import { TimelineBarBody } from './timeline/TimelineBarBody.jsx';
+import { TimelineTrack } from './timeline/TimelineTrack.jsx';
 import {
   findContainingSegmentIndex,
   findNearestSegmentIndex,
   formatTimestampAsLocalDate,
   clampTimelineValue,
-  getClippedSegmentHourRange,
   getLocalDayBounds,
   getPlayableSegmentTimestamp,
   getTimelinePreviewFrameIndex,
@@ -80,7 +80,6 @@ function stripHours(hours) {
 const MIN_FULLSCREEN_TIMELINE_VIEW_HOURS = 1 / 3600;
 const PLAYBACK_SPEEDS = [0.25, 0.5, 1, 1.5, 2, 4];
 const SEEK_SETTLE_TOLERANCE_SECONDS = 1.5;
-const CONTINUOUS_SEGMENT_GAP_SECONDS = 10;
 
 function formatDurationLabel(seconds) {
   if (!Number.isFinite(seconds) || seconds <= 0) {
@@ -298,44 +297,6 @@ export function FullscreenTimelineOverlay({
     const nextDate = shiftDateInputValue(selectedDate, amount, 'day');
     changeSelectedDate(nextDate);
   };
-
-  const visibleSegments = useMemo(() => {
-    if (!segments.length) {
-      return [];
-    }
-
-    const sorted = [...segments].sort((a, b) => Number(a.start_timestamp) - Number(b.start_timestamp));
-    const merged = [];
-
-    for (const segment of sorted) {
-      const start = Number(segment.start_timestamp);
-      const end = Number(segment.end_timestamp);
-      if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
-        continue;
-      }
-
-      const previous = merged[merged.length - 1];
-      if (previous && start - Number(previous.end_timestamp) <= CONTINUOUS_SEGMENT_GAP_SECONDS) {
-        previous.end_timestamp = Math.max(Number(previous.end_timestamp), end);
-        previous.has_detection = Boolean(previous.has_detection || segment.has_detection);
-        continue;
-      }
-
-      merged.push({ ...segment });
-    }
-
-    return merged
-      .map((segment) => {
-        const range = getClippedSegmentHourRange(segment, selectedDate);
-        if (!range) return null;
-        return {
-          ...segment,
-          startHour: range.startHour,
-          endHour: range.endHour
-        };
-      })
-      .filter(Boolean);
-  }, [segments, selectedDate]);
 
   const clampTimestampToSelectableRange = (timestamp, date = selectedDate) => {
     const bounds = getLocalDayBounds(date);
@@ -879,54 +840,20 @@ export function FullscreenTimelineOverlay({
                   onPreviewSelect={handlePreviewSelect}
                   onWheel={handleWheelZoom}
                   renderTrackContent={() => (
-                    <div
-                      ref={trackRef}
-                      className={`relative cursor-pointer overflow-visible rounded-xl border border-white/10 bg-gradient-to-b from-[#121417] via-[#0d0f12] to-[#07080a] shadow-inner ${isDocked ? 'h-6' : 'h-11'}`}
+                    <TimelineTrack
+                      segments={segments}
+                      selectedDate={selectedDate}
+                      startHour={startHour}
+                      endHour={endHour}
+                      compact={isDocked}
+                      containerRef={trackRef}
+                      className="cursor-pointer overflow-visible"
                       onPointerDown={handleTrackPointerDown}
                       onPointerMove={handleTrackPointerMove}
                       onPointerUp={endTrackScrub}
                       onPointerCancel={endTrackScrub}
                       onClick={handleStripClick}
                     >
-                      <div
-                        className="absolute inset-0 opacity-45"
-                        style={{
-                          backgroundImage: 'repeating-linear-gradient(90deg, rgba(255,255,255,0.03) 0 1px, transparent 1px 3.125%)'
-                        }}
-                      />
-
-                      <div
-                        className="absolute inset-x-0 bottom-0 h-[2px] bg-gradient-to-r from-emerald-500/40 via-emerald-300/70 to-emerald-500/40"
-                        style={{ opacity: isFollowingLive ? 0.7 : 0.35 }}
-                      />
-
-                      {visibleSegments.map((segment, index) => {
-                        const visibleStart = Math.max(segment.startHour, startHour);
-                        const visibleEnd = Math.min(segment.endHour, endHour);
-                        if (visibleEnd <= startHour || visibleStart >= endHour) {
-                          return null;
-                        }
-
-                        const left = ((visibleStart - startHour) / visibleRange) * 100;
-                        const width = Math.max(((visibleEnd - visibleStart) / visibleRange) * 100, 0.12);
-
-                        return (
-                          <div
-                            key={`${segment.id || index}-${segment.start_timestamp}`}
-                            className="absolute top-1/2 -translate-y-1/2 rounded-sm"
-                            style={{
-                              left: `${left}%`,
-                              width: `${width}%`,
-                              height: '8px',
-                              background: segment.has_detection
-                                ? 'linear-gradient(180deg, rgba(245, 158, 11, 0.98) 0%, rgba(34, 197, 94, 0.95) 100%)'
-                                : 'linear-gradient(180deg, rgba(100, 220, 118, 0.95) 0%, rgba(58, 181, 74, 0.92) 100%)',
-                              boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.08)'
-                            }}
-                          />
-                        );
-                      })}
-
                       {showCursor && (
                         <div
                           className="absolute top-[-4px] z-20"
@@ -941,7 +868,7 @@ export function FullscreenTimelineOverlay({
                           </div>
                         </div>
                       )}
-                    </div>
+                    </TimelineTrack>
                   )}
                   footerContent={(
                     <div className={`flex items-center justify-end gap-1.5 px-1 uppercase tracking-[0.22em] text-white/35 ${isDocked ? 'text-[8px]' : 'text-[10px]'}`}>
