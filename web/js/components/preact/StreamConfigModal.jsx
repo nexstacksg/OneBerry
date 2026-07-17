@@ -500,11 +500,11 @@ export function StreamConfigModal({
           onClose={() => setShowZoneEditor(false)}
         />
       )}
-    <div id="stream-modal" className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className="bg-card text-card-foreground rounded-lg shadow-xl w-full max-w-5xl max-h-[95vh] overflow-hidden flex flex-col">
+    <div id="stream-modal" className="stream-config-modal-backdrop">
+      <div className="stream-config-modal-panel">
         {/* Header */}
-        <div className="flex justify-between items-center p-6 border-b border-border flex-shrink-0">
-          <div>
+        <div className="stream-config-modal-header">
+          <div className="min-w-0">
             <h3 className="text-2xl font-bold">{isEditing ? t('streams.editStream') : isCloning ? t('streams.cloneStream') : t('streams.addStream')}</h3>
             <p className="text-sm text-muted-foreground mt-1">
               {t('streamsConfig.subtitle')}
@@ -521,7 +521,7 @@ export function StreamConfigModal({
         </div>
 
         {/* Scrollable Content */}
-        <div className="flex-1 overflow-y-auto p-6">
+        <div className="stream-config-modal-body">
           <form id="stream-form" className="space-y-3">
 
             {/* Basic Settings Section */}
@@ -1751,7 +1751,7 @@ export function StreamConfigModal({
         </div>
 
         {/* Footer */}
-        <div className="flex justify-between items-center p-6 border-t border-border flex-shrink-0 bg-muted/20">
+        <div className="stream-config-modal-footer">
           <button
             id="stream-test-btn"
             type="button"
@@ -1760,7 +1760,7 @@ export function StreamConfigModal({
           >
             {t('streamsConfig.testConnection')}
           </button>
-          <div className="flex space-x-3">
+          <div className="stream-config-modal-actions">
             <button
               id="stream-cancel-btn"
               type="button"
