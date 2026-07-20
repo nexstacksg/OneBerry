@@ -6,8 +6,11 @@
 
 /* Additional custom styles */
 .page {
-  @apply text-card-foreground rounded-lg shadow-sm border border-border p-4 mb-4;
-  background: hsl(var(--card));
+  @apply text-card-foreground p-0 mb-0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
 }
 
 .fullscreen-mode.page {
@@ -16,7 +19,10 @@
 
 /* Footer styles */
 footer {
-  @apply bg-card text-card-foreground py-3 px-4 flex justify-between items-center text-sm mt-4 border border-border rounded-lg;
+  @apply text-card-foreground py-3 px-4 flex justify-between items-center text-sm mt-4;
+  background: transparent;
+  border-top: 1px solid hsl(var(--border) / 0.75);
+  color: hsl(var(--muted-foreground));
 }
 
 footer a {
@@ -89,10 +95,10 @@ th {
 /* Responsive adjustments */
 @media (max-width: 768px) {
   .page-header {
-    @apply flex-col items-start;
+    @apply flex-col items-stretch;
   }
 
   .controls {
-    @apply mt-2 flex-wrap;
+    @apply mt-2 flex-wrap gap-2;
   }
 }

@@ -962,26 +962,27 @@ export function VideoModal({ isOpen, onClose, videoUrl, title, downloadUrl }) {
       className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50"
       onClick={handleBackgroundClick}
     >
-      <div className={`modal-content bg-card text-card-foreground rounded-lg shadow-xl max-w-4xl max-h-[90vh] flex flex-col transform transition-all duration-300 ease-out scale-95 opacity-0 w-full md:w-[90%]`}>
-        <div className="flex justify-between items-center p-3 border-b border-border flex-shrink-0">
-          <h3 id="video-preview-title" className="text-lg font-semibold text-gray-900 dark:text-white truncate mr-2">
+      <div className="modal-content flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-xl border border-white/10 bg-[#070a12] text-white shadow-2xl transform transition-all duration-300 ease-out scale-95 opacity-0 md:w-[92%]">
+        <div className="flex flex-shrink-0 items-center justify-between border-b border-white/10 bg-[#0b0f18] px-4 py-3">
+          <h3 id="video-preview-title" className="mr-3 truncate text-base font-semibold tracking-tight text-white">
             {title || 'Video'}
           </h3>
           <button
-            className="close text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 flex-shrink-0"
+            className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full text-xl leading-none text-white/65 transition-colors hover:bg-white/10 hover:text-white"
             onClick={onClose}
+            aria-label="Close video preview"
           >
             ✕
           </button>
         </div>
 
-        <div className="flex-1 min-h-0 overflow-y-auto">
-          <div className="p-3">
+        <div className="min-h-0 flex-1 overflow-y-auto bg-[#070a12]">
+          <div className="px-3 pt-3">
             <div className="relative flex justify-center">
               <div
                 ref={videoContainerRef}
                 data-testid="recording-video-container"
-                className={isFullscreen ? 'relative w-screen h-screen bg-black' : 'relative inline-block max-w-full w-full max-h-[50vh] bg-black'}
+                className={isFullscreen ? 'relative w-screen h-screen bg-black' : 'relative inline-block max-w-full w-full max-h-[58vh] overflow-hidden rounded-lg bg-black'}
               >
                 <video
                   ref={videoRef}
@@ -1008,11 +1009,11 @@ export function VideoModal({ isOpen, onClose, videoUrl, title, downloadUrl }) {
             </div>
           </div>
 
-          <div className="px-3 pb-1">
+          <div className="px-3 pb-1 pt-2">
             <div
               id="recording-playback-position"
               data-testid="recording-playback-position"
-              className="text-center text-sm font-medium text-foreground tabular-nums"
+              className="text-center text-xs font-semibold uppercase tracking-[0.16em] text-white/55 tabular-nums"
             >
               {playbackPositionLabel}
             </div>
@@ -1082,21 +1083,19 @@ export function VideoModal({ isOpen, onClose, videoUrl, title, downloadUrl }) {
 
               <div className="mt-2 flex items-center justify-between gap-2 text-[10px] uppercase tracking-[0.22em] text-white/45">
                 <span>{recordingStartTimestamp > 0 ? formatPlaybackClockLabel(recordingStartTimestamp) : 'Start'}</span>
-                <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-white/65">Click or drag to seek</span>
                 <span>{recordingEndTimestamp > 0 ? formatPlaybackClockLabel(recordingEndTimestamp) : 'End'}</span>
               </div>
             </div>
           </div>
 
-          <div id="recordings-controls" className="mx-3 mb-3 p-3 border border-green-500 rounded-lg bg-card text-card-foreground shadow-md relative z-10">
-            <h3 className="text-base font-bold text-center mb-2 text-foreground">
-              PLAYBACK CONTROLS
-            </h3>
-
-            <div className="flex justify-center mb-3">
+          <div id="recordings-controls" className="relative z-10 mx-3 mb-3 rounded-xl border border-white/10 bg-[#0b0f18] p-3 text-white shadow-[0_12px_36px_rgba(0,0,0,0.28)]">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2 border-b border-white/10 pb-3">
+              <h3 className="text-xs font-semibold uppercase tracking-[0.2em] text-white/55">
+                Playback controls
+              </h3>
               <button
                 type="button"
-                className="px-3 py-1.5 rounded bg-secondary text-secondary-foreground hover:bg-secondary/80 transition-colors text-sm font-medium"
+                className="rounded-md border border-white/10 bg-white/8 px-3 py-1.5 text-xs font-semibold text-white/85 transition-colors hover:bg-white/14 hover:text-white"
                 onClick={handleToggleFullscreen}
                 title={isFullscreen ? 'Exit Fullscreen' : 'Enter Fullscreen'}
               >
@@ -1104,10 +1103,10 @@ export function VideoModal({ isOpen, onClose, videoUrl, title, downloadUrl }) {
               </button>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-2">
+            <div className="mb-2 grid grid-cols-1 gap-3 md:grid-cols-2">
               {/* Speed controls section */}
-              <div className="border-b border-border pb-3 md:border-b-0 md:border-r md:pr-3 md:pb-0">
-                <h4 className="font-bold text-center mb-2 text-foreground text-sm">
+              <div className="border-b border-white/10 pb-3 md:border-b-0 md:border-r md:pr-3 md:pb-0">
+                <h4 className="mb-2 text-center text-xs font-semibold uppercase tracking-[0.16em] text-white/55">
                   Playback Speed
                 </h4>
 
@@ -1117,8 +1116,8 @@ export function VideoModal({ isOpen, onClose, videoUrl, title, downloadUrl }) {
                       key={speed}
                       className={`speed-btn px-2.5 py-1.5 rounded-full ${
                         speed === currentSpeed
-                          ? 'badge-success'
-                          : 'bg-secondary text-secondary-foreground hover:bg-secondary/80'
+                          ? 'bg-emerald-500 text-black'
+                          : 'border border-white/10 bg-white/8 text-white/75 hover:bg-white/14 hover:text-white'
                       } text-xs font-medium transition-all focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-opacity-50`}
                       data-speed={speed}
                       onClick={() => handleSpeedChange(speed)}
@@ -1128,14 +1127,14 @@ export function VideoModal({ isOpen, onClose, videoUrl, title, downloadUrl }) {
                   ))}
                 </div>
 
-                <div id="current-speed-indicator" className="mt-2 text-center font-medium text-green-600 dark:text-green-400 text-xs">
+                <div id="current-speed-indicator" className="mt-2 text-center text-xs font-medium text-emerald-300">
                   Current Speed: {currentSpeed}× {currentSpeed === 1.0 ? '(Normal)' : ''}
                 </div>
               </div>
 
               {/* Detection overlay section */}
               <div className="pt-3 md:pt-0 md:pl-3">
-                <h4 className="font-bold text-center mb-2 text-foreground text-sm">
+                <h4 className="mb-2 text-center text-xs font-semibold uppercase tracking-[0.16em] text-white/55">
                   Detection Overlays
                 </h4>
 
@@ -1144,14 +1143,14 @@ export function VideoModal({ isOpen, onClose, videoUrl, title, downloadUrl }) {
                     <input
                       type="checkbox"
                       id="detection-overlay-checkbox"
-                      className="w-4 h-4 accent-primary bg-secondary border-border rounded focus:ring-primary focus:ring-2"
+                      className="h-4 w-4 rounded border-white/20 bg-white/10 accent-primary focus:ring-2 focus:ring-primary"
                       checked={detectionOverlayEnabled}
                       onChange={(e) => setDetectionOverlayEnabled(e.target.checked)}
                       disabled={detections.length === 0}
                     />
                     <label
                       htmlFor="detection-overlay-checkbox"
-                      className="text-xs font-medium text-foreground"
+                      className="text-xs font-medium text-white/80"
                     >
                       Show Detection Overlays
                     </label>
@@ -1160,7 +1159,7 @@ export function VideoModal({ isOpen, onClose, videoUrl, title, downloadUrl }) {
                   <div className="flex flex-col w-full mt-1 mb-1">
                     <label
                       htmlFor="detection-sensitivity-slider"
-                      className="text-xs font-medium text-foreground mb-1"
+                      className="mb-1 text-xs font-medium text-white/80"
                     >
                       Detection Sensitivity
                     </label>
@@ -1168,7 +1167,7 @@ export function VideoModal({ isOpen, onClose, videoUrl, title, downloadUrl }) {
                     <input
                       type="range"
                       id="detection-sensitivity-slider"
-                      className="w-full h-2 bg-secondary rounded-lg appearance-none cursor-pointer accent-primary"
+                      className="h-2 w-full cursor-pointer appearance-none rounded-lg bg-white/10 accent-primary"
                       min="1"
                       max="10"
                       step="1"
@@ -1176,15 +1175,15 @@ export function VideoModal({ isOpen, onClose, videoUrl, title, downloadUrl }) {
                       onChange={handleTimeWindowChange}
                     />
 
-                    <div id="detection-sensitivity-value" className="text-xs text-muted-foreground text-center mb-1">
+                    <div id="detection-sensitivity-value" className="mb-1 text-center text-xs text-white/50">
                       Time Window: {timeWindow} second{timeWindow !== 1 ? 's' : ''}
                     </div>
                   </div>
 
                   <div id="detection-status-indicator" className={`text-center text-xs ${
                     detections.length > 0
-                      ? 'font-medium text-green-600 dark:text-green-400'
-                      : 'text-muted-foreground'
+                      ? 'font-medium text-emerald-300'
+                      : 'text-white/50'
                   }`}>
                     {detectionStatus}
                   </div>
@@ -1193,7 +1192,7 @@ export function VideoModal({ isOpen, onClose, videoUrl, title, downloadUrl }) {
             </div>
 
             {/* Action buttons */}
-            <div className="flex flex-wrap justify-center gap-2 mt-3 pt-2 border-t border-border">
+            <div className="mt-3 flex flex-wrap justify-center gap-2 border-t border-white/10 pt-3">
               {/* Snapshot */}
               <button
                 className="px-3 py-1.5 bg-secondary text-secondary-foreground rounded hover:bg-secondary/80 transition-colors flex items-center text-xs"
