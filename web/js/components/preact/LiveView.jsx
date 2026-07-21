@@ -78,6 +78,26 @@ function getLiveInitDelay({ isWebRTC, useMSE, go2rtcAvailable, index, totalStrea
   return Math.ceil((index - immediateCount + 1) / 4) * 150;
 }
 
+function getDraggedCameraNames(dataTransfer) {
+  const types = Array.from(dataTransfer?.types || []);
+  if (!types.includes('application/x-oneberry-camera')) return [];
+
+  if (types.includes('application/x-oneberry-cameras')) {
+    try {
+      const parsed = JSON.parse(dataTransfer.getData('application/x-oneberry-cameras'));
+      if (Array.isArray(parsed)) {
+        const cameraNames = parsed.map((cameraName) => String(cameraName || '').trim()).filter(Boolean);
+        if (cameraNames.length > 0) return cameraNames;
+      }
+    } catch (error) {
+      // Fall back to the single-camera drag payload below.
+    }
+  }
+
+  const cameraName = dataTransfer.getData('application/x-oneberry-camera') || dataTransfer.getData('text/plain');
+  return cameraName ? [cameraName] : [];
+}
+
 function createWorkspaceTile(cameraId, tile = {}) {
   return {
     type: 'camera',
@@ -445,6 +465,7 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
   const saveLayoutTimeoutRef = useRef(null);
   const workspaceGridRef = useRef(null);
   const workspacePointerRef = useRef(null);
+  const workspaceAutoExpandedDropRef = useRef(false);
   const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false);
   const [addCameraMenuOpen, setAddCameraMenuOpen] = useState(false);
   const [layoutEditMode, setLayoutEditMode] = useState(false);
@@ -982,6 +1003,7 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
     }
 
     const shouldAutoTile = !activeLayoutId && !placement && options.autoFit !== false;
+    workspaceAutoExpandedDropRef.current = false;
     setWorkspaceStarted(true);
     setWorkspaceTiles((previousTiles) => {
       const candidateTile = createWorkspaceTile(cameraId);
@@ -1040,8 +1062,8 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
       const collision = findTileCollision(nextTile, previousTiles);
       if (collision) {
         if (!openSlot) {
-          showStatusMessage('No open workspace space for another camera tile', 'error', 5000);
-          return previousTiles;
+          workspaceAutoExpandedDropRef.current = true;
+          return buildResponsiveWorkspaceLayout([...previousTiles, candidateTile]);
         }
         const fallback = normalizeWorkspaceBounds(createWorkspaceTile(cameraId, {
           x: openSlot.x,
@@ -1055,7 +1077,7 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
       return [...previousTiles, nextTile];
     });
     if (placement) {
-      setWorkspaceAutoGrid(false);
+      setWorkspaceAutoGrid(workspaceAutoExpandedDropRef.current);
     } else if (shouldAutoTile || (workspaceAutoGrid && options.autoFit !== false)) {
       setWorkspaceAutoGrid(true);
     }
@@ -1306,9 +1328,15 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
 
   useEffect(() => {
     const handleAddCamera = (event) => {
-      addWorkspaceTile(event.detail?.cameraName, null, {
-        autoFit: event.detail?.autoFit !== false,
-      });
+      const cameraNames = Array.isArray(event.detail?.cameraNames)
+        ? event.detail.cameraNames
+        : [event.detail?.cameraName];
+      cameraNames
+        .map((cameraName) => String(cameraName || '').trim())
+        .filter(Boolean)
+        .forEach((cameraName) => addWorkspaceTile(cameraName, null, {
+          autoFit: event.detail?.autoFit !== false,
+        }));
     };
 
     window.addEventListener('oneberry:add-live-camera', handleAddCamera);
@@ -1984,12 +2012,13 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
           }}
           onDrop={(event) => {
             if (reorderMode || workspaceLocked) return;
-            const types = Array.from(event.dataTransfer.types || []);
-            if (!types.includes('application/x-oneberry-camera')) return;
-            const cameraName = event.dataTransfer.getData('application/x-oneberry-camera') || event.dataTransfer.getData('text/plain');
-            if (!cameraName) return;
+            const cameraNames = getDraggedCameraNames(event.dataTransfer);
+            if (cameraNames.length === 0) return;
             event.preventDefault();
-            addWorkspaceTile(cameraName, getWorkspaceGridPoint(event));
+            const placement = getWorkspaceGridPoint(event);
+            cameraNames.forEach((cameraName, index) => {
+              addWorkspaceTile(cameraName, index === 0 ? placement : null, { autoFit: false });
+            });
           }}
         >
           {isLoadingStreams ? (
@@ -2074,13 +2103,13 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
                       }}
                       onDrop={(event) => {
                         if (workspaceLocked) return;
-                        const types = Array.from(event.dataTransfer.types || []);
-                        if (!types.includes('application/x-oneberry-camera')) return;
-                        const cameraName = event.dataTransfer.getData('application/x-oneberry-camera') || event.dataTransfer.getData('text/plain');
-                        if (!cameraName) return;
+                        const cameraNames = getDraggedCameraNames(event.dataTransfer);
+                        if (cameraNames.length === 0) return;
                         event.preventDefault();
                         event.stopPropagation();
-                        addWorkspaceTile(cameraName, { x: workspaceTile.x, y: workspaceTile.y });
+                        cameraNames.forEach((cameraName, cameraIndex) => {
+                          addWorkspaceTile(cameraName, cameraIndex === 0 ? { x: workspaceTile.x, y: workspaceTile.y } : null, { autoFit: false });
+                        });
                       }}
                     >
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
