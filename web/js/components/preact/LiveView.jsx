@@ -445,6 +445,7 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
   const saveLayoutTimeoutRef = useRef(null);
   const workspaceGridRef = useRef(null);
   const workspacePointerRef = useRef(null);
+  const workspaceAutoExpandedDropRef = useRef(false);
   const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false);
   const [addCameraMenuOpen, setAddCameraMenuOpen] = useState(false);
   const [layoutEditMode, setLayoutEditMode] = useState(false);
@@ -982,6 +983,7 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
     }
 
     const shouldAutoTile = !activeLayoutId && !placement && options.autoFit !== false;
+    workspaceAutoExpandedDropRef.current = false;
     setWorkspaceStarted(true);
     setWorkspaceTiles((previousTiles) => {
       const candidateTile = createWorkspaceTile(cameraId);
@@ -1040,8 +1042,8 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
       const collision = findTileCollision(nextTile, previousTiles);
       if (collision) {
         if (!openSlot) {
-          showStatusMessage('No open workspace space for another camera tile', 'error', 5000);
-          return previousTiles;
+          workspaceAutoExpandedDropRef.current = true;
+          return buildResponsiveWorkspaceLayout([...previousTiles, candidateTile]);
         }
         const fallback = normalizeWorkspaceBounds(createWorkspaceTile(cameraId, {
           x: openSlot.x,
@@ -1055,7 +1057,7 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
       return [...previousTiles, nextTile];
     });
     if (placement) {
-      setWorkspaceAutoGrid(false);
+      setWorkspaceAutoGrid(workspaceAutoExpandedDropRef.current);
     } else if (shouldAutoTile || (workspaceAutoGrid && options.autoFit !== false)) {
       setWorkspaceAutoGrid(true);
     }
