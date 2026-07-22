@@ -2,9 +2,11 @@ import assert from 'node:assert/strict';
 
 import {
   AutoPlacement,
+  AnimationEngine,
   DragController,
   LayoutEngine,
   OccupancyGrid,
+  SnapEngine,
   SwapEngine,
 } from '../js/layout-engine/index.ts';
 
@@ -81,4 +83,70 @@ const tile = (id, x, y, w = 1, h = 1) => ({
   }, 200, 0, 100, 100);
 
   assert.deepEqual(preview.map(({ x, y }) => ({ x, y })), [{ x: 2, y: 0 }, { x: 3, y: 0 }]);
+}
+
+{
+  const snap = new SnapEngine(gridSize);
+  assert.deepEqual(snap.snapRect({ x: 1.82, y: 0.18, w: 1, h: 1 }), { x: 2, y: 0, w: 1, h: 1 });
+  assert.deepEqual(
+    snap.snapRect({ x: 1.61, y: 0.39, w: 1, h: 1 }, { previous: { x: 2, y: 0 } }),
+    { x: 2, y: 0, w: 1, h: 1 }
+  );
+}
+
+{
+  const placement = new AutoPlacement({ columns: 6, rows: 4 }).findBestAvailable([
+    tile('a', 0, 0, 2, 2),
+    tile('b', 2, 0, 2, 2),
+  ], 1, 1, {
+    preferred: { x: 4, y: 0 },
+  });
+  assert.deepEqual(placement, { x: 4, y: 0, w: 1, h: 1 });
+}
+
+{
+  const engine = new LayoutEngine({ columns: 6, rows: 4 });
+  const tiles = [
+    tile('a', 0, 0, 2, 2),
+    tile('b', 4, 0, 2, 2),
+    tile('c', 0, 2, 2, 2),
+  ];
+  const result = engine.removeAndReflow(tiles, 'a');
+  assert.equal(result.ok, true);
+  assert.equal(result.tiles.length, 2);
+  assert.equal(result.tiles.some((item) => item.instanceId === 'a'), false);
+}
+
+{
+  const animations = new AnimationEngine().diffTiles(
+    [tile('a', 0, 0, 1, 1), tile('b', 1, 0, 1, 1)],
+    [tile('a', 1, 0, 1, 1), tile('b', 1, 0, 1, 1)]
+  );
+  assert.deepEqual(animations, [{
+    instanceId: 'a',
+    from: { x: 0, y: 0, w: 1, h: 1 },
+    to: { x: 1, y: 0, w: 1, h: 1 },
+  }]);
+}
+
+{
+  const engine = new LayoutEngine(gridSize);
+  const result = engine.add(
+    [tile('a', 0, 0, 4, 4)],
+    tile('b', 0, 0, 2, 2),
+    { x: 0, y: 0 }
+  );
+  assert.equal(result.ok, true);
+  assert.equal(result.action, 'add');
+  assert.equal(result.tiles.length, 2);
+  assert.deepEqual(result.tiles.map((item) => ({
+    id: item.instanceId,
+    x: item.x,
+    y: item.y,
+    w: item.w,
+    h: item.h,
+  })), [
+    { id: 'b', x: 0, y: 0, w: 2, h: 4 },
+    { id: 'a', x: 2, y: 0, w: 2, h: 4 },
+  ]);
 }

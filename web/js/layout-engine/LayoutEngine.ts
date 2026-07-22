@@ -3,7 +3,7 @@ import { CollisionDetector } from './CollisionDetector.ts';
 import { OccupancyGrid } from './OccupancyGrid.ts';
 import { SwapEngine } from './SwapEngine.ts';
 import { normalizeRect, sameSize } from './geometry.ts';
-import type { GridSize, LayoutRect, LayoutTile } from './types.ts';
+import type { GridSize, LayoutRect, LayoutTile, ReflowOptions } from './types.ts';
 
 export type CommitResult =
   | { ok: true; tiles: LayoutTile[]; action: 'move' | 'resize' | 'swap' | 'add' | 'remove' }
@@ -76,13 +76,36 @@ export class LayoutEngine {
     }
 
     const autoPlacement = new AutoPlacement(this.gridSize);
-    const placement = autoPlacement.findFirstAvailable(tiles, normalized.w, normalized.h);
-    if (!placement) return { ok: false, reason: 'Layout Full' };
+    const placement = autoPlacement.findBestAvailable(tiles, normalized.w, normalized.h, {
+      preferred: preferred || { x: normalized.x, y: normalized.y },
+      relatedTiles: tiles,
+    });
+    if (!placement) {
+      const reflowedTiles = autoPlacement.createSpaceForTile(tiles, normalized, preferred || { x: normalized.x, y: normalized.y });
+      if (!reflowedTiles) return { ok: false, reason: 'Layout Full' };
+      return { ok: true, action: 'add', tiles: reflowedTiles };
+    }
     return { ok: true, action: 'add', tiles: [...tiles, { ...normalized, ...placement }] };
   }
 
   remove(tiles: LayoutTile[], tileId: string): CommitResult {
     return { ok: true, action: 'remove', tiles: tiles.filter((tile) => tile.instanceId !== tileId) };
+  }
+
+  removeAndReflow(tiles: LayoutTile[], tileId: string, options: ReflowOptions = {}): CommitResult {
+    const removedTile = tiles.find((tile) => tile.instanceId === tileId) || null;
+    const remainingTiles = tiles.filter((tile) => tile.instanceId !== tileId);
+    if (!removedTile) return { ok: true, action: 'remove', tiles: remainingTiles };
+
+    const autoPlacement = new AutoPlacement(this.gridSize);
+    return {
+      ok: true,
+      action: 'remove',
+      tiles: autoPlacement.reduceFragmentation(remainingTiles, {
+        ...options,
+        removedTile,
+      }),
+    };
   }
 
   private mergeTiles(tiles: LayoutTile[], replacements: LayoutTile[]): LayoutTile[] {

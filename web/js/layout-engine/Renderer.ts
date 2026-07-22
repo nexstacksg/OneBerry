@@ -19,6 +19,13 @@ export class Renderer {
     };
   }
 
+  rectToPixelTranslate(rect: LayoutRect, bounds: DOMRect): string {
+    const normalized = normalizeRect(rect, this.gridSize);
+    const x = (normalized.x / this.gridSize.columns) * bounds.width;
+    const y = (normalized.y / this.gridSize.rows) * bounds.height;
+    return `translate3d(${x}px, ${y}px, 0)`;
+  }
+
   pointToCell(clientX: number, clientY: number, rect: DOMRect): { x: number; y: number } {
     const cellWidth = rect.width / this.gridSize.columns;
     const cellHeight = rect.height / this.gridSize.rows;

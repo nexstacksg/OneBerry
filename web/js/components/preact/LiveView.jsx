@@ -376,6 +376,9 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
   const [workspacePreview, setWorkspacePreview] = useState(null);
   const workspacePreviewRef = useRef(null);
   const workspacePreviewFrameRef = useRef(0);
+  const workspacePreviewElementsRef = useRef(new Map());
+  const workspaceTileElementsRef = useRef(new Map());
+  const workspacePendingVisualRef = useRef(null);
   const removeTimeoutsRef = useRef(new Map());
 
   useEffect(() => {
@@ -978,7 +981,9 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
 
     const timeoutId = window.setTimeout(() => {
       setWorkspaceTiles((previousTiles) => {
-        const result = layoutEngine.remove(previousTiles, instanceId);
+        const result = layoutEngine.removeAndReflow(previousTiles, instanceId, {
+          pinnedIds: selectedWorkspaceTileIds.filter((tileId) => tileId !== instanceId),
+        });
         const nextTiles = result.ok ? result.tiles : previousTiles;
         if (result.ok) {
           historyManagerRef.current.execute({
@@ -998,7 +1003,7 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
     }, 190);
 
     removeTimeoutsRef.current.set(instanceId, timeoutId);
-  }, [layoutEngine, workspaceLocked]);
+  }, [layoutEngine, selectedWorkspaceTileIds, workspaceLocked]);
 
   const getWorkspaceCellSize = useCallback(() => {
     const grid = workspaceGridRef.current;
@@ -1013,14 +1018,76 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
     };
   }, [workspaceGridCols, workspaceGridRows]);
 
+  const applyWorkspacePreviewStyles = useCallback((preview) => {
+    if (!preview) return;
+    const grid = workspaceGridRef.current;
+    const gridRect = grid?.getBoundingClientRect?.();
+
+    preview.rects.forEach((rect, index) => {
+      const previewId = preview.tileIds[index];
+      const previewElement = workspacePreviewElementsRef.current.get(previewId);
+      if (previewElement) {
+        Object.assign(previewElement.style, workspaceRenderer.rectToStyle(rect));
+        previewElement.classList.toggle('is-invalid', preview.status === 'invalid');
+        previewElement.classList.toggle('is-valid', preview.status === 'valid');
+      }
+    });
+
+    if (preview.mode === 'move' && gridRect) {
+      const state = workspacePointerRef.current;
+      const resultTiles = preview.resultTiles || [];
+      const resultById = new Map(resultTiles.map((tile) => [tile.instanceId, tile]));
+
+      workspaceTileElementsRef.current.forEach((element, tileId) => {
+        const startTile = state?.startTiles?.find?.((tile) => tile.instanceId === tileId);
+        const resultTile = resultById.get(tileId);
+        if (startTile && preview.cursorOffset) {
+          element.style.transform = `translate3d(${preview.cursorOffset.dx}px, ${preview.cursorOffset.dy}px, 0)`;
+          element.style.zIndex = '45';
+          element.style.willChange = 'transform';
+          return;
+        }
+        if (resultTile && state?.tileIds?.length === 1) {
+          const currentTile = workspaceTiles.find((tile) => tile.instanceId === tileId);
+          if (currentTile && (currentTile.x !== resultTile.x || currentTile.y !== resultTile.y)) {
+            const dx = ((resultTile.x - currentTile.x) / workspaceGridCols) * gridRect.width;
+            const dy = ((resultTile.y - currentTile.y) / workspaceGridRows) * gridRect.height;
+            element.style.transform = `translate3d(${dx}px, ${dy}px, 0)`;
+            element.style.willChange = 'transform';
+          }
+        }
+      });
+    }
+  }, [workspaceGridCols, workspaceGridRows, workspaceRenderer, workspaceTiles]);
+
+  const resetWorkspaceImperativeStyles = useCallback(() => {
+    workspaceTileElementsRef.current.forEach((element) => {
+      element.style.transform = '';
+      element.style.zIndex = '';
+      element.style.willChange = '';
+    });
+  }, []);
+
   const scheduleWorkspacePreview = useCallback((nextPreview) => {
     workspacePreviewRef.current = nextPreview;
+    workspacePendingVisualRef.current = nextPreview;
     if (workspacePreviewFrameRef.current) return;
     workspacePreviewFrameRef.current = window.requestAnimationFrame(() => {
       workspacePreviewFrameRef.current = 0;
-      setWorkspacePreview(workspacePreviewRef.current);
+      const visualPreview = workspacePendingVisualRef.current;
+      const previousPreview = workspacePreview;
+      const needsReactPreview = (
+        !previousPreview ||
+        !visualPreview ||
+        previousPreview.tileIds.length !== visualPreview.tileIds.length ||
+        previousPreview.tileIds.some((tileId, index) => tileId !== visualPreview.tileIds[index])
+      );
+      if (needsReactPreview) {
+        setWorkspacePreview(visualPreview);
+      }
+      applyWorkspacePreviewStyles(visualPreview);
     });
-  }, []);
+  }, [applyWorkspacePreviewStyles, workspacePreview]);
 
   const handleWorkspacePointerMove = useCallback((event) => {
     const state = workspacePointerRef.current;
@@ -1028,24 +1095,28 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
 
     event.preventDefault();
     const cellSize = getWorkspaceCellSize();
-    const dx = Math.round((event.clientX - state.startX) / cellSize.width);
-    const dy = Math.round((event.clientY - state.startY) / cellSize.height);
+    const dx = (event.clientX - state.startX) / cellSize.width;
+    const dy = (event.clientY - state.startY) / cellSize.height;
 
     if (state.mode === 'move') {
-      const rects = dragController.getPreview(state, event.clientX, event.clientY, cellSize.width, cellSize.height);
+      const previous = workspacePreviewRef.current?.rects?.[0] || null;
+      const rects = dragController.getMagneticPreview(state, event.clientX, event.clientY, cellSize.width, cellSize.height, previous);
       const result = layoutEngine.move(workspaceTiles, state.tileIds, rects);
       setWorkspaceAutoGrid(false);
       scheduleWorkspacePreview({
         mode: 'move',
         tileIds: state.tileIds,
         rects,
+        cursorOffset: dragController.getCursorOffset(state, event.clientX, event.clientY),
+        resultTiles: result.ok ? result.tiles : [],
         status: result.ok ? 'valid' : 'invalid',
         reason: result.ok ? '' : result.reason,
       });
       return;
     }
 
-    const nextTile = resizeController.getPreview(state.startTile, state.edges, dx, dy);
+    const previous = workspacePreviewRef.current?.rects?.[0] || null;
+    const nextTile = resizeController.getPreview(state.startTile, state.edges, dx, dy, previous);
     const result = layoutEngine.resize(workspaceTiles, state.instanceId, nextTile);
     if (dx !== 0 || dy !== 0) {
       setWorkspaceAutoGrid(false);
@@ -1080,8 +1151,10 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
         return result.tiles;
       });
     }
+    resetWorkspaceImperativeStyles();
     workspacePointerRef.current = null;
     workspacePreviewRef.current = null;
+    workspacePendingVisualRef.current = null;
     if (workspacePreviewFrameRef.current) {
       window.cancelAnimationFrame(workspacePreviewFrameRef.current);
       workspacePreviewFrameRef.current = 0;
@@ -1090,7 +1163,7 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
     window.removeEventListener('pointermove', handleWorkspacePointerMove);
     window.removeEventListener('pointerup', finishWorkspacePointer);
     window.removeEventListener('pointercancel', finishWorkspacePointer);
-  }, [handleWorkspacePointerMove, layoutEngine]);
+  }, [handleWorkspacePointerMove, layoutEngine, resetWorkspaceImperativeStyles]);
 
   const startWorkspacePointer = useCallback((event, tile, mode = 'move', edges = '') => {
     if (!workspaceStarted || !tile) return;
@@ -1131,6 +1204,8 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
       startTile: { ...tile },
       tileIds,
       startTiles,
+      startClientX: event.clientX,
+      startClientY: event.clientY,
       startX: event.clientX,
       startY: event.clientY,
     };
@@ -2047,6 +2122,11 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
                   {workspacePreview.rects.map((rect, index) => (
                     <div
                       key={`${workspacePreview.tileIds[index]}-preview`}
+                      ref={(element) => {
+                        const previewId = workspacePreview.tileIds[index];
+                        if (element) workspacePreviewElementsRef.current.set(previewId, element);
+                        else workspacePreviewElementsRef.current.delete(previewId);
+                      }}
                       className={`live-workspace-placement-preview is-${workspacePreview.status}`}
                       style={workspaceRenderer.rectToStyle(rect)}
                     />
@@ -2063,6 +2143,10 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
                     <div
                       key={tileInstanceId}
                       className="live-workspace-slot"
+                      ref={(element) => {
+                        if (element) workspaceTileElementsRef.current.set(tileInstanceId, element);
+                        else workspaceTileElementsRef.current.delete(tileInstanceId);
+                      }}
                       style={{
                         ...workspaceRenderer.rectToStyle(workspaceTile),
                         opacity: workspacePreviewById.has(tileInstanceId) ? 0.35 : undefined,
@@ -2121,6 +2205,11 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
                   <div
                     key={tileInstanceId || stream.name}
                     className={`live-workspace-tile ${selectedWorkspaceTileIds.includes(tileInstanceId) ? 'is-selected' : ''} ${removingTileIds.has(tileInstanceId) ? 'is-removing' : ''}`}
+                    ref={(element) => {
+                      const elementId = tileInstanceId || stream.name;
+                      if (element) workspaceTileElementsRef.current.set(elementId, element);
+                      else workspaceTileElementsRef.current.delete(elementId);
+                    }}
                     style={{
                       ...(isWorkspaceMode && workspaceTile ? {
                         ...workspaceRenderer.rectToStyle(workspaceTile),

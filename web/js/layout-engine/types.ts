@@ -54,3 +54,26 @@ export interface LayoutCommand {
   execute(): LayoutTile[];
   undo(): LayoutTile[];
 }
+
+export interface SnapState {
+  x?: number;
+  y?: number;
+  w?: number;
+  h?: number;
+}
+
+export interface SnapOptions {
+  threshold?: number;
+  releaseThreshold?: number;
+  previous?: SnapState | null;
+}
+
+export interface PlacementOptions {
+  preferred?: Pick<LayoutRect, 'x' | 'y'> | null;
+  relatedTiles?: LayoutTile[];
+}
+
+export interface ReflowOptions {
+  removedTile?: LayoutTile | null;
+  pinnedIds?: string[];
+}
