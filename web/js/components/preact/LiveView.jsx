@@ -19,11 +19,22 @@ import { GridPicker, computeOptimalGrid, MAX_GRID_CELLS } from './GridPicker.jsx
 import { buildBuildingTree } from '../../utils/building-hierarchy.js';
 import { getAuthHeaders } from '../../utils/auth-utils.js';
 import { useI18n } from '../../i18n.js';
+import {
+  DEFAULT_GRID_COLUMNS,
+  DEFAULT_GRID_ROWS,
+  DragController,
+  HistoryManager,
+  LayoutEngine,
+  LayoutSerializer,
+  Renderer,
+  ResizeController,
+  SelectionManager
+} from '../../layout-engine/index.ts';
 
-const WORKSPACE_GRID_COLS = 48;
-const WORKSPACE_GRID_ROWS = 27;
-const DEFAULT_WORKSPACE_TILE_W = 24;
-const DEFAULT_WORKSPACE_TILE_H = 13;
+const WORKSPACE_GRID_COLS = DEFAULT_GRID_COLUMNS;
+const WORKSPACE_GRID_ROWS = DEFAULT_GRID_ROWS;
+const DEFAULT_WORKSPACE_TILE_W = 8;
+const DEFAULT_WORKSPACE_TILE_H = 6;
 const WORKSPACE_LAYOUT_PRESETS = [
   { count: 2, cols: 2, rows: 1, label: '2 cameras' },
   { count: 4, cols: 2, rows: 2, label: '4 cameras' },
@@ -180,108 +191,6 @@ function normalizeLiveLayouts(data = {}) {
   };
 }
 
-function tilesOverlap(a, b) {
-  return (
-    a.x < b.x + b.w &&
-    a.x + a.w > b.x &&
-    a.y < b.y + b.h &&
-    a.y + a.h > b.y
-  );
-}
-
-function findTileCollision(candidate, workspaceTiles, ignoredInstanceId = '') {
-  return workspaceTiles.find((tile) => (
-    tile.instanceId !== ignoredInstanceId && tilesOverlap(candidate, tile)
-  )) || null;
-}
-
-function findOpenWorkspaceSlot(workspaceTiles, width, height, cols, rows) {
-  const w = Math.max(1, Math.min(cols, width));
-  const h = Math.max(1, Math.min(rows, height));
-  for (let y = 0; y <= rows - h; y += 1) {
-    for (let x = 0; x <= cols - w; x += 1) {
-      const candidate = { x, y, w, h };
-      if (!findTileCollision(candidate, workspaceTiles)) {
-        return { x, y };
-      }
-    }
-  }
-  return null;
-}
-
-function buildWorkspaceOccupancyPrefix(workspaceTiles, cols, rows) {
-  const safeCols = Math.max(1, cols || 1);
-  const safeRows = Math.max(1, rows || 1);
-  const occupied = Array.from({ length: safeRows }, () => Array(safeCols).fill(0));
-
-  workspaceTiles.forEach((tile) => {
-    const bounded = normalizeWorkspaceBounds(tile, safeCols, safeRows);
-    for (let y = bounded.y; y < bounded.y + bounded.h; y += 1) {
-      for (let x = bounded.x; x < bounded.x + bounded.w; x += 1) {
-        occupied[y][x] = 1;
-      }
-    }
-  });
-
-  const prefix = Array.from({ length: safeRows + 1 }, () => Array(safeCols + 1).fill(0));
-  for (let y = 0; y < safeRows; y += 1) {
-    for (let x = 0; x < safeCols; x += 1) {
-      prefix[y + 1][x + 1] = occupied[y][x] + prefix[y][x + 1] + prefix[y + 1][x] - prefix[y][x];
-    }
-  }
-  return prefix;
-}
-
-function isWorkspaceRectEmpty(prefix, x, y, w, h) {
-  const x2 = x + w;
-  const y2 = y + h;
-  return (prefix[y2][x2] - prefix[y][x2] - prefix[y2][x] + prefix[y][x]) === 0;
-}
-
-function findBestOpenWorkspaceArea(workspaceTiles, cols, rows, preferredPoint = null) {
-  const safeCols = Math.max(1, cols || 1);
-  const safeRows = Math.max(1, rows || 1);
-  const prefix = buildWorkspaceOccupancyPrefix(workspaceTiles, safeCols, safeRows);
-  const preferred = preferredPoint
-    ? {
-      x: Math.max(0, Math.min(safeCols - 1, Math.floor(Number(preferredPoint.x) || 0))),
-      y: Math.max(0, Math.min(safeRows - 1, Math.floor(Number(preferredPoint.y) || 0))),
-    }
-    : null;
-  const mustContainPreferred = preferred && isWorkspaceRectEmpty(prefix, preferred.x, preferred.y, 1, 1);
-
-  let best = null;
-  for (let y = 0; y < safeRows; y += 1) {
-    for (let x = 0; x < safeCols; x += 1) {
-      for (let h = 1; y + h <= safeRows; h += 1) {
-        for (let w = 1; x + w <= safeCols; w += 1) {
-          if (mustContainPreferred) {
-            const containsPreferred =
-              preferred.x >= x && preferred.x < x + w &&
-              preferred.y >= y && preferred.y < y + h;
-            if (!containsPreferred) continue;
-          }
-          if (!isWorkspaceRectEmpty(prefix, x, y, w, h)) continue;
-
-          const area = w * h;
-          const distance = preferred
-            ? Math.abs(x + (w / 2) - preferred.x) + Math.abs(y + (h / 2) - preferred.y)
-            : x + y;
-          if (
-            !best ||
-            area > best.area ||
-            (area === best.area && distance < best.distance)
-          ) {
-            best = { x, y, w, h, area, distance };
-          }
-        }
-      }
-    }
-  }
-
-  return best ? { x: best.x, y: best.y, w: best.w, h: best.h } : null;
-}
-
 function normalizeWorkspaceBounds(tile, cols, rows) {
   const safeCols = Math.max(1, cols || 1);
   const safeRows = Math.max(1, rows || 1);
@@ -337,24 +246,13 @@ function scaleLayoutTileToWorkspace(tile, layoutCols, layoutRows) {
 }
 
 function serializeWorkspaceTilesForSave(workspaceTiles) {
-  return workspaceTiles.filter((tile) => tile.type !== 'slot' && tile.cameraId).map((tile) => ({
-    id: tile.instanceId,
-    camera: tile.cameraId,
-    x: Number.isFinite(Number(tile.x)) ? tile.x : 0,
-    y: Number.isFinite(Number(tile.y)) ? tile.y : 0,
-    w: Number.isFinite(Number(tile.w)) ? tile.w : DEFAULT_WORKSPACE_TILE_W,
-    h: Number.isFinite(Number(tile.h)) ? tile.h : DEFAULT_WORKSPACE_TILE_H,
-  }));
+  return new LayoutSerializer({ columns: WORKSPACE_GRID_COLS, rows: WORKSPACE_GRID_ROWS })
+    .serializeCameras(workspaceTiles);
 }
 
 function serializeWorkspaceSlotsForSave(workspaceTiles) {
-  return workspaceTiles.filter((tile) => tile.type === 'slot').map((tile) => ({
-    id: tile.instanceId,
-    x: Number.isFinite(Number(tile.x)) ? tile.x : 0,
-    y: Number.isFinite(Number(tile.y)) ? tile.y : 0,
-    w: Number.isFinite(Number(tile.w)) ? tile.w : DEFAULT_WORKSPACE_TILE_W,
-    h: Number.isFinite(Number(tile.h)) ? tile.h : DEFAULT_WORKSPACE_TILE_H,
-  }));
+  return new LayoutSerializer({ columns: WORKSPACE_GRID_COLS, rows: WORKSPACE_GRID_ROWS })
+    .serializeSlots(workspaceTiles);
 }
 
 function reflowWorkspaceTiles(workspaceTiles, cols) {
@@ -466,12 +364,18 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
   const workspaceGridRef = useRef(null);
   const workspacePointerRef = useRef(null);
   const workspaceAutoExpandedDropRef = useRef(false);
+  const historyManagerRef = useRef(new HistoryManager());
+  const selectionManagerRef = useRef(new SelectionManager());
   const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false);
   const [addCameraMenuOpen, setAddCameraMenuOpen] = useState(false);
   const [layoutEditMode, setLayoutEditMode] = useState(false);
   const [urlStreamHydrated, setUrlStreamHydrated] = useState(false);
   const [removingTileIds, setRemovingTileIds] = useState(new Set());
   const [isMobileViewport, setIsMobileViewport] = useState(false);
+  const [selectedWorkspaceTileIds, setSelectedWorkspaceTileIds] = useState([]);
+  const [workspacePreview, setWorkspacePreview] = useState(null);
+  const workspacePreviewRef = useRef(null);
+  const workspacePreviewFrameRef = useRef(0);
   const removeTimeoutsRef = useRef(new Map());
 
   useEffect(() => {
@@ -569,6 +473,14 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
   const maxStreams = cols * rows;
   const workspaceGridCols = workspaceStarted ? WORKSPACE_GRID_COLS : cols;
   const workspaceGridRows = workspaceStarted ? WORKSPACE_GRID_ROWS : rows;
+  const workspaceGridSize = useMemo(() => ({
+    columns: workspaceGridCols,
+    rows: workspaceGridRows,
+  }), [workspaceGridCols, workspaceGridRows]);
+  const layoutEngine = useMemo(() => new LayoutEngine(workspaceGridSize), [workspaceGridSize]);
+  const workspaceRenderer = useMemo(() => new Renderer(workspaceGridSize), [workspaceGridSize]);
+  const dragController = useMemo(() => new DragController(workspaceGridSize), [workspaceGridSize]);
+  const resizeController = useMemo(() => new ResizeController(workspaceGridSize), [workspaceGridSize]);
 
   // Clamp cols×rows to MAX_GRID_CELLS — guards against stale URL params or
   // localStorage values written before the 64-stream cap was enforced.
@@ -920,6 +832,9 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
     ));
 
     setWorkspaceTiles([...tiles, ...slots]);
+    historyManagerRef.current.clear();
+    selectionManagerRef.current.clear();
+    setSelectedWorkspaceTileIds([]);
     setWorkspaceStarted(true);
     setWorkspaceAutoGrid(tiles.length === 0 && slots.length === 0);
     setLayoutEditMode(false);
@@ -947,46 +862,8 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
     }
 
     const rect = grid.getBoundingClientRect();
-    const styles = window.getComputedStyle(grid);
-    const gap = Number.parseFloat(styles.columnGap || styles.gap || '0') || 0;
-    const safeCols = Math.max(1, workspaceGridCols);
-    const safeRows = Math.max(1, workspaceGridRows);
-    const cellWidth = (rect.width - (gap * (safeCols - 1))) / safeCols;
-    const cellHeight = (rect.height - (gap * (safeRows - 1))) / safeRows;
-    const x = Math.max(0, Math.min(safeCols - 1, Math.floor((event.clientX - rect.left) / Math.max(1, cellWidth + gap))));
-    const y = Math.max(0, Math.min(safeRows - 1, Math.floor((event.clientY - rect.top) / Math.max(1, cellHeight + gap))));
-    return { x, y };
-  }, [workspaceGridCols, workspaceGridRows, workspaceTiles.length]);
-
-  const updateWorkspaceTile = useCallback((instanceId, updater) => {
-    setWorkspaceTiles((previousTiles) => {
-      const currentTile = previousTiles.find((tile) => tile.instanceId === instanceId);
-      if (!currentTile) return previousTiles;
-
-      const proposedTile = normalizeWorkspaceBounds(
-        typeof updater === 'function' ? updater(currentTile) : { ...currentTile, ...updater },
-        workspaceGridCols,
-        workspaceGridRows
-      );
-      const collision = findTileCollision(proposedTile, previousTiles, instanceId);
-
-      if (!collision) {
-        return previousTiles.map((tile) => (
-          tile.instanceId === instanceId ? proposedTile : tile
-        ));
-      }
-
-      if (proposedTile.w === collision.w && proposedTile.h === collision.h) {
-        return previousTiles.map((tile) => {
-          if (tile.instanceId === instanceId) return { ...proposedTile, x: collision.x, y: collision.y };
-          if (tile.instanceId === collision.instanceId) return { ...collision, x: currentTile.x, y: currentTile.y };
-          return tile;
-        });
-      }
-
-      return previousTiles;
-    });
-  }, [workspaceGridCols, workspaceGridRows]);
+    return workspaceRenderer.pointToCell(event.clientX, event.clientY, rect);
+  }, [workspaceGridCols, workspaceRenderer, workspaceTiles.length]);
 
   const addWorkspaceTile = useCallback((cameraName, placement = null, options = {}) => {
     const cameraId = String(cameraName || '').trim();
@@ -1002,7 +879,6 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
       return;
     }
 
-    const shouldAutoTile = !activeLayoutId && !placement && options.autoFit !== false;
     workspaceAutoExpandedDropRef.current = false;
     setWorkspaceStarted(true);
     setWorkspaceTiles((previousTiles) => {
@@ -1018,7 +894,7 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
         );
       });
       if (targetSlot) {
-        return previousTiles.map((tile) => (
+        const nextTiles = previousTiles.map((tile) => (
           tile.instanceId === targetSlot.instanceId
             ? normalizeWorkspaceBounds({
               ...candidateTile,
@@ -1029,61 +905,35 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
             }, workspaceGridCols, workspaceGridRows)
             : tile
         ));
+        historyManagerRef.current.execute({
+          label: 'Add Camera',
+          execute: () => nextTiles,
+          undo: () => previousTiles,
+        });
+        return nextTiles;
       }
 
-      if (shouldAutoTile || (!placement && workspaceAutoGrid && options.autoFit !== false)) {
-        return buildResponsiveWorkspaceLayout([...previousTiles, candidateTile]);
+      const result = layoutEngine.add(previousTiles, candidateTile, placement);
+      if (!result.ok) {
+        showStatusMessage(result.reason, 'error', 5000);
+        return previousTiles;
       }
 
-      const openArea = findBestOpenWorkspaceArea(
-        previousTiles,
-        workspaceGridCols,
-        workspaceGridRows,
-        placement
-      );
-      const openSlot = openArea || findOpenWorkspaceSlot(
-        previousTiles,
-        Math.min(DEFAULT_WORKSPACE_TILE_W, workspaceGridCols),
-        Math.min(DEFAULT_WORKSPACE_TILE_H, workspaceGridRows),
-        workspaceGridCols,
-        workspaceGridRows
-      );
-      const point = openArea || placement || {
-        x: openSlot?.x ?? 0,
-        y: openSlot?.y ?? 0,
-      };
-      const nextTile = normalizeWorkspaceBounds({
-        ...candidateTile,
-        x: point.x,
-        y: point.y,
-        w: openArea?.w ?? DEFAULT_WORKSPACE_TILE_W,
-        h: openArea?.h ?? DEFAULT_WORKSPACE_TILE_H,
-      }, workspaceGridCols, workspaceGridRows);
-      const collision = findTileCollision(nextTile, previousTiles);
-      if (collision) {
-        if (!openSlot) {
-          workspaceAutoExpandedDropRef.current = true;
-          return buildResponsiveWorkspaceLayout([...previousTiles, candidateTile]);
-        }
-        const fallback = normalizeWorkspaceBounds(createWorkspaceTile(cameraId, {
-          x: openSlot.x,
-          y: openSlot.y,
-          w: openSlot.w ?? DEFAULT_WORKSPACE_TILE_W,
-          h: openSlot.h ?? DEFAULT_WORKSPACE_TILE_H,
-        }), workspaceGridCols, workspaceGridRows);
-        return [...previousTiles, fallback];
-      }
-
-      return [...previousTiles, nextTile];
+      historyManagerRef.current.execute({
+        label: 'Add Camera',
+        execute: () => result.tiles,
+        undo: () => previousTiles,
+      });
+      return result.tiles;
     });
     if (placement) {
       setWorkspaceAutoGrid(workspaceAutoExpandedDropRef.current);
-    } else if (shouldAutoTile || (workspaceAutoGrid && options.autoFit !== false)) {
-      setWorkspaceAutoGrid(true);
+    } else if (workspaceAutoGrid && options.autoFit !== false) {
+      setWorkspaceAutoGrid(false);
     }
     setCurrentPage(0);
     setSelectedStream(cameraId);
-  }, [activeLayoutId, streamByName, workspaceAutoGrid, workspaceGridCols, workspaceGridRows, workspaceLocked]);
+  }, [activeLayoutId, layoutEngine, streamByName, workspaceAutoGrid, workspaceGridCols, workspaceGridRows, workspaceLocked]);
 
   const applyWorkspacePreset = useCallback((preset) => {
     if (workspaceLocked) {
@@ -1128,8 +978,16 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
 
     const timeoutId = window.setTimeout(() => {
       setWorkspaceTiles((previousTiles) => {
-        const nextTiles = previousTiles.filter((tile) => tile.instanceId !== instanceId);
-        return workspaceAutoGrid ? buildResponsiveWorkspaceLayout(nextTiles) : nextTiles;
+        const result = layoutEngine.remove(previousTiles, instanceId);
+        const nextTiles = result.ok ? result.tiles : previousTiles;
+        if (result.ok) {
+          historyManagerRef.current.execute({
+            label: 'Remove Camera',
+            execute: () => nextTiles,
+            undo: () => previousTiles,
+          });
+        }
+        return nextTiles;
       });
       setRemovingTileIds((previousIds) => {
         const nextIds = new Set(previousIds);
@@ -1140,22 +998,29 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
     }, 190);
 
     removeTimeoutsRef.current.set(instanceId, timeoutId);
-  }, [workspaceAutoGrid, workspaceLocked]);
+  }, [layoutEngine, workspaceLocked]);
 
   const getWorkspaceCellSize = useCallback(() => {
     const grid = workspaceGridRef.current;
     if (!grid) return { width: 1, height: 1 };
 
     const rect = grid.getBoundingClientRect();
-    const styles = window.getComputedStyle(grid);
-    const gap = Number.parseFloat(styles.columnGap || styles.gap || '0') || 0;
     const safeCols = Math.max(1, workspaceGridCols);
     const safeRows = Math.max(1, workspaceGridRows);
     return {
-      width: Math.max(1, (rect.width - (gap * (safeCols - 1))) / safeCols + gap),
-      height: Math.max(1, (rect.height - (gap * (safeRows - 1))) / safeRows + gap),
+      width: Math.max(1, rect.width / safeCols),
+      height: Math.max(1, rect.height / safeRows),
     };
   }, [workspaceGridCols, workspaceGridRows]);
+
+  const scheduleWorkspacePreview = useCallback((nextPreview) => {
+    workspacePreviewRef.current = nextPreview;
+    if (workspacePreviewFrameRef.current) return;
+    workspacePreviewFrameRef.current = window.requestAnimationFrame(() => {
+      workspacePreviewFrameRef.current = 0;
+      setWorkspacePreview(workspacePreviewRef.current);
+    });
+  }, []);
 
   const handleWorkspacePointerMove = useCallback((event) => {
     const state = workspacePointerRef.current;
@@ -1167,43 +1032,65 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
     const dy = Math.round((event.clientY - state.startY) / cellSize.height);
 
     if (state.mode === 'move') {
-      if (dx === 0 && dy === 0) return;
+      const rects = dragController.getPreview(state, event.clientX, event.clientY, cellSize.width, cellSize.height);
+      const result = layoutEngine.move(workspaceTiles, state.tileIds, rects);
       setWorkspaceAutoGrid(false);
-      updateWorkspaceTile(state.instanceId, {
-        ...state.startTile,
-        x: state.startTile.x + dx,
-        y: state.startTile.y + dy,
+      scheduleWorkspacePreview({
+        mode: 'move',
+        tileIds: state.tileIds,
+        rects,
+        status: result.ok ? 'valid' : 'invalid',
+        reason: result.ok ? '' : result.reason,
       });
       return;
     }
 
-    const nextTile = { ...state.startTile };
-    if (state.edges.includes('e')) {
-      nextTile.w = state.startTile.w + dx;
-    }
-    if (state.edges.includes('s')) {
-      nextTile.h = state.startTile.h + dy;
-    }
-    if (state.edges.includes('w')) {
-      nextTile.x = state.startTile.x + dx;
-      nextTile.w = state.startTile.w - dx;
-    }
-    if (state.edges.includes('n')) {
-      nextTile.y = state.startTile.y + dy;
-      nextTile.h = state.startTile.h - dy;
-    }
+    const nextTile = resizeController.getPreview(state.startTile, state.edges, dx, dy);
+    const result = layoutEngine.resize(workspaceTiles, state.instanceId, nextTile);
     if (dx !== 0 || dy !== 0) {
       setWorkspaceAutoGrid(false);
     }
-    updateWorkspaceTile(state.instanceId, nextTile);
-  }, [getWorkspaceCellSize, updateWorkspaceTile]);
+    const nextPreview = {
+      mode: 'resize',
+      tileIds: [state.instanceId],
+      rects: [nextTile],
+      status: result.ok ? 'valid' : 'invalid',
+      reason: result.ok ? '' : result.reason,
+    };
+    scheduleWorkspacePreview(nextPreview);
+  }, [dragController, getWorkspaceCellSize, layoutEngine, resizeController, scheduleWorkspacePreview, workspaceTiles]);
 
   const finishWorkspacePointer = useCallback(() => {
+    const state = workspacePointerRef.current;
+    const preview = workspacePreviewRef.current;
+    if (state && preview) {
+      setWorkspaceTiles((previousTiles) => {
+        const result = preview.mode === 'resize'
+          ? layoutEngine.resize(previousTiles, state.instanceId, preview.rects[0])
+          : layoutEngine.move(previousTiles, state.tileIds, preview.rects);
+        if (!result.ok) {
+          showStatusMessage(result.reason, 'error', 3500);
+          return previousTiles;
+        }
+        historyManagerRef.current.execute({
+          label: result.action === 'swap' ? 'Swap' : result.action === 'resize' ? 'Resize' : 'Move',
+          execute: () => result.tiles,
+          undo: () => previousTiles,
+        });
+        return result.tiles;
+      });
+    }
     workspacePointerRef.current = null;
+    workspacePreviewRef.current = null;
+    if (workspacePreviewFrameRef.current) {
+      window.cancelAnimationFrame(workspacePreviewFrameRef.current);
+      workspacePreviewFrameRef.current = 0;
+    }
+    setWorkspacePreview(null);
     window.removeEventListener('pointermove', handleWorkspacePointerMove);
     window.removeEventListener('pointerup', finishWorkspacePointer);
     window.removeEventListener('pointercancel', finishWorkspacePointer);
-  }, [handleWorkspacePointerMove]);
+  }, [handleWorkspacePointerMove, layoutEngine]);
 
   const startWorkspacePointer = useCallback((event, tile, mode = 'move', edges = '') => {
     if (!workspaceStarted || !tile) return;
@@ -1223,18 +1110,34 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
     if (mode === 'resize') {
       setWorkspaceAutoGrid(false);
     }
+    let tileIds = [tile.instanceId];
+    if (mode === 'move') {
+      if (event.shiftKey) {
+        tileIds = selectionManagerRef.current.extend(tile.instanceId);
+      } else if (event.ctrlKey || event.metaKey) {
+        tileIds = selectionManagerRef.current.toggle(tile.instanceId);
+      } else if (selectedWorkspaceTileIds.includes(tile.instanceId)) {
+        tileIds = selectedWorkspaceTileIds;
+      } else {
+        tileIds = selectionManagerRef.current.selectOnly(tile.instanceId);
+      }
+      setSelectedWorkspaceTileIds(tileIds);
+    }
+    const startTiles = workspaceTiles.filter((candidate) => tileIds.includes(candidate.instanceId));
     workspacePointerRef.current = {
       mode,
       edges,
       instanceId: tile.instanceId,
       startTile: { ...tile },
+      tileIds,
+      startTiles,
       startX: event.clientX,
       startY: event.clientY,
     };
     window.addEventListener('pointermove', handleWorkspacePointerMove);
     window.addEventListener('pointerup', finishWorkspacePointer);
     window.addEventListener('pointercancel', finishWorkspacePointer);
-  }, [finishWorkspacePointer, handleWorkspacePointerMove, isMobileViewport, workspaceLocked, workspaceStarted]);
+  }, [finishWorkspacePointer, handleWorkspacePointerMove, isMobileViewport, selectedWorkspaceTileIds, workspaceLocked, workspaceStarted, workspaceTiles]);
 
   useEffect(() => () => {
     finishWorkspacePointer();
@@ -1244,7 +1147,32 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
       window.clearTimeout(saveLayoutTimeoutRef.current);
       saveLayoutTimeoutRef.current = null;
     }
+    if (workspacePreviewFrameRef.current) {
+      window.cancelAnimationFrame(workspacePreviewFrameRef.current);
+      workspacePreviewFrameRef.current = 0;
+    }
   }, []);
+
+  useEffect(() => {
+    const handleHistoryShortcut = (event) => {
+      if (!workspaceStarted || workspaceLocked) return;
+      if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 'z') return;
+      const target = event.target;
+      if (target?.closest?.('input, textarea, select, [contenteditable="true"]')) return;
+
+      event.preventDefault();
+      const nextTiles = event.shiftKey
+        ? historyManagerRef.current.redo()
+        : historyManagerRef.current.undo();
+      if (nextTiles) {
+        setWorkspaceAutoGrid(false);
+        setWorkspaceTiles(nextTiles);
+      }
+    };
+
+    window.addEventListener('keydown', handleHistoryShortcut);
+    return () => window.removeEventListener('keydown', handleHistoryShortcut);
+  }, [workspaceLocked, workspaceStarted]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -1460,6 +1388,9 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
     setHydratedLayoutId('');
     lastSavedLayoutPayloadRef.current = '';
     setWorkspaceTiles([]);
+    historyManagerRef.current.clear();
+    selectionManagerRef.current.clear();
+    setSelectedWorkspaceTileIds([]);
     setWorkspaceStarted(true);
     setLayoutEditMode(true);
     setWorkspaceAutoGrid(true);
@@ -1467,6 +1398,9 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
 
   const resetCurrentWorkspaceLayout = useCallback(() => {
     setWorkspaceTiles([]);
+    historyManagerRef.current.clear();
+    selectionManagerRef.current.clear();
+    setSelectedWorkspaceTileIds([]);
     setWorkspaceStarted(true);
     setLayoutEditMode(!activeLayoutId);
     setCurrentPage(0);
@@ -1655,6 +1589,13 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
   const workspaceEmptySlotCount = isWorkspaceMode
     ? workspaceTiles.filter((tile) => tile.type === 'slot').length
     : 0;
+  const workspacePreviewById = useMemo(() => {
+    const entries = workspacePreview?.tileIds?.map((tileId, index) => [
+      tileId,
+      workspacePreview.rects[index],
+    ]) || [];
+    return new Map(entries);
+  }, [workspacePreview]);
 
   const gridHasEmptySlots = !isWorkspaceMode
     && !isLoadingStreams
@@ -2008,13 +1949,35 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
             const types = Array.from(event.dataTransfer.types || []);
             if (!types.includes('application/x-oneberry-camera')) return;
             event.preventDefault();
-            event.dataTransfer.dropEffect = 'copy';
+            const placement = getWorkspaceGridPoint(event);
+            const rect = normalizeWorkspaceBounds({
+              x: placement.x,
+              y: placement.y,
+              w: Math.min(DEFAULT_WORKSPACE_TILE_W, workspaceGridCols),
+              h: Math.min(DEFAULT_WORKSPACE_TILE_H, workspaceGridRows),
+            }, workspaceGridCols, workspaceGridRows);
+            const valid = layoutEngine.validate(rect, workspaceTiles);
+            event.dataTransfer.dropEffect = valid ? 'copy' : 'none';
+            scheduleWorkspacePreview({
+              mode: 'drop',
+              tileIds: ['drop-preview'],
+              rects: [rect],
+              status: valid ? 'valid' : 'invalid',
+              reason: valid ? '' : 'Collision',
+            });
+          }}
+          onDragLeave={(event) => {
+            if (event.currentTarget.contains(event.relatedTarget)) return;
+            workspacePreviewRef.current = null;
+            setWorkspacePreview(null);
           }}
           onDrop={(event) => {
             if (reorderMode || workspaceLocked) return;
             const cameraNames = getDraggedCameraNames(event.dataTransfer);
             if (cameraNames.length === 0) return;
             event.preventDefault();
+            workspacePreviewRef.current = null;
+            setWorkspacePreview(null);
             const placement = getWorkspaceGridPoint(event);
             cameraNames.forEach((cameraName, index) => {
               addWorkspaceTile(cameraName, index === 0 ? placement : null, { autoFit: false });
@@ -2079,6 +2042,17 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
             />
           ) : (
             <>
+              {isWorkspaceMode && workspacePreview && (
+                <div className="live-workspace-preview-layer" aria-hidden="true">
+                  {workspacePreview.rects.map((rect, index) => (
+                    <div
+                      key={`${workspacePreview.tileIds[index]}-preview`}
+                      className={`live-workspace-placement-preview is-${workspacePreview.status}`}
+                      style={workspaceRenderer.rectToStyle(rect)}
+                    />
+                  ))}
+                </div>
+              )}
               {(isWorkspaceMode ? workspaceTiles : streamsToShow).map((item, index) => {
                 const workspaceTile = isWorkspaceMode ? item : null;
                 const isWorkspaceSlot = isWorkspaceMode && workspaceTile?.type === 'slot';
@@ -2090,8 +2064,8 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
                       key={tileInstanceId}
                       className="live-workspace-slot"
                       style={{
-                        gridColumn: `${Math.min(workspaceGridCols, workspaceTile.x + 1)} / span ${Math.max(1, Math.min(workspaceGridCols - workspaceTile.x, workspaceTile.w || DEFAULT_WORKSPACE_TILE_W))}`,
-                        gridRow: `${Math.min(workspaceGridRows, workspaceTile.y + 1)} / span ${Math.max(1, Math.min(workspaceGridRows - workspaceTile.y, workspaceTile.h || DEFAULT_WORKSPACE_TILE_H))}`,
+                        ...workspaceRenderer.rectToStyle(workspaceTile),
+                        opacity: workspacePreviewById.has(tileInstanceId) ? 0.35 : undefined,
                       }}
                       onDragOver={(event) => {
                         if (workspaceLocked) return;
@@ -2100,6 +2074,13 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
                         event.preventDefault();
                         event.stopPropagation();
                         event.dataTransfer.dropEffect = 'copy';
+                        scheduleWorkspacePreview({
+                          mode: 'drop',
+                          tileIds: ['drop-preview'],
+                          rects: [workspaceTile],
+                          status: 'valid',
+                          reason: '',
+                        });
                       }}
                       onDrop={(event) => {
                         if (workspaceLocked) return;
@@ -2107,6 +2088,8 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
                         if (cameraNames.length === 0) return;
                         event.preventDefault();
                         event.stopPropagation();
+                        workspacePreviewRef.current = null;
+                        setWorkspacePreview(null);
                         cameraNames.forEach((cameraName, cameraIndex) => {
                           addWorkspaceTile(cameraName, cameraIndex === 0 ? { x: workspaceTile.x, y: workspaceTile.y } : null, { autoFit: false });
                         });
@@ -2137,12 +2120,12 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
                 return (
                   <div
                     key={tileInstanceId || stream.name}
-                    className={`live-workspace-tile ${removingTileIds.has(tileInstanceId) ? 'is-removing' : ''}`}
+                    className={`live-workspace-tile ${selectedWorkspaceTileIds.includes(tileInstanceId) ? 'is-selected' : ''} ${removingTileIds.has(tileInstanceId) ? 'is-removing' : ''}`}
                     style={{
-                      position: 'relative',
                       ...(isWorkspaceMode && workspaceTile ? {
-                        gridColumn: `${Math.min(workspaceGridCols, workspaceTile.x + 1)} / span ${Math.max(1, Math.min(workspaceGridCols - workspaceTile.x, workspaceTile.w || DEFAULT_WORKSPACE_TILE_W))}`,
-                        gridRow: `${Math.min(workspaceGridRows, workspaceTile.y + 1)} / span ${Math.max(1, Math.min(workspaceGridRows - workspaceTile.y, workspaceTile.h || DEFAULT_WORKSPACE_TILE_H))}`,
+                        ...workspaceRenderer.rectToStyle(workspaceTile),
+                        zIndex: workspacePreviewById.has(tileInstanceId) ? 45 : undefined,
+                        opacity: workspacePreviewById.has(tileInstanceId) ? 0.42 : undefined,
                       } : {}),
                     }}
                     draggable={!isWorkspaceMode && reorderMode}
