@@ -318,6 +318,65 @@ function buildResponsiveWorkspaceLayout(workspaceTiles) {
   });
 }
 
+function buildWorkspaceInsertionCells(count, cols, rows) {
+  const [layoutCols, layoutRows] = computeOptimalGrid(count);
+  return Array.from({ length: count }, (_, index) => {
+    const col = index % layoutCols;
+    const row = Math.floor(index / layoutCols);
+    const x = Math.floor((col * cols) / layoutCols);
+    const y = Math.floor((row * rows) / layoutRows);
+    const nextX = Math.floor(((col + 1) * cols) / layoutCols);
+    const nextY = Math.floor(((row + 1) * rows) / layoutRows);
+    return {
+      x,
+      y,
+      w: Math.max(1, nextX - x),
+      h: Math.max(1, nextY - y),
+    };
+  });
+}
+
+function getWorkspaceInsertionIndex(cells, placement) {
+  if (!placement) return cells.length - 1;
+
+  const pointX = Number(placement.x) || 0;
+  const pointY = Number(placement.y) || 0;
+  let bestIndex = cells.length - 1;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  cells.forEach((cell, index) => {
+    const centerX = cell.x + (cell.w / 2);
+    const centerY = cell.y + (cell.h / 2);
+    const distance = Math.abs(centerX - pointX) + Math.abs(centerY - pointY);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      bestIndex = index;
+    }
+  });
+  return bestIndex;
+}
+
+function insertWorkspaceTileWithBalancedSpace(workspaceTiles, tile, cols, rows, placement = null) {
+  const safeCols = Math.max(1, cols || 1);
+  const safeRows = Math.max(1, rows || 1);
+  const nextCount = Math.max(1, workspaceTiles.length + 1);
+  const cells = buildWorkspaceInsertionCells(nextCount, safeCols, safeRows);
+  const insertIndex = getWorkspaceInsertionIndex(cells, placement);
+  const orderedTiles = workspaceTiles
+    .map((workspaceTile, index) => ({ workspaceTile, index }))
+    .sort((a, b) => (
+      (Number(a.workspaceTile.y) || 0) - (Number(b.workspaceTile.y) || 0) ||
+      (Number(a.workspaceTile.x) || 0) - (Number(b.workspaceTile.x) || 0) ||
+      a.index - b.index
+    ))
+    .map(({ workspaceTile }) => workspaceTile);
+
+  orderedTiles.splice(insertIndex, 0, tile);
+  return orderedTiles.map((workspaceTile, index) => normalizeWorkspaceBounds({
+    ...workspaceTile,
+    ...cells[index],
+  }, safeCols, safeRows));
+}
+
 function scaleLayoutTileToWorkspace(tile, layoutCols, layoutRows) {
   const sourceCols = Number.isFinite(Number(layoutCols)) && Number(layoutCols) > 0 ? Number(layoutCols) : WORKSPACE_GRID_COLS;
   const sourceRows = Number.isFinite(Number(layoutRows)) && Number(layoutRows) > 0 ? Number(layoutRows) : WORKSPACE_GRID_ROWS;
@@ -1062,8 +1121,13 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
       const collision = findTileCollision(nextTile, previousTiles);
       if (collision) {
         if (!openSlot) {
-          workspaceAutoExpandedDropRef.current = true;
-          return buildResponsiveWorkspaceLayout([...previousTiles, candidateTile]);
+          return insertWorkspaceTileWithBalancedSpace(
+            previousTiles,
+            candidateTile,
+            workspaceGridCols,
+            workspaceGridRows,
+            placement
+          );
         }
         const fallback = normalizeWorkspaceBounds(createWorkspaceTile(cameraId, {
           x: openSlot.x,
