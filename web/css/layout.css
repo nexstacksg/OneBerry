@@ -601,6 +601,7 @@ body > .container {
 .sidebar-camera-context-menu {
     z-index: 1400;
     min-width: 11rem;
+    max-width: min(16rem, calc(100vw - 1rem));
 }
 
 .sidebar-camera-context-label {

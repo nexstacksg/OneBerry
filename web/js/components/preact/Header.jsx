@@ -1042,16 +1042,13 @@ export function Header({ version = VERSION }) {
     if (!name) return;
 
     setSelectedSidebarCameraNames((previousSelection) => {
-      if (event.ctrlKey || event.metaKey || event.shiftKey) {
-        const nextSelection = new Set(previousSelection);
-        if (nextSelection.has(name)) {
-          nextSelection.delete(name);
-        } else {
-          nextSelection.add(name);
-        }
-        return nextSelection;
+      const nextSelection = new Set(previousSelection);
+      if (nextSelection.has(name)) {
+        nextSelection.delete(name);
+      } else {
+        nextSelection.add(name);
       }
-      return new Set([name]);
+      return nextSelection.size > 0 ? nextSelection : new Set([name]);
     });
   }, []);
 
@@ -1502,6 +1499,8 @@ export function Header({ version = VERSION }) {
             position: 'fixed',
             left: `${cameraContextMenu.x}px`,
             top: `${cameraContextMenu.y}px`,
+            right: 'auto',
+            bottom: 'auto',
           }}
           onClick={(event) => event.stopPropagation()}
           onContextMenu={(event) => event.preventDefault()}
