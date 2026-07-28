@@ -598,6 +598,19 @@ body > .container {
     background: hsl(var(--foreground) / 0.06);
 }
 
+.sidebar-camera-context-menu {
+    z-index: 1400;
+    min-width: 11rem;
+}
+
+.sidebar-camera-context-label {
+    padding: 0.35rem 0.6rem 0.45rem;
+    color: hsl(var(--muted-foreground));
+    font-size: 0.72rem;
+    font-weight: 700;
+    line-height: 1.25;
+}
+
 .sidebar-layout-title .sidebar-tree-count {
     background: hsl(var(--foreground) / 0.06);
     color: hsl(var(--muted-foreground));

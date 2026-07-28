@@ -1040,8 +1040,12 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
       const collision = findTileCollision(nextTile, previousTiles);
       if (collision) {
         if (!openSlot) {
-          showStatusMessage('No open workspace space for another camera tile', 'error', 5000);
-          return previousTiles;
+          const cameraTiles = previousTiles.filter((tile) => tile.type !== 'slot');
+          const slots = previousTiles.filter((tile) => tile.type === 'slot');
+          return [
+            ...buildResponsiveWorkspaceLayout([...cameraTiles, candidateTile]),
+            ...slots,
+          ];
         }
         const fallback = normalizeWorkspaceBounds(createWorkspaceTile(cameraId, {
           x: openSlot.x,
@@ -1988,8 +1992,16 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
             if (!types.includes('application/x-oneberry-camera')) return;
             const cameraName = event.dataTransfer.getData('application/x-oneberry-camera') || event.dataTransfer.getData('text/plain');
             if (!cameraName) return;
+            let cameraNames = [];
+            try {
+              cameraNames = JSON.parse(event.dataTransfer.getData('application/x-oneberry-cameras') || '[]');
+            } catch {
+              cameraNames = [];
+            }
             event.preventDefault();
-            addWorkspaceTile(cameraName, getWorkspaceGridPoint(event));
+            const dropPoint = getWorkspaceGridPoint(event);
+            (Array.isArray(cameraNames) && cameraNames.length > 0 ? cameraNames : [cameraName])
+              .forEach((name, index) => addWorkspaceTile(name, index === 0 ? dropPoint : null));
           }}
         >
           {isLoadingStreams ? (
@@ -2078,9 +2090,16 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
                         if (!types.includes('application/x-oneberry-camera')) return;
                         const cameraName = event.dataTransfer.getData('application/x-oneberry-camera') || event.dataTransfer.getData('text/plain');
                         if (!cameraName) return;
+                        let cameraNames = [];
+                        try {
+                          cameraNames = JSON.parse(event.dataTransfer.getData('application/x-oneberry-cameras') || '[]');
+                        } catch {
+                          cameraNames = [];
+                        }
                         event.preventDefault();
                         event.stopPropagation();
-                        addWorkspaceTile(cameraName, { x: workspaceTile.x, y: workspaceTile.y });
+                        (Array.isArray(cameraNames) && cameraNames.length > 0 ? cameraNames : [cameraName])
+                          .forEach((name, index) => addWorkspaceTile(name, index === 0 ? { x: workspaceTile.x, y: workspaceTile.y } : null));
                       }}
                     >
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
