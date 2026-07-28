@@ -213,6 +213,46 @@ function buildDiscoveryPairName(device, primaryProfile, secondaryProfile) {
   return `${primaryName}_sub`;
 }
 
+const DISCOVERY_CAMERA_HANDOFF_KEY = 'oneberry.discoveryCameraHandoff';
+
+function getDiscoveryDeviceKey(device) {
+  return String(device?.ip_address || device?.device_service || device?.endpoint || device?.name || '').trim();
+}
+
+function mergeDiscoveredDevices(previousDevices, nextDevices) {
+  const devicesByKey = new Map();
+
+  (Array.isArray(previousDevices) ? previousDevices : []).forEach((device) => {
+    const key = getDiscoveryDeviceKey(device);
+    if (key) devicesByKey.set(key, device);
+  });
+
+  (Array.isArray(nextDevices) ? nextDevices : []).forEach((device) => {
+    const key = getDiscoveryDeviceKey(device);
+    if (key) devicesByKey.set(key, device);
+  });
+
+  return Array.from(devicesByKey.values())
+    .sort((a, b) => String(a.ip_address || '').localeCompare(String(b.ip_address || '')));
+}
+
+function getStableDiscoveryDevices(previousDevices, data) {
+  const nextDevices = Array.isArray(data?.devices) ? data.devices : [];
+  const scanRunning = data?.running === true && data?.completed !== true;
+
+  if (!scanRunning) {
+    return nextDevices.length > 0
+      ? nextDevices.slice().sort((a, b) => String(a.ip_address || '').localeCompare(String(b.ip_address || '')))
+      : previousDevices;
+  }
+
+  if (nextDevices.length === 0) {
+    return previousDevices;
+  }
+
+  return mergeDiscoveredDevices(previousDevices, nextDevices);
+}
+
 /**
  * StreamsView component
  * @returns {JSX.Element} StreamsView component
@@ -1143,14 +1183,16 @@ export function StreamsView() {
   };
 
   // Open ONVIF discovery modal
-  const openOnvifModal = async () => {
+  const openOnvifModal = async (initialDevice = null) => {
     if (!canCreateStreams) {
       showStatusMessage(t('streams.createStreamForbidden'), 'error', 5000);
       return;
     }
-    setDiscoveredDevices([]);
     setDeviceProfiles([]);
-    setSelectedDevice(null);
+    setSelectedDevice(initialDevice);
+    if (initialDevice?.ip_address) {
+      setDiscoveredDevices((previousDevices) => mergeDiscoveredDevices(previousDevices, [initialDevice]));
+    }
     setSelectedProfile(null);
     setSelectedSecondaryProfile(null);
     setCustomStreamName('');
@@ -1176,6 +1218,21 @@ export function StreamsView() {
     }
     setOnvifNetworkOverride(discoveryNetwork);
     setOnvifModalVisible(true);
+    try {
+      const data = await fetchJSON('/api/discovery/cameras/status', {
+        timeout: 5000,
+        retries: 0
+      });
+      const statusDevices = Array.isArray(data.devices) ? data.devices : [];
+      setDiscoveredDevices((previousDevices) => getStableDiscoveryDevices(previousDevices, data));
+      setIsDiscovering(data.running === true && !data.completed);
+      if (initialDevice?.ip_address) {
+        const matchedDevice = statusDevices.find(device => device.ip_address === initialDevice.ip_address) || initialDevice;
+        setSelectedDevice(matchedDevice);
+      }
+    } catch (error) {
+      console.warn('Unable to load existing camera discovery status:', error);
+    }
     onvifDiscoveryMutation.mutate({
       network: discoveryNetwork,
       include_onvif: true,
@@ -1276,16 +1333,14 @@ export function StreamsView() {
     {
       onMutate: () => {
         setIsDiscovering(true);
-        setDiscoveredDevices([]);
-        setSelectedDevice(null);
         setSelectedProfile(null);
         setSelectedSecondaryProfile(null);
         setDeviceProfiles([]);
         setShowCustomNameInput(false);
       },
       onSuccess: (data) => {
-        setDiscoveredDevices(data.devices || []);
-        setIsDiscovering(data.running === true);
+        setDiscoveredDevices((previousDevices) => getStableDiscoveryDevices(previousDevices, data));
+        setIsDiscovering(data.running === true && !data.completed);
       },
       onError: (error) => {
         showStatusMessage(t('streams.errorDiscoveringOnvifDevices', { message: error.message }), 'error', 5000);
@@ -1309,7 +1364,7 @@ export function StreamsView() {
         if (cancelled) {
           return;
         }
-        setDiscoveredDevices(data.devices || []);
+        setDiscoveredDevices((previousDevices) => getStableDiscoveryDevices(previousDevices, data));
         if (data.error) {
           showStatusMessage(t('streams.errorDiscoveringOnvifDevices', { message: data.error }), 'error', 5000);
           setIsDiscovering(false);
@@ -1332,6 +1387,51 @@ export function StreamsView() {
       window.clearInterval(intervalId);
     };
   }, [onvifModalVisible, isDiscovering, t]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !canCreateStreams) {
+      return;
+    }
+
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('discover') !== '1') {
+      return;
+    }
+
+    let handoffDevice = null;
+    try {
+      const rawHandoff = sessionStorage.getItem(DISCOVERY_CAMERA_HANDOFF_KEY);
+      if (rawHandoff) {
+        const parsed = JSON.parse(rawHandoff);
+        if (parsed?.device?.ip_address) {
+          handoffDevice = parsed.device;
+        }
+      }
+      sessionStorage.removeItem(DISCOVERY_CAMERA_HANDOFF_KEY);
+    } catch (error) {
+      // Ignore malformed or unavailable session storage.
+    }
+
+    const cameraIp = params.get('camera') || handoffDevice?.ip_address || '';
+    const initialDevice = handoffDevice || (cameraIp ? {
+      ip_address: cameraIp,
+      name: cameraIp,
+      rtsp: true,
+      onvif: false,
+      rtsp_ports: [],
+      manufacturer: 'Unknown',
+      model: 'Unknown',
+      status: 'RTSP Found'
+    } : null);
+
+    openOnvifModal(initialDevice);
+
+    params.delete('discover');
+    params.delete('camera');
+    const nextSearch = params.toString();
+    const nextUrl = `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ''}${window.location.hash || ''}`;
+    window.history.replaceState({}, '', nextUrl);
+  }, [canCreateStreams]);
 
   const validateRtspDeviceMutation = usePostMutation(
     '/api/discovery/rtsp/validate',

@@ -118,6 +118,27 @@ const SidebarCameraRow = memo(({
   </li>
 ));
 
+const getDiscoveredDeviceKey = (device) => (
+  String(device?.ip_address || device?.device_service || device?.endpoint || device?.name || '').trim()
+);
+
+const mergeDiscoveredDevices = (previousDevices, nextDevices) => {
+  const devicesByKey = new Map();
+
+  (Array.isArray(previousDevices) ? previousDevices : []).forEach((device) => {
+    const key = getDiscoveredDeviceKey(device);
+    if (key) devicesByKey.set(key, device);
+  });
+
+  (Array.isArray(nextDevices) ? nextDevices : []).forEach((device) => {
+    const key = getDiscoveredDeviceKey(device);
+    if (key) devicesByKey.set(key, device);
+  });
+
+  return Array.from(devicesByKey.values())
+    .sort((a, b) => String(a.ip_address || '').localeCompare(String(b.ip_address || '')));
+};
+
 const SIDEBAR_STORAGE_KEY = 'oneberry.dashboardSidebar';
 const SIDEBAR_EXPANDED_WIDTH_REM = 17;
 const SIDEBAR_COLLAPSED_WIDTH_REM = 5.25;
@@ -125,6 +146,7 @@ const SIDEBAR_MIN_WIDTH_REM = 14;
 const SIDEBAR_MAX_WIDTH_REM = 22;
 const SIDEBAR_COLLAPSE_THRESHOLD_REM = 9;
 const CAMERA_LIST_COLLAPSED_STORAGE_KEY = 'oneberry.sidebarCameraListCollapsed';
+const DISCOVERY_CAMERA_HANDOFF_KEY = 'oneberry.discoveryCameraHandoff';
 
 const getStoredSidebarState = () => {
   try {
@@ -312,9 +334,12 @@ export function Header({ version = VERSION }) {
   const [cameraContextMenu, setCameraContextMenu] = useState(null);
   const [liveLayoutEditState, setLiveLayoutEditState] = useState({ layoutId: '', editing: false });
   const [locationSearch, setLocationSearch] = useState(() => (typeof window !== 'undefined' ? window.location.search : ''));
+  const [discoveredDevices, setDiscoveredDevices] = useState([]);
+  const [isDiscoveringCameras, setIsDiscoveringCameras] = useState(false);
   const { t } = useI18n();
   const suppressNextCameraClickRef = useRef(false);
   const cameraSelectionBeforeClickRef = useRef(new Set());
+  const sidebarAutoDiscoveryStartedRef = useRef(false);
   const sidebarCollapsed = sidebarState.collapsed;
   const { data: sidebarStreams = [] } = useQuery(
     'streams',
@@ -373,6 +398,22 @@ export function Header({ version = VERSION }) {
         .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')))
       : []
   ), [sidebarStreams]);
+  const sidebarDiscoveredCameraList = useMemo(() => (
+    discoveredDevices
+      .filter((device) => device?.ip_address && !sidebarCameraList.some((stream) => {
+        if (!stream) return false;
+        return [stream.url, stream.secondary_url].some((streamUrl) => {
+          if (!streamUrl) return false;
+          try {
+            return new URL(streamUrl).hostname === device.ip_address;
+          } catch {
+            return String(streamUrl).includes(device.ip_address);
+          }
+        });
+      }))
+      .slice()
+      .sort((a, b) => String(a.ip_address || '').localeCompare(String(b.ip_address || '')))
+  ), [discoveredDevices, sidebarCameraList]);
   const streamByName = useMemo(() => new Map(sidebarCameraList.map((stream) => [stream.name, stream])), [sidebarCameraList]);
   const selectedCameraNameList = useMemo(() => (
     sidebarCameraList
@@ -734,6 +775,7 @@ export function Header({ version = VERSION }) {
   // While the role is still loading (null) we conservatively show all items
   // so the nav doesn't flash/reorder after load.
   const isAdmin = userRole === null || userRole === 'admin';
+  const canDiscoverSidebarCameras = userRole === 'admin' && !demoMode;
   const canEditCurrentUser = authEnabled && !demoMode && Boolean(currentUser?.id);
   const displayUsername = username || (demoMode ? t('auth.demoViewer') : t('auth.user'));
 
@@ -747,6 +789,98 @@ export function Header({ version = VERSION }) {
     ...(isAdmin ? [{ id: 'nav-users', href: 'users.html', label: t('nav.users') }] : []),
     ...(isAdmin ? [{ id: 'nav-system', href: 'system.html', label: t('nav.system') }] : []),
   ];
+
+  const loadSidebarDiscoveryStatus = useCallback(async () => {
+    if (!canDiscoverSidebarCameras) {
+      setDiscoveredDevices([]);
+      setIsDiscoveringCameras(false);
+      return null;
+    }
+
+    try {
+      const data = await fetchJSON('/api/discovery/cameras/status', {
+        timeout: 5000,
+        retries: 0,
+      });
+      setDiscoveredDevices((previousDevices) => mergeDiscoveredDevices(previousDevices, data.devices || []));
+      setIsDiscoveringCameras(data.running === true && !data.completed);
+      return data;
+    } catch (error) {
+      console.warn('Unable to load sidebar camera discovery status:', error);
+      return null;
+    }
+  }, [canDiscoverSidebarCameras]);
+
+  const startSidebarCameraDiscovery = useCallback(async () => {
+    if (!canDiscoverSidebarCameras) {
+      return null;
+    }
+
+    let discoveryNetwork = 'auto';
+    try {
+      const settings = await fetchJSON('/api/settings', { timeout: 5000 });
+      if (settings?.onvif_discovery_network) {
+        discoveryNetwork = settings.onvif_discovery_network;
+      }
+    } catch (error) {
+      console.warn('Could not fetch camera discovery network setting, using auto', error);
+    }
+
+    try {
+      setIsDiscoveringCameras(true);
+      const data = await fetchJSON('/api/discovery/cameras', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...getAuthHeaders(),
+        },
+        body: JSON.stringify({
+          network: discoveryNetwork,
+          include_onvif: true,
+          include_rtsp: true,
+        }),
+        timeout: 15000,
+        retries: 0,
+      });
+      setDiscoveredDevices((previousDevices) => mergeDiscoveredDevices(previousDevices, data.devices || []));
+      setIsDiscoveringCameras(data.running === true && !data.completed);
+      return data;
+    } catch (error) {
+      console.warn('Sidebar camera discovery failed:', error);
+      setIsDiscoveringCameras(false);
+      return null;
+    }
+  }, [canDiscoverSidebarCameras]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const hydrateDiscovery = async () => {
+      const status = await loadSidebarDiscoveryStatus();
+      if (cancelled || sidebarAutoDiscoveryStartedRef.current || !canDiscoverSidebarCameras) {
+        return;
+      }
+
+      sidebarAutoDiscoveryStartedRef.current = true;
+      if (!status?.running) {
+        await startSidebarCameraDiscovery();
+      }
+    };
+
+    hydrateDiscovery();
+    const intervalId = window.setInterval(loadSidebarDiscoveryStatus, 15000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [canDiscoverSidebarCameras, loadSidebarDiscoveryStatus, startSidebarCameraDiscovery]);
+
+  useEffect(() => {
+    if (!isDiscoveringCameras) return undefined;
+
+    const intervalId = window.setInterval(loadSidebarDiscoveryStatus, 1500);
+    return () => window.clearInterval(intervalId);
+  }, [isDiscoveringCameras, loadSidebarDiscoveryStatus]);
 
   // Render navigation item
   const renderNavItem = (item, mobile = false) => {
@@ -1111,11 +1245,27 @@ export function Header({ version = VERSION }) {
     setCameraContextMenu(null);
   }, [addCamerasToLayout, cameraContextMenu, selectedCameraNameList, selectedCameraNames]);
 
+  const openDiscoveredCameraInStreams = useCallback((event, device) => {
+    if (!device?.ip_address) return;
+
+    try {
+      sessionStorage.setItem(DISCOVERY_CAMERA_HANDOFF_KEY, JSON.stringify({
+        ip_address: device.ip_address,
+        device,
+        requested_at: Date.now(),
+      }));
+    } catch (error) {
+      // Storage can fail in locked-down browser contexts; the query string still carries the IP.
+    }
+
+    forceNavigation(`streams.html?discover=1&camera=${encodeURIComponent(device.ip_address)}`, event);
+  }, []);
+
   const renderCameraList = () => {
-    if (sidebarCameraList.length === 0) {
+    if (sidebarCameraList.length === 0 && sidebarDiscoveredCameraList.length === 0) {
       return (
         <div className="sidebar-building-empty">
-          No cameras
+          {isDiscoveringCameras ? 'Discovering cameras...' : 'No cameras'}
         </div>
       );
     }
@@ -1150,6 +1300,21 @@ export function Header({ version = VERSION }) {
             />
           );
         })}
+        {sidebarDiscoveredCameraList.map((device) => (
+          <li key={`discovered-${device.ip_address}`} className="sidebar-camera-node">
+            <a
+              href={`streams.html?discover=1&camera=${encodeURIComponent(device.ip_address)}`}
+              className="sidebar-camera-link sidebar-network-camera-link"
+              title={`${device.ip_address} - Discovered network camera. Select to add.`}
+              onClick={(event) => openDiscoveredCameraInStreams(event, device)}
+            >
+              <span className="sidebar-camera-status is-warning" aria-hidden="true"></span>
+              <TreeIcon type="camera" />
+              <span className="sidebar-camera-name">{device.name || device.ip_address}</span>
+              <span className="sidebar-camera-auth-badge">Not added</span>
+            </a>
+          </li>
+        ))}
       </ul>
     );
   };
@@ -1164,7 +1329,7 @@ export function Header({ version = VERSION }) {
         onClick={() => setCameraListCollapsed((collapsed) => !collapsed)}
       >
         <span className="sidebar-section-label">Camera List</span>
-        <span className="sidebar-tree-count">{sidebarCameraList.length}</span>
+        <span className="sidebar-tree-count">{sidebarCameraList.length + sidebarDiscoveredCameraList.length}</span>
         <span className="sidebar-tree-toggle" aria-hidden="true">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 6l6 6-6 6" />
@@ -1203,7 +1368,7 @@ export function Header({ version = VERSION }) {
           <div className="sidebar-camera-context-label">Add to layout</div>
           {canAddToCurrentWorkspace && (
             <button type="button" role="menuitem" onClick={handleAddContextCamerasToWorkspace}>
-              Current workspace
+              Blank layout
             </button>
           )}
           {hasSavedLayouts && liveLayouts.layouts.map((layout) => (
