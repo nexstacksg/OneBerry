@@ -4,6 +4,7 @@
  */
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'preact/hooks';
+import { memo } from 'preact/compat';
 import {VERSION} from '../../version.js';
 import { fetchJSON, queryClient, useQuery } from '../../query-client.js';
 import { getSettings } from '../../utils/settings-utils.js';
@@ -80,6 +81,43 @@ const TreeIcon = ({ type }) => (
   </span>
 );
 
+const SidebarCameraRow = memo(({
+  cameraHref,
+  cameraName,
+  statusKind,
+  statusLabel,
+  isActive,
+  isSelected,
+  onCameraClick,
+  onCameraDoubleClick,
+  onCameraDragStart,
+  onCameraDragEnd,
+  onCameraContextMenu,
+}) => (
+  <li className={`sidebar-camera-node ${isActive ? 'is-active' : ''} ${isSelected ? 'is-selected' : ''}`} role="presentation">
+    <a
+      href={cameraHref}
+      role="option"
+      className={`sidebar-camera-link ${isActive ? 'is-active' : ''} ${isSelected ? 'is-selected' : ''}`}
+      title={`${cameraName} - ${statusLabel}. Double-click to open.`}
+      aria-current={isActive ? 'page' : undefined}
+      aria-selected={isSelected ? 'true' : 'false'}
+      draggable={true}
+      data-camera-id={cameraName}
+      onDragStart={onCameraDragStart}
+      onDragEnd={onCameraDragEnd}
+      onClick={onCameraClick}
+      onDblClick={onCameraDoubleClick}
+      onContextMenu={onCameraContextMenu}
+    >
+      <span className="sidebar-camera-select-indicator" aria-hidden="true"></span>
+      <span className={`sidebar-camera-status is-${statusKind}`} aria-hidden="true"></span>
+      <TreeIcon type="camera" />
+      <span className="sidebar-camera-name">{cameraName}</span>
+    </a>
+  </li>
+));
+
 const getDiscoveredDeviceKey = (device) => (
   String(device?.ip_address || device?.device_service || device?.endpoint || device?.name || '').trim()
 );
@@ -137,6 +175,12 @@ const WORKSPACE_GRID_COLS = 48;
 const WORKSPACE_GRID_ROWS = 27;
 const DEFAULT_WORKSPACE_TILE_W = 24;
 const DEFAULT_WORKSPACE_TILE_H = 13;
+
+const getCameraNameList = (cameraNames) => (
+  Array.isArray(cameraNames)
+    ? cameraNames.map((name) => String(name || '').trim()).filter(Boolean)
+    : []
+);
 
 const getStoredExpandedTree = (storageKey) => {
   try {
@@ -286,14 +330,16 @@ export function Header({ version = VERSION }) {
   const [renamingLayoutId, setRenamingLayoutId] = useState('');
   const [renameLayoutName, setRenameLayoutName] = useState('');
   const [dragOverLayoutId, setDragOverLayoutId] = useState('');
+  const [selectedCameraNames, setSelectedCameraNames] = useState(() => new Set());
+  const [cameraContextMenu, setCameraContextMenu] = useState(null);
   const [liveLayoutEditState, setLiveLayoutEditState] = useState({ layoutId: '', editing: false });
   const [locationSearch, setLocationSearch] = useState(() => (typeof window !== 'undefined' ? window.location.search : ''));
   const [discoveredDevices, setDiscoveredDevices] = useState([]);
   const [isDiscoveringCameras, setIsDiscoveringCameras] = useState(false);
-  const [selectedSidebarCameraNames, setSelectedSidebarCameraNames] = useState(() => new Set());
-  const [cameraContextMenu, setCameraContextMenu] = useState(null);
-  const sidebarAutoDiscoveryStartedRef = useRef(false);
   const { t } = useI18n();
+  const suppressNextCameraClickRef = useRef(false);
+  const cameraSelectionBeforeClickRef = useRef(new Set());
+  const sidebarAutoDiscoveryStartedRef = useRef(false);
   const sidebarCollapsed = sidebarState.collapsed;
   const { data: sidebarStreams = [] } = useQuery(
     'streams',
@@ -330,6 +376,20 @@ export function Header({ version = VERSION }) {
     preloadLiveSnapshots(sidebarStreams);
   }, [sidebarStreams]);
 
+  useEffect(() => {
+    if (!cameraContextMenu) return undefined;
+
+    const closeCameraContextMenu = () => setCameraContextMenu(null);
+    window.addEventListener('click', closeCameraContextMenu);
+    window.addEventListener('scroll', closeCameraContextMenu, true);
+    window.addEventListener('resize', closeCameraContextMenu);
+    return () => {
+      window.removeEventListener('click', closeCameraContextMenu);
+      window.removeEventListener('scroll', closeCameraContextMenu, true);
+      window.removeEventListener('resize', closeCameraContextMenu);
+    };
+  }, [cameraContextMenu]);
+
   const sidebarCameraList = useMemo(() => (
     Array.isArray(sidebarStreams)
       ? sidebarStreams
@@ -355,6 +415,11 @@ export function Header({ version = VERSION }) {
       .sort((a, b) => String(a.ip_address || '').localeCompare(String(b.ip_address || '')))
   ), [discoveredDevices, sidebarCameraList]);
   const streamByName = useMemo(() => new Map(sidebarCameraList.map((stream) => [stream.name, stream])), [sidebarCameraList]);
+  const selectedCameraNameList = useMemo(() => (
+    sidebarCameraList
+      .map((stream) => stream.name)
+      .filter((name) => selectedCameraNames.has(name))
+  ), [sidebarCameraList, selectedCameraNames]);
   const liveSelection = useMemo(() => {
     if (activeNav !== 'nav-live' || typeof window === 'undefined') {
       return { tag: '', stream: '' };
@@ -367,6 +432,24 @@ export function Header({ version = VERSION }) {
       layout: layout === 'none' || layout === 'workspace' ? '' : layout,
     };
   }, [activeNav, locationSearch]);
+
+  useEffect(() => {
+    if (sidebarCameraList.length === 0) return;
+
+    const availableNames = new Set(sidebarCameraList.map((stream) => stream.name));
+    setSelectedCameraNames((previousSelected) => {
+      const nextSelected = new Set(
+        [...previousSelected].filter((cameraName) => availableNames.has(cameraName))
+      );
+      if (
+        nextSelected.size === previousSelected.size &&
+        [...nextSelected].every((cameraName) => previousSelected.has(cameraName))
+      ) {
+        return previousSelected;
+      }
+      return nextSelected;
+    });
+  }, [sidebarCameraList]);
 
   const setUsername = (username) => {
     _setUsername(username);
@@ -529,10 +612,7 @@ export function Header({ version = VERSION }) {
   }, [cameraListCollapsed]);
 
   useEffect(() => {
-    const closeMenus = () => {
-      setOpenMenu(null);
-      setCameraContextMenu(null);
-    };
+    const closeMenus = () => setOpenMenu(null);
     window.addEventListener('click', closeMenus);
     return () => window.removeEventListener('click', closeMenus);
   }, []);
@@ -965,17 +1045,13 @@ export function Header({ version = VERSION }) {
   ), [activeNav, isAdmin, liveLayoutEditState.editing, liveLayoutEditState.layoutId, liveSelection.layout]);
 
   const addCamerasToLayout = useCallback(async (layoutId, cameraNames) => {
-    const cameras = (Array.isArray(cameraNames) ? cameraNames : [cameraNames])
-      .map((cameraName) => String(cameraName || '').trim())
-      .filter(Boolean);
+    const cameras = getCameraNameList(cameraNames);
     if (cameras.length === 0 || !isAdmin) return;
 
     if (canEditSidebarLayout(layoutId)) {
-      cameras.forEach((camera) => {
-        window.dispatchEvent(new CustomEvent('oneberry:add-live-camera', {
-          detail: { cameraName: camera, autoFit: false },
-        }));
-      });
+      window.dispatchEvent(new CustomEvent('oneberry:add-live-camera', {
+        detail: { cameraNames: cameras, cameraName: cameras[0], autoFit: false },
+      }));
       return;
     }
 
@@ -1003,10 +1079,6 @@ export function Header({ version = VERSION }) {
     await saveLiveLayouts(next, previous);
   }, [canEditSidebarLayout, isAdmin, liveLayouts, saveLiveLayouts]);
 
-  const addCameraToLayout = useCallback((layoutId, cameraName) => (
-    addCamerasToLayout(layoutId, [cameraName])
-  ), [addCamerasToLayout]);
-
   const removeCameraFromLayout = useCallback((layoutId, tile) => {
     if (!canEditSidebarLayout(layoutId) || !tile) return;
     window.dispatchEvent(new CustomEvent('oneberry:remove-live-layout-camera', {
@@ -1018,87 +1090,160 @@ export function Header({ version = VERSION }) {
     }));
   }, [canEditSidebarLayout]);
 
-  const getSelectedCameraNamesForAction = useCallback((cameraName = '') => {
-    const fallbackCamera = String(cameraName || '').trim();
-    const selected = Array.from(selectedSidebarCameraNames).filter(Boolean);
-    if (fallbackCamera && selected.includes(fallbackCamera)) {
-      return selected;
-    }
-    return fallbackCamera ? [fallbackCamera] : selected;
-  }, [selectedSidebarCameraNames]);
+  const handleCameraDragStart = useCallback((event) => {
+    const cameraName = event.currentTarget?.dataset?.cameraId || '';
+    if (!cameraName) return;
 
-  const handleCameraDragStart = useCallback((event, cameraName) => {
-    const cameraNames = getSelectedCameraNamesForAction(cameraName);
+    suppressNextCameraClickRef.current = true;
+    const cameraNames = selectedCameraNames.has(cameraName) && selectedCameraNameList.length > 0
+      ? selectedCameraNameList
+      : [cameraName];
     event.dataTransfer.effectAllowed = 'copy';
-    event.dataTransfer.setData('text/plain', cameraNames[0] || cameraName);
-    event.dataTransfer.setData('application/x-oneberry-camera', cameraNames[0] || cameraName);
+    event.dataTransfer.setData('text/plain', cameraNames[0]);
+    event.dataTransfer.setData('application/x-oneberry-camera', cameraNames[0]);
     event.dataTransfer.setData('application/x-oneberry-cameras', JSON.stringify(cameraNames));
-  }, [getSelectedCameraNamesForAction]);
-
-  const handleSourceCameraClick = useCallback((event, cameraName) => {
-    event.preventDefault();
+    setSelectedCameraNames(new Set());
+    cameraSelectionBeforeClickRef.current = new Set();
     setCameraContextMenu(null);
-    const name = String(cameraName || '').trim();
-    if (!name) return;
+  }, [selectedCameraNameList, selectedCameraNames]);
 
-    setSelectedSidebarCameraNames((previousSelection) => {
-      const nextSelection = new Set(previousSelection);
-      if (nextSelection.has(name)) {
-        nextSelection.delete(name);
+  const handleCameraDragEnd = useCallback(() => {
+    window.setTimeout(() => {
+      suppressNextCameraClickRef.current = false;
+    }, 50);
+  }, []);
+
+  const handleSourceCameraClick = useCallback((event) => {
+    const cameraName = event.currentTarget?.dataset?.cameraId || '';
+    if (!cameraName) return;
+
+    event.preventDefault();
+    if (event.detail > 1) return;
+    if (suppressNextCameraClickRef.current) return;
+
+    setCameraContextMenu(null);
+    setSelectedCameraNames((previousSelected) => {
+      cameraSelectionBeforeClickRef.current = new Set(previousSelected);
+      const nextSelected = new Set(previousSelected);
+      if (nextSelected.has(cameraName)) {
+        nextSelected.delete(cameraName);
       } else {
-        nextSelection.add(name);
+        nextSelected.add(cameraName);
       }
-      return nextSelection.size > 0 ? nextSelection : new Set([name]);
+      return nextSelected;
     });
   }, []);
 
-  const handleSourceCameraDoubleClick = useCallback((event, cameraHref, cameraName) => {
+  const handleSourceCameraDoubleClick = useCallback((event) => {
+    const cameraName = event.currentTarget?.dataset?.cameraId || '';
+    const cameraHref = event.currentTarget?.getAttribute('href') || makeLiveHref({ cols: 1, rows: 1, stream: cameraName });
+    if (!cameraName) return;
+
     if (activeNav !== 'nav-live' || typeof window === 'undefined') {
       forceNavigation(cameraHref, event);
       return;
     }
 
-    event.preventDefault();
-    window.dispatchEvent(new CustomEvent('oneberry:add-live-camera', {
-      detail: { cameraName, autoFit: true },
-    }));
-  }, [activeNav]);
-
-  const handleSourceCameraContextMenu = useCallback((event, cameraName) => {
-    event.preventDefault();
-    event.stopPropagation();
-    const name = String(cameraName || '').trim();
-    if (!name) return;
-    const cameraNames = getSelectedCameraNamesForAction(name);
-
-    if (!selectedSidebarCameraNames.has(name)) {
-      setSelectedSidebarCameraNames(new Set([name]));
-    }
-
-    setCameraContextMenu({
-      x: event.clientX,
-      y: event.clientY,
-      cameraNames,
-    });
-  }, [getSelectedCameraNamesForAction, selectedSidebarCameraNames]);
-
-  const addCamerasToBlankWorkspace = useCallback((cameraNames) => {
-    const cameras = (Array.isArray(cameraNames) ? cameraNames : [cameraNames])
-      .map((cameraName) => String(cameraName || '').trim())
-      .filter(Boolean);
-    if (cameras.length === 0) return;
-
-    if (activeNav !== 'nav-live' || typeof window === 'undefined') {
-      forceNavigation(makeLiveHref({ layout: 'none', stream: cameras[0] }), null);
+    const selectedBeforeClick = cameraSelectionBeforeClickRef.current;
+    const cameraNames = selectedBeforeClick.has(cameraName)
+      ? sidebarCameraList
+        .map((stream) => stream.name)
+        .filter((name) => selectedBeforeClick.has(name))
+      : selectedCameraNames.has(cameraName) && selectedCameraNameList.length > 0
+        ? selectedCameraNameList
+        : [cameraName];
+    const activationCameraNames = cameraNames.length > 0
+      ? cameraNames
+      : [cameraName];
+    if (!liveSelection.layout) {
+      event.preventDefault();
+      window.dispatchEvent(new CustomEvent('oneberry:add-live-camera', {
+        detail: { cameraNames: activationCameraNames, cameraName: activationCameraNames[0], autoFit: true },
+      }));
+      setSelectedCameraNames(new Set());
+      cameraSelectionBeforeClickRef.current = new Set();
+      setCameraContextMenu(null);
       return;
     }
 
-    cameras.forEach((cameraName) => {
+    if (canEditSidebarLayout(liveSelection.layout)) {
+      event.preventDefault();
       window.dispatchEvent(new CustomEvent('oneberry:add-live-camera', {
-        detail: { cameraName, autoFit: true },
+        detail: { cameraNames: activationCameraNames, cameraName: activationCameraNames[0], autoFit: false },
       }));
+      setSelectedCameraNames(new Set());
+      cameraSelectionBeforeClickRef.current = new Set();
+      setCameraContextMenu(null);
+      return;
+    }
+
+    setSelectedCameraNames(new Set());
+    cameraSelectionBeforeClickRef.current = new Set();
+    setCameraContextMenu(null);
+    forceNavigation(makeLiveHref({ layout: 'none', stream: cameraName }), event);
+  }, [activeNav, canEditSidebarLayout, liveSelection.layout, selectedCameraNameList, selectedCameraNames, sidebarCameraList]);
+
+  const handleSourceCameraKeyDown = useCallback((event) => {
+    if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
+
+    const cameraCount = sidebarCameraList.length;
+    if (cameraCount === 0) return;
+
+    event.preventDefault();
+    setCameraContextMenu(null);
+    const anchorCameraName = selectedCameraNameList[selectedCameraNameList.length - 1] || '';
+    const selectedIndex = sidebarCameraList.findIndex((stream) => stream.name === anchorCameraName);
+    const nextIndex = event.key === 'ArrowDown'
+      ? (selectedIndex < 0 ? 0 : Math.min(cameraCount - 1, selectedIndex + 1))
+      : (selectedIndex < 0 ? cameraCount - 1 : Math.max(0, selectedIndex - 1));
+    const nextCameraId = sidebarCameraList[nextIndex]?.name || '';
+    if (nextCameraId) {
+      setSelectedCameraNames(new Set([nextCameraId]));
+    }
+  }, [selectedCameraNameList, sidebarCameraList]);
+
+  const handleSourceCameraContextMenu = useCallback((event) => {
+    const cameraName = event.currentTarget?.dataset?.cameraId || '';
+    if (!cameraName) return;
+
+    event.preventDefault();
+    setOpenMenu(null);
+    setSelectedCameraNames((previousSelected) => {
+      if (previousSelected.has(cameraName)) return previousSelected;
+      return new Set([cameraName]);
     });
-  }, [activeNav]);
+    setCameraContextMenu({
+      cameraName,
+      x: event.clientX,
+      y: event.clientY,
+    });
+  }, []);
+
+  const handleAddContextCamerasToWorkspace = useCallback(() => {
+    if (!cameraContextMenu) return;
+    const cameraNames = selectedCameraNames.has(cameraContextMenu.cameraName) && selectedCameraNameList.length > 0
+      ? selectedCameraNameList
+      : [cameraContextMenu.cameraName];
+
+    window.dispatchEvent(new CustomEvent('oneberry:add-live-camera', {
+      detail: { cameraNames, cameraName: cameraNames[0], autoFit: false },
+    }));
+    setSelectedCameraNames(new Set());
+    cameraSelectionBeforeClickRef.current = new Set();
+    setCameraContextMenu(null);
+  }, [cameraContextMenu, selectedCameraNameList, selectedCameraNames]);
+
+  const handleAddContextCamerasToLayout = useCallback(async (layoutId) => {
+    if (!cameraContextMenu) return;
+    const cameraNames = selectedCameraNames.has(cameraContextMenu.cameraName) && selectedCameraNameList.length > 0
+      ? selectedCameraNameList
+      : [cameraContextMenu.cameraName];
+
+    await addCamerasToLayout(layoutId, cameraNames);
+    setSelectedCameraNames(new Set());
+    cameraSelectionBeforeClickRef.current = new Set();
+    setCameraContextMenu(null);
+  }, [addCamerasToLayout, cameraContextMenu, selectedCameraNameList, selectedCameraNames]);
 
   const openDiscoveredCameraInStreams = useCallback((event, device) => {
     if (!device?.ip_address) return;
@@ -1126,30 +1271,33 @@ export function Header({ version = VERSION }) {
     }
 
     return (
-      <ul className="sidebar-camera-tree sidebar-live-camera-list">
+      <ul
+        className="sidebar-camera-tree sidebar-live-camera-list"
+        role="listbox"
+        aria-label="Camera list"
+        tabIndex={0}
+        onKeyDown={handleSourceCameraKeyDown}
+      >
         {sidebarCameraList.map((stream) => {
           const cameraHref = makeLiveHref({ cols: 1, rows: 1, stream: stream.name });
           const statusKind = getStreamStatusKind(stream);
           const cameraActive = activeNav === 'nav-live' && liveSelection.stream === stream.name;
-          const cameraSelected = selectedSidebarCameraNames.has(stream.name);
+          const cameraSelected = selectedCameraNames.has(stream.name);
           return (
-            <li key={stream.name} className={`sidebar-camera-node ${cameraActive || cameraSelected ? 'is-active' : ''}`}>
-              <a
-                href={cameraHref}
-                className={`sidebar-camera-link ${cameraActive || cameraSelected ? 'is-active' : ''}`}
-                title={`${stream.name} - ${t(`sidebar.status.${statusKind}`)}`}
-                aria-current={cameraActive ? 'page' : undefined}
-                draggable={true}
-                onDragStart={(event) => handleCameraDragStart(event, stream.name)}
-                onClick={(event) => handleSourceCameraClick(event, stream.name)}
-                onDoubleClick={(event) => handleSourceCameraDoubleClick(event, cameraHref, stream.name)}
-                onContextMenu={(event) => handleSourceCameraContextMenu(event, stream.name)}
-              >
-                <span className={`sidebar-camera-status is-${statusKind}`} aria-hidden="true"></span>
-                <TreeIcon type="camera" />
-                <span className="sidebar-camera-name">{stream.name}</span>
-              </a>
-            </li>
+            <SidebarCameraRow
+              key={stream.name}
+              cameraHref={cameraHref}
+              cameraName={stream.name}
+              statusKind={statusKind}
+              statusLabel={t(`sidebar.status.${statusKind}`)}
+              isActive={cameraActive}
+              isSelected={cameraSelected}
+              onCameraClick={handleSourceCameraClick}
+              onCameraDoubleClick={handleSourceCameraDoubleClick}
+              onCameraDragStart={handleCameraDragStart}
+              onCameraDragEnd={handleCameraDragEnd}
+              onCameraContextMenu={handleSourceCameraContextMenu}
+            />
           );
         })}
         {sidebarDiscoveredCameraList.map((device) => (
@@ -1195,6 +1343,53 @@ export function Header({ version = VERSION }) {
       )}
     </div>
   );
+
+  const renderCameraContextMenu = () => {
+    if (!cameraContextMenu) return null;
+
+    const cameraNames = selectedCameraNames.has(cameraContextMenu.cameraName) && selectedCameraNameList.length > 0
+      ? selectedCameraNameList
+      : [cameraContextMenu.cameraName];
+    const canAddToCurrentWorkspace = activeNav === 'nav-live';
+    const hasSavedLayouts = isAdmin && liveLayouts.layouts.length > 0;
+
+    return (
+      <div
+        className="sidebar-camera-context-menu"
+        role="menu"
+        style={{ left: `${cameraContextMenu.x}px`, top: `${cameraContextMenu.y}px` }}
+        onClick={(event) => event.stopPropagation()}
+        onContextMenu={(event) => event.preventDefault()}
+      >
+        <div className="sidebar-camera-context-title">
+          {cameraNames.length === 1 ? cameraNames[0] : `${cameraNames.length} cameras selected`}
+        </div>
+        <div className="sidebar-camera-context-group" aria-label="Add to layout">
+          <div className="sidebar-camera-context-label">Add to layout</div>
+          {canAddToCurrentWorkspace && (
+            <button type="button" role="menuitem" onClick={handleAddContextCamerasToWorkspace}>
+              Blank layout
+            </button>
+          )}
+          {hasSavedLayouts && liveLayouts.layouts.map((layout) => (
+            <button
+              type="button"
+              role="menuitem"
+              key={layout.id}
+              onClick={() => handleAddContextCamerasToLayout(layout.id)}
+            >
+              {layout.name}
+            </button>
+          ))}
+          {!canAddToCurrentWorkspace && !hasSavedLayouts && (
+            <button type="button" role="menuitem" disabled>
+              No layouts available
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  };
 
   const renderLayoutMenu = (layout) => {
     if (!isAdmin) return null;
@@ -1251,6 +1446,14 @@ export function Header({ version = VERSION }) {
         <span className="sidebar-section-label">Layouts</span>
         {renderLayoutMenu(null)}
       </div>
+      <a
+        href={makeLiveHref({ layout: 'workspace' })}
+        className={`sidebar-blank-layout-button ${activeNav === 'nav-live' && !liveSelection.layout && !liveSelection.stream ? 'is-active' : ''}`}
+        onClick={(event) => forceNavigation(makeLiveHref({ layout: 'workspace' }), event)}
+      >
+        <TreeIcon type="area" />
+        <span>Blank layout</span>
+      </a>
       {creatingLayout && (
         <form className="sidebar-layout-inline-form" onSubmit={handleCreateLayout}>
           <input
@@ -1298,14 +1501,19 @@ export function Header({ version = VERSION }) {
                   if (!types.includes('application/x-oneberry-camera')) return;
                   event.preventDefault();
                   let cameraNames = [];
-                  try {
-                    cameraNames = JSON.parse(event.dataTransfer.getData('application/x-oneberry-cameras') || '[]');
-                  } catch {
-                    cameraNames = [];
+                  if (types.includes('application/x-oneberry-cameras')) {
+                    try {
+                      cameraNames = getCameraNameList(JSON.parse(event.dataTransfer.getData('application/x-oneberry-cameras')));
+                    } catch (error) {
+                      cameraNames = [];
+                    }
                   }
                   const cameraName = event.dataTransfer.getData('application/x-oneberry-camera') || event.dataTransfer.getData('text/plain');
                   setDragOverLayoutId('');
-                  addCamerasToLayout(layout.id, Array.isArray(cameraNames) && cameraNames.length > 0 ? cameraNames : [cameraName]);
+                  addCamerasToLayout(layout.id, cameraNames.length > 0 ? cameraNames : [cameraName]);
+                  setSelectedCameraNames(new Set());
+                  cameraSelectionBeforeClickRef.current = new Set();
+                  setCameraContextMenu(null);
                 }}
               >
                 <div className="sidebar-layout-row">
@@ -1473,6 +1681,7 @@ export function Header({ version = VERSION }) {
           onPointerDown={handleSidebarDragStart}
         />
       </header>
+      {renderCameraContextMenu()}
       {isProfileModalOpen && currentUser && (
         <EditUserModal
           currentUser={currentUser}
@@ -1490,48 +1699,6 @@ export function Header({ version = VERSION }) {
           showAllowedLoginCidrsField={false}
           showClearLoginLockoutButton={false}
         />
-      )}
-      {cameraContextMenu && (
-        <div
-          className="sidebar-layout-menu sidebar-camera-context-menu"
-          role="menu"
-          style={{
-            position: 'fixed',
-            left: `${cameraContextMenu.x}px`,
-            top: `${cameraContextMenu.y}px`,
-            right: 'auto',
-            bottom: 'auto',
-          }}
-          onClick={(event) => event.stopPropagation()}
-          onContextMenu={(event) => event.preventDefault()}
-        >
-          <div className="sidebar-camera-context-label">
-            Add {cameraContextMenu.cameraNames.length > 1 ? `${cameraContextMenu.cameraNames.length} cameras` : cameraContextMenu.cameraNames[0]} to
-          </div>
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => {
-              addCamerasToBlankWorkspace(cameraContextMenu.cameraNames);
-              setCameraContextMenu(null);
-            }}
-          >
-            Blank layout
-          </button>
-          {liveLayouts.layouts.map((layout) => (
-            <button
-              key={layout.id}
-              type="button"
-              role="menuitem"
-              onClick={() => {
-                addCamerasToLayout(layout.id, cameraContextMenu.cameraNames);
-                setCameraContextMenu(null);
-              }}
-            >
-              {layout.name}
-            </button>
-          ))}
-        </div>
       )}
       </>
   );

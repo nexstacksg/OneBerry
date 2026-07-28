@@ -78,6 +78,26 @@ function getLiveInitDelay({ isWebRTC, useMSE, go2rtcAvailable, index, totalStrea
   return Math.ceil((index - immediateCount + 1) / 4) * 150;
 }
 
+function getDraggedCameraNames(dataTransfer) {
+  const types = Array.from(dataTransfer?.types || []);
+  if (!types.includes('application/x-oneberry-camera')) return [];
+
+  if (types.includes('application/x-oneberry-cameras')) {
+    try {
+      const parsed = JSON.parse(dataTransfer.getData('application/x-oneberry-cameras'));
+      if (Array.isArray(parsed)) {
+        const cameraNames = parsed.map((cameraName) => String(cameraName || '').trim()).filter(Boolean);
+        if (cameraNames.length > 0) return cameraNames;
+      }
+    } catch (error) {
+      // Fall back to the single-camera drag payload below.
+    }
+  }
+
+  const cameraName = dataTransfer.getData('application/x-oneberry-camera') || dataTransfer.getData('text/plain');
+  return cameraName ? [cameraName] : [];
+}
+
 function createWorkspaceTile(cameraId, tile = {}) {
   return {
     type: 'camera',
@@ -298,6 +318,65 @@ function buildResponsiveWorkspaceLayout(workspaceTiles) {
   });
 }
 
+function buildWorkspaceInsertionCells(count, cols, rows) {
+  const [layoutCols, layoutRows] = computeOptimalGrid(count);
+  return Array.from({ length: count }, (_, index) => {
+    const col = index % layoutCols;
+    const row = Math.floor(index / layoutCols);
+    const x = Math.floor((col * cols) / layoutCols);
+    const y = Math.floor((row * rows) / layoutRows);
+    const nextX = Math.floor(((col + 1) * cols) / layoutCols);
+    const nextY = Math.floor(((row + 1) * rows) / layoutRows);
+    return {
+      x,
+      y,
+      w: Math.max(1, nextX - x),
+      h: Math.max(1, nextY - y),
+    };
+  });
+}
+
+function getWorkspaceInsertionIndex(cells, placement) {
+  if (!placement) return cells.length - 1;
+
+  const pointX = Number(placement.x) || 0;
+  const pointY = Number(placement.y) || 0;
+  let bestIndex = cells.length - 1;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  cells.forEach((cell, index) => {
+    const centerX = cell.x + (cell.w / 2);
+    const centerY = cell.y + (cell.h / 2);
+    const distance = Math.abs(centerX - pointX) + Math.abs(centerY - pointY);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      bestIndex = index;
+    }
+  });
+  return bestIndex;
+}
+
+function insertWorkspaceTileWithBalancedSpace(workspaceTiles, tile, cols, rows, placement = null) {
+  const safeCols = Math.max(1, cols || 1);
+  const safeRows = Math.max(1, rows || 1);
+  const nextCount = Math.max(1, workspaceTiles.length + 1);
+  const cells = buildWorkspaceInsertionCells(nextCount, safeCols, safeRows);
+  const insertIndex = getWorkspaceInsertionIndex(cells, placement);
+  const orderedTiles = workspaceTiles
+    .map((workspaceTile, index) => ({ workspaceTile, index }))
+    .sort((a, b) => (
+      (Number(a.workspaceTile.y) || 0) - (Number(b.workspaceTile.y) || 0) ||
+      (Number(a.workspaceTile.x) || 0) - (Number(b.workspaceTile.x) || 0) ||
+      a.index - b.index
+    ))
+    .map(({ workspaceTile }) => workspaceTile);
+
+  orderedTiles.splice(insertIndex, 0, tile);
+  return orderedTiles.map((workspaceTile, index) => normalizeWorkspaceBounds({
+    ...workspaceTile,
+    ...cells[index],
+  }, safeCols, safeRows));
+}
+
 function scaleLayoutTileToWorkspace(tile, layoutCols, layoutRows) {
   const sourceCols = Number.isFinite(Number(layoutCols)) && Number(layoutCols) > 0 ? Number(layoutCols) : WORKSPACE_GRID_COLS;
   const sourceRows = Number.isFinite(Number(layoutRows)) && Number(layoutRows) > 0 ? Number(layoutRows) : WORKSPACE_GRID_ROWS;
@@ -445,6 +524,7 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
   const saveLayoutTimeoutRef = useRef(null);
   const workspaceGridRef = useRef(null);
   const workspacePointerRef = useRef(null);
+  const workspaceAutoExpandedDropRef = useRef(false);
   const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false);
   const [addCameraMenuOpen, setAddCameraMenuOpen] = useState(false);
   const [layoutEditMode, setLayoutEditMode] = useState(false);
@@ -982,6 +1062,7 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
     }
 
     const shouldAutoTile = !activeLayoutId && !placement && options.autoFit !== false;
+    workspaceAutoExpandedDropRef.current = false;
     setWorkspaceStarted(true);
     setWorkspaceTiles((previousTiles) => {
       const candidateTile = createWorkspaceTile(cameraId);
@@ -1040,12 +1121,13 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
       const collision = findTileCollision(nextTile, previousTiles);
       if (collision) {
         if (!openSlot) {
-          const cameraTiles = previousTiles.filter((tile) => tile.type !== 'slot');
-          const slots = previousTiles.filter((tile) => tile.type === 'slot');
-          return [
-            ...buildResponsiveWorkspaceLayout([...cameraTiles, candidateTile]),
-            ...slots,
-          ];
+          return insertWorkspaceTileWithBalancedSpace(
+            previousTiles,
+            candidateTile,
+            workspaceGridCols,
+            workspaceGridRows,
+            placement
+          );
         }
         const fallback = normalizeWorkspaceBounds(createWorkspaceTile(cameraId, {
           x: openSlot.x,
@@ -1059,7 +1141,7 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
       return [...previousTiles, nextTile];
     });
     if (placement) {
-      setWorkspaceAutoGrid(false);
+      setWorkspaceAutoGrid(workspaceAutoExpandedDropRef.current);
     } else if (shouldAutoTile || (workspaceAutoGrid && options.autoFit !== false)) {
       setWorkspaceAutoGrid(true);
     }
@@ -1310,9 +1392,15 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
 
   useEffect(() => {
     const handleAddCamera = (event) => {
-      addWorkspaceTile(event.detail?.cameraName, null, {
-        autoFit: event.detail?.autoFit !== false,
-      });
+      const cameraNames = Array.isArray(event.detail?.cameraNames)
+        ? event.detail.cameraNames
+        : [event.detail?.cameraName];
+      cameraNames
+        .map((cameraName) => String(cameraName || '').trim())
+        .filter(Boolean)
+        .forEach((cameraName) => addWorkspaceTile(cameraName, null, {
+          autoFit: event.detail?.autoFit !== false,
+        }));
     };
 
     window.addEventListener('oneberry:add-live-camera', handleAddCamera);
@@ -1988,20 +2076,13 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
           }}
           onDrop={(event) => {
             if (reorderMode || workspaceLocked) return;
-            const types = Array.from(event.dataTransfer.types || []);
-            if (!types.includes('application/x-oneberry-camera')) return;
-            const cameraName = event.dataTransfer.getData('application/x-oneberry-camera') || event.dataTransfer.getData('text/plain');
-            if (!cameraName) return;
-            let cameraNames = [];
-            try {
-              cameraNames = JSON.parse(event.dataTransfer.getData('application/x-oneberry-cameras') || '[]');
-            } catch {
-              cameraNames = [];
-            }
+            const cameraNames = getDraggedCameraNames(event.dataTransfer);
+            if (cameraNames.length === 0) return;
             event.preventDefault();
-            const dropPoint = getWorkspaceGridPoint(event);
-            (Array.isArray(cameraNames) && cameraNames.length > 0 ? cameraNames : [cameraName])
-              .forEach((name, index) => addWorkspaceTile(name, index === 0 ? dropPoint : null));
+            const placement = getWorkspaceGridPoint(event);
+            cameraNames.forEach((cameraName, index) => {
+              addWorkspaceTile(cameraName, index === 0 ? placement : null, { autoFit: false });
+            });
           }}
         >
           {isLoadingStreams ? (
@@ -2086,20 +2167,13 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
                       }}
                       onDrop={(event) => {
                         if (workspaceLocked) return;
-                        const types = Array.from(event.dataTransfer.types || []);
-                        if (!types.includes('application/x-oneberry-camera')) return;
-                        const cameraName = event.dataTransfer.getData('application/x-oneberry-camera') || event.dataTransfer.getData('text/plain');
-                        if (!cameraName) return;
-                        let cameraNames = [];
-                        try {
-                          cameraNames = JSON.parse(event.dataTransfer.getData('application/x-oneberry-cameras') || '[]');
-                        } catch {
-                          cameraNames = [];
-                        }
+                        const cameraNames = getDraggedCameraNames(event.dataTransfer);
+                        if (cameraNames.length === 0) return;
                         event.preventDefault();
                         event.stopPropagation();
-                        (Array.isArray(cameraNames) && cameraNames.length > 0 ? cameraNames : [cameraName])
-                          .forEach((name, index) => addWorkspaceTile(name, index === 0 ? { x: workspaceTile.x, y: workspaceTile.y } : null));
+                        cameraNames.forEach((cameraName, cameraIndex) => {
+                          addWorkspaceTile(cameraName, cameraIndex === 0 ? { x: workspaceTile.x, y: workspaceTile.y } : null, { autoFit: false });
+                        });
                       }}
                     >
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">

@@ -10,6 +10,10 @@
  */
 
 /* Sortable table headers - using @apply for Tailwind integration */
+.recordings-content {
+    min-width: 0;
+}
+
 .sortable {
     @apply cursor-pointer relative select-none;
 }
@@ -74,10 +78,6 @@
 
     .recordings-layout {
         @apply gap-3;
-    }
-
-    .recordings-content {
-        min-width: 0;
     }
 
     .filters-sidebar {
