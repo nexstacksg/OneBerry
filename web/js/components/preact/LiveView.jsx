@@ -25,11 +25,21 @@ const WORKSPACE_GRID_ROWS = 27;
 const DEFAULT_WORKSPACE_TILE_W = 24;
 const DEFAULT_WORKSPACE_TILE_H = 13;
 const WORKSPACE_LAYOUT_PRESETS = [
-  { count: 2, cols: 2, rows: 1, label: '2 cameras' },
-  { count: 4, cols: 2, rows: 2, label: '4 cameras' },
-  { count: 8, cols: 4, rows: 2, label: '8 cameras' },
-  { count: 16, cols: 4, rows: 4, label: '16 cameras' },
+  { count: 4, cols: 2, rows: 2, label: '2x2' },
+  { count: 9, cols: 3, rows: 3, label: '3x3' },
+  { count: 16, cols: 4, rows: 4, label: '4x4' },
+  { count: 25, cols: 5, rows: 5, label: '5x5' },
+  { count: 36, cols: 6, rows: 6, label: '6x6' },
+  { count: 64, cols: 8, rows: 8, label: '8x8' },
 ];
+
+const getWorkspacePresetLabel = (tiles) => {
+  const safeTiles = Array.isArray(tiles) ? tiles : [];
+  const slotCount = safeTiles.filter((tile) => tile.type === 'slot').length;
+  const count = Math.max(slotCount, safeTiles.length);
+  const matchedPreset = WORKSPACE_LAYOUT_PRESETS.find((preset) => preset.count === count);
+  return matchedPreset?.label || WORKSPACE_LAYOUT_PRESETS[0].label;
+};
 
 /**
  * Convert the old single-string layout value to cols/rows for backward compat.
@@ -526,7 +536,7 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
   const workspacePointerRef = useRef(null);
   const workspaceAutoExpandedDropRef = useRef(false);
   const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false);
-  const [addCameraMenuOpen, setAddCameraMenuOpen] = useState(false);
+  const [layoutPresetMenuOpen, setLayoutPresetMenuOpen] = useState(false);
   const [layoutEditMode, setLayoutEditMode] = useState(false);
   const [urlStreamHydrated, setUrlStreamHydrated] = useState(false);
   const [removingTileIds, setRemovingTileIds] = useState(new Set());
@@ -1719,6 +1729,7 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
   const workspaceEmptySlotCount = isWorkspaceMode
     ? workspaceTiles.filter((tile) => tile.type === 'slot').length
     : 0;
+  const workspacePresetLabel = getWorkspacePresetLabel(workspaceTiles);
 
   const gridHasEmptySlots = !isWorkspaceMode
     && !isLoadingStreams
@@ -1982,47 +1993,50 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
               </small>
             </div>
             <div className="live-workspace-header-actions">
-              <div className="live-workspace-add-wrap">
-                <button
-                  type="button"
-                  className="live-workspace-add-button"
-                  onClick={() => setAddCameraMenuOpen((open) => !open)}
-                  disabled={workspaceLocked}
-                  title={workspaceLocked ? 'Click Edit Layout from the menu before adding cameras' : 'Add camera or empty layout slots'}
-                  aria-expanded={addCameraMenuOpen}
-                >
-                  + Add Camera
-                </button>
-                {addCameraMenuOpen && (
-                  <div className="live-workspace-add-menu" role="menu">
-                    <button
-                      type="button"
-                      role="menuitem"
-                      disabled={streams.length === 0}
-                      onClick={() => {
-                        setAddCameraMenuOpen(false);
-                        const firstCamera = streams[0]?.name;
-                        if (firstCamera) addWorkspaceTile(firstCamera);
-                      }}
-                    >
-                      Add first camera
-                    </button>
-                    <div className="live-workspace-menu-label">Empty layout</div>
-                    {WORKSPACE_LAYOUT_PRESETS.map((preset) => (
-                      <button
-                        key={preset.count}
-                        type="button"
-                        role="menuitem"
-                        onClick={() => {
-                          setAddCameraMenuOpen(false);
-                          applyWorkspacePreset(preset);
-                        }}
-                      >
-                        {preset.label}
-                      </button>
-                    ))}
-                  </div>
-                )}
+              <div className="live-workspace-layout-control">
+                <span className="live-workspace-layout-label">Layout:</span>
+                <div className="live-workspace-preset-wrap">
+                  <button
+                    type="button"
+                    className="live-workspace-preset-button"
+                    onClick={() => {
+                      setWorkspaceMenuOpen(false);
+                      setLayoutPresetMenuOpen((open) => !open);
+                    }}
+                    disabled={workspaceLocked}
+                    title={workspaceLocked ? 'Click Edit Layout from the menu before changing this saved layout' : 'Choose an empty grid layout'}
+                    aria-label="Choose empty grid layout"
+                    aria-expanded={layoutPresetMenuOpen}
+                  >
+                    <svg className="live-workspace-preset-icon" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                      <rect x="3" y="3" width="4" height="4" rx="0.6" stroke="currentColor" strokeWidth="1.3" />
+                      <rect x="9" y="3" width="4" height="4" rx="0.6" stroke="currentColor" strokeWidth="1.3" />
+                      <rect x="3" y="9" width="4" height="4" rx="0.6" stroke="currentColor" strokeWidth="1.3" />
+                      <rect x="9" y="9" width="4" height="4" rx="0.6" stroke="currentColor" strokeWidth="1.3" />
+                    </svg>
+                    <span>{workspacePresetLabel}</span>
+                    <svg className="live-workspace-preset-chevron" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                      <path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  </button>
+                  {layoutPresetMenuOpen && (
+                    <div className="live-workspace-preset-menu" role="menu">
+                      {WORKSPACE_LAYOUT_PRESETS.map((preset) => (
+                        <button
+                          key={preset.label}
+                          type="button"
+                          role="menuitem"
+                          onClick={() => {
+                            setLayoutPresetMenuOpen(false);
+                            applyWorkspacePreset(preset);
+                          }}
+                        >
+                          {preset.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
               <div className="live-workspace-menu-wrap">
                 <button
@@ -2030,7 +2044,10 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
                   className="live-workspace-menu-button"
                   aria-label="Open workspace layout menu"
                   aria-expanded={workspaceMenuOpen}
-                  onClick={() => setWorkspaceMenuOpen((open) => !open)}
+                  onClick={() => {
+                    setLayoutPresetMenuOpen(false);
+                    setWorkspaceMenuOpen((open) => !open);
+                  }}
                 >
                   <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
                     <circle cx="8" cy="3.25" r="1.2" />

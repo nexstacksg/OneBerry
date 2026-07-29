@@ -179,11 +179,23 @@
     gap: 0.5rem;
 }
 
-.live-workspace-add-wrap {
+.live-workspace-layout-control {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+}
+
+.live-workspace-layout-label {
+    color: hsl(var(--muted-foreground));
+    font-size: 0.78rem;
+    font-weight: 650;
+}
+
+.live-workspace-preset-wrap {
     position: relative;
 }
 
-.live-workspace-add-button,
+.live-workspace-preset-button,
 .live-workspace-menu-button {
     display: inline-flex;
     align-items: center;
@@ -199,15 +211,36 @@
     transition: border-color 160ms ease, background-color 160ms ease;
 }
 
-.live-workspace-add-button:hover,
+.live-workspace-preset-button:hover,
 .live-workspace-menu-button:hover {
     border-color: hsl(var(--primary) / 0.45);
     background: hsl(var(--primary) / 0.08);
 }
 
-.live-workspace-add-button:disabled {
+.live-workspace-preset-button:disabled {
     cursor: not-allowed;
     opacity: 0.48;
+}
+
+.live-workspace-preset-button {
+    gap: 0.32rem;
+    min-width: 4.9rem;
+    justify-content: space-between;
+    padding: 0 0.5rem;
+}
+
+.live-workspace-preset-icon {
+    width: 0.92rem;
+    height: 0.92rem;
+    flex: 0 0 auto;
+    opacity: 0.78;
+}
+
+.live-workspace-preset-chevron {
+    width: 0.78rem;
+    height: 0.78rem;
+    flex: 0 0 auto;
+    opacity: 0.68;
 }
 
 .live-workspace-menu-wrap {
@@ -239,13 +272,13 @@
     box-shadow: 0 18px 40px -24px hsl(var(--foreground) / 0.65);
 }
 
-.live-workspace-add-menu {
+.live-workspace-preset-menu {
     position: absolute;
     right: 0;
     top: calc(100% + 0.35rem);
     z-index: 80;
     display: flex;
-    min-width: 10.5rem;
+    min-width: 7.5rem;
     flex-direction: column;
     border: 1px solid hsl(var(--border) / 0.78);
     border-radius: 0.5rem;
@@ -263,7 +296,7 @@
     text-align: left;
 }
 
-.live-workspace-add-menu button {
+.live-workspace-preset-menu button {
     width: 100%;
     border-radius: 0.35rem;
     color: hsl(var(--foreground));
@@ -273,23 +306,14 @@
 }
 
 .live-workspace-menu button:hover:not(:disabled),
-.live-workspace-add-menu button:hover:not(:disabled) {
+.live-workspace-preset-menu button:hover:not(:disabled) {
     background: hsl(var(--muted) / 0.75);
 }
 
 .live-workspace-menu button:disabled,
-.live-workspace-add-menu button:disabled {
+.live-workspace-preset-menu button:disabled {
     cursor: not-allowed;
     opacity: 0.42;
-}
-
-.live-workspace-menu-label {
-    padding: 0.4rem 0.55rem 0.22rem;
-    color: hsl(var(--muted-foreground));
-    font-size: 0.68rem;
-    font-weight: 800;
-    letter-spacing: 0;
-    text-transform: uppercase;
 }
 
 .live-workspace-main .video-container {
@@ -1142,20 +1166,23 @@
         white-space: normal;
     }
 
-    .live-workspace-add-button {
+    .live-workspace-preset-button {
         min-height: 2.25rem;
-        flex: 1 1 9rem;
     }
 
-    .live-workspace-add-wrap {
-        flex: 1 1 9rem;
+    .live-workspace-layout-control {
+        justify-content: flex-start;
     }
 
-    .live-workspace-add-wrap .live-workspace-add-button {
-        width: 100%;
+    .live-workspace-preset-wrap {
+        flex: 0 0 auto;
     }
 
-    .live-workspace-add-menu {
+    .live-workspace-preset-wrap .live-workspace-preset-button {
+        width: auto;
+    }
+
+    .live-workspace-preset-menu {
         left: 0;
         right: auto;
     }
@@ -1312,11 +1339,6 @@
 
     .live-workspace-header {
         border-radius: 0.5rem;
-    }
-
-    .live-workspace-add-button {
-        padding: 0 0.5rem;
-        font-size: 0.75rem;
     }
 
     .video-cell {
