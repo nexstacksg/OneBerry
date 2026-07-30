@@ -98,6 +98,7 @@ function App() {
 
 // Render the App component when the DOM is loaded
 document.addEventListener('DOMContentLoaded', async () => {
+    document.body.classList.add('live-page-body');
     startLiveWarmup({ force: true });
     prefetchLiveViewData();
     void initI18n();
