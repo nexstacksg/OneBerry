@@ -177,6 +177,7 @@ function normalizeLiveLayouts(data = {}) {
 
           return {
             id: String(layout.id),
+            userId: layout.userId ?? layout.ownerUserId ?? layout.owner_user_id,
             name: String(layout.name).trim(),
             cols: Number.isFinite(Number(layout.cols)) ? Math.max(1, Math.floor(Number(layout.cols))) : undefined,
             rows: Number.isFinite(Number(layout.rows)) ? Math.max(1, Math.floor(Number(layout.rows))) : undefined,
@@ -1339,7 +1340,6 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
 
   useEffect(() => {
     if (!activeLayoutId || !activeLayout || !workspaceStarted || hydratedLayoutId !== activeLayoutId) return;
-    if (localStorage.getItem('userrole') === 'viewer') return;
 
     const tiles = serializeWorkspaceTilesForSave(workspaceTiles);
     const slots = serializeWorkspaceSlotsForSave(workspaceTiles);

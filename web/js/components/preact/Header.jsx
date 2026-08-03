@@ -234,6 +234,7 @@ const normalizeLiveLayouts = (data = {}) => ({
 
         return {
           id: String(layout.id),
+          userId: layout.userId ?? layout.ownerUserId ?? layout.owner_user_id,
           name: String(layout.name).trim(),
           cols: Number.isFinite(Number(layout.cols)) ? Math.max(1, Math.floor(Number(layout.cols))) : undefined,
           rows: Number.isFinite(Number(layout.rows)) ? Math.max(1, Math.floor(Number(layout.rows))) : undefined,
@@ -971,18 +972,20 @@ export function Header({ version = VERSION }) {
       const savedLayouts = normalizeLiveLayouts(saved);
       setLiveLayouts(savedLayouts);
       queryClient.setQueryData(['live-layouts'], savedLayouts);
+      return savedLayouts;
     } catch (error) {
       const rollback = normalizeLiveLayouts(previousLayouts);
       setLiveLayouts(rollback);
       queryClient.setQueryData(['live-layouts'], rollback);
       showStatusMessage(error.message || 'Failed to save layouts', 'error', 8000);
+      return rollback;
     }
   }, [liveLayouts]);
 
   const handleCreateLayout = useCallback(async (event) => {
     if (event) event.preventDefault();
     const name = newLayoutName.trim();
-    if (!name || !isAdmin) return;
+    if (!name) return;
 
     const previous = liveLayouts;
     const next = {
@@ -1001,19 +1004,18 @@ export function Header({ version = VERSION }) {
     setCreatingLayout(false);
     setNewLayoutName('');
     await saveLiveLayouts(next, previous);
-  }, [isAdmin, liveLayouts, newLayoutName, saveLiveLayouts]);
+  }, [liveLayouts, newLayoutName, saveLiveLayouts]);
 
   const startRenameLayout = useCallback((layout) => {
-    if (!isAdmin) return;
     setRenamingLayoutId(layout.id);
     setRenameLayoutName(layout.name);
     setOpenMenu(null);
-  }, [isAdmin]);
+  }, []);
 
   const handleRenameLayout = useCallback(async (event) => {
     if (event) event.preventDefault();
     const name = renameLayoutName.trim();
-    if (!name || !renamingLayoutId || !isAdmin) return;
+    if (!name || !renamingLayoutId) return;
 
     const previous = liveLayouts;
     const next = {
@@ -1024,29 +1026,27 @@ export function Header({ version = VERSION }) {
     setRenamingLayoutId('');
     setRenameLayoutName('');
     await saveLiveLayouts(next, previous);
-  }, [isAdmin, liveLayouts, renameLayoutName, renamingLayoutId, saveLiveLayouts]);
+  }, [liveLayouts, renameLayoutName, renamingLayoutId, saveLiveLayouts]);
 
   const deleteLayout = useCallback(async (layoutId) => {
-    if (!isAdmin) return;
     const previous = liveLayouts;
     const next = {
       layouts: liveLayouts.layouts.filter((layout) => layout.id !== layoutId),
     };
     setOpenMenu(null);
     await saveLiveLayouts(next, previous);
-  }, [isAdmin, liveLayouts, saveLiveLayouts]);
+  }, [liveLayouts, saveLiveLayouts]);
 
   const canEditSidebarLayout = useCallback((layoutId) => (
-    isAdmin &&
     activeNav === 'nav-live' &&
     liveSelection.layout === layoutId &&
     liveLayoutEditState.editing &&
     liveLayoutEditState.layoutId === layoutId
-  ), [activeNav, isAdmin, liveLayoutEditState.editing, liveLayoutEditState.layoutId, liveSelection.layout]);
+  ), [activeNav, liveLayoutEditState.editing, liveLayoutEditState.layoutId, liveSelection.layout]);
 
   const addCamerasToLayout = useCallback(async (layoutId, cameraNames) => {
     const cameras = getCameraNameList(cameraNames);
-    if (cameras.length === 0 || !isAdmin) return;
+    if (cameras.length === 0) return;
 
     if (canEditSidebarLayout(layoutId)) {
       window.dispatchEvent(new CustomEvent('oneberry:add-live-camera', {
@@ -1077,7 +1077,7 @@ export function Header({ version = VERSION }) {
     };
 
     await saveLiveLayouts(next, previous);
-  }, [canEditSidebarLayout, isAdmin, liveLayouts, saveLiveLayouts]);
+  }, [canEditSidebarLayout, liveLayouts, saveLiveLayouts]);
 
   const removeCameraFromLayout = useCallback((layoutId, tile) => {
     if (!canEditSidebarLayout(layoutId) || !tile) return;
@@ -1351,7 +1351,7 @@ export function Header({ version = VERSION }) {
       ? selectedCameraNameList
       : [cameraContextMenu.cameraName];
     const canAddToCurrentWorkspace = activeNav === 'nav-live';
-    const hasSavedLayouts = isAdmin && liveLayouts.layouts.length > 0;
+    const hasSavedLayouts = liveLayouts.layouts.length > 0;
 
     return (
       <div
@@ -1392,8 +1392,6 @@ export function Header({ version = VERSION }) {
   };
 
   const renderLayoutMenu = (layout) => {
-    if (!isAdmin) return null;
-
     return (
       <div className="sidebar-layout-menu-wrap" onClick={(event) => event.stopPropagation()}>
         <button

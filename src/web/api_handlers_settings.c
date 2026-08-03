@@ -68,6 +68,7 @@ static bool is_safe_storage_path(const char *path) {
 #define LIVE_LAYOUT_CAMERA_MAX_LEN 255
 #define LIVE_LAYOUT_TILE_MAX_LEN 96
 #define LIVE_LAYOUT_GRID_MAX_SIDE 64
+#define LIVE_LAYOUT_UNOWNED_USER_ID INT64_MIN
 
 static void trim_location_value(const char *src, char *dst, size_t dst_size) {
     if (!dst || dst_size == 0) return;
@@ -255,7 +256,88 @@ static bool is_valid_layout_tile_id(const char *value) {
     return true;
 }
 
-static bool add_normalized_layout_tile(cJSON *tiles, cJSON *cameras, const char *tile_id,
+static int64_t get_live_layout_user_id(cJSON *layout) {
+    cJSON *user_id_json = cJSON_GetObjectItem(layout, "userId");
+    if (!user_id_json) user_id_json = cJSON_GetObjectItem(layout, "ownerUserId");
+    if (!user_id_json) user_id_json = cJSON_GetObjectItem(layout, "owner_user_id");
+
+    if (cJSON_IsNumber(user_id_json)) {
+        return (int64_t)user_id_json->valuedouble;
+    }
+    if (cJSON_IsString(user_id_json) && user_id_json->valuestring && user_id_json->valuestring[0] != '\0') {
+        char *end = NULL;
+        long long parsed = strtoll(user_id_json->valuestring, &end, 10);
+        if (end && *end == '\0') {
+            return (int64_t)parsed;
+        }
+    }
+    return LIVE_LAYOUT_UNOWNED_USER_ID;
+}
+
+static cJSON *build_allowed_live_layout_cameras(const user_t *user) {
+    cJSON *allowed = cJSON_CreateObject();
+    if (!allowed) return NULL;
+
+    stream_config_t *all_streams = calloc(g_config.max_streams, sizeof(stream_config_t));
+    if (!all_streams) {
+        cJSON_Delete(allowed);
+        return NULL;
+    }
+
+    int stream_count = get_all_stream_configs(all_streams, g_config.max_streams);
+    if (stream_count < 0) {
+        free(all_streams);
+        cJSON_Delete(allowed);
+        return NULL;
+    }
+
+    for (int i = 0; i < stream_count; i++) {
+        if (all_streams[i].name[0] == '\0') continue;
+        if (!db_auth_stream_allowed_for_user(user, all_streams[i].tags)) continue;
+        cJSON_AddBoolToObject(allowed, all_streams[i].name, true);
+    }
+
+    free(all_streams);
+    return allowed;
+}
+
+static bool live_layout_camera_allowed(cJSON *allowed_cameras, const char *camera_name) {
+    if (!allowed_cameras) return true;
+    if (!camera_name) return false;
+    return cJSON_HasObjectItem(allowed_cameras, camera_name);
+}
+
+static int64_t get_legacy_live_layout_owner_user_id(const user_t *current_user) {
+    if (current_user && current_user->role == USER_ROLE_ADMIN) {
+        return current_user->id;
+    }
+
+    sqlite3 *db = get_db_handle();
+    pthread_mutex_t *db_mutex = get_db_mutex();
+    if (!db || !db_mutex) {
+        return current_user ? current_user->id : 0;
+    }
+
+    pthread_mutex_lock(db_mutex);
+    sqlite3_stmt *stmt = NULL;
+    int64_t admin_user_id = LIVE_LAYOUT_UNOWNED_USER_ID;
+    int rc = sqlite3_prepare_v2(db,
+        "SELECT id FROM users WHERE role = 0 AND is_active = 1 ORDER BY id LIMIT 1;",
+        -1, &stmt, NULL);
+    if (rc == SQLITE_OK && sqlite3_step(stmt) == SQLITE_ROW) {
+        admin_user_id = sqlite3_column_int64(stmt, 0);
+    }
+    if (stmt) sqlite3_finalize(stmt);
+    pthread_mutex_unlock(db_mutex);
+
+    if (admin_user_id != LIVE_LAYOUT_UNOWNED_USER_ID) {
+        return admin_user_id;
+    }
+    return current_user ? current_user->id : 0;
+}
+
+static bool add_normalized_layout_tile(cJSON *tiles, cJSON *cameras, cJSON *allowed_cameras,
+                                       const char *tile_id,
                                        const char *camera_name, int x, int y, int w, int h,
                                        char *error, size_t error_size) {
     if (!is_valid_layout_tile_id(tile_id)) {
@@ -265,6 +347,9 @@ static bool add_normalized_layout_tile(cJSON *tiles, cJSON *cameras, const char 
     if (!is_valid_layout_camera_name(camera_name)) {
         snprintf(error, error_size, "Camera names must be 1-%d characters", LIVE_LAYOUT_CAMERA_MAX_LEN);
         return false;
+    }
+    if (!live_layout_camera_allowed(allowed_cameras, camera_name)) {
+        return true;
     }
 
     cJSON *tile = cJSON_CreateObject();
@@ -292,9 +377,15 @@ static bool add_normalized_layout_tile(cJSON *tiles, cJSON *cameras, const char 
     return true;
 }
 
-static cJSON *normalize_live_layouts_json(cJSON *input, char *error, size_t error_size) {
+static cJSON *normalize_live_layouts_json(cJSON *input, const user_t *user, bool only_current_user,
+                                          bool reject_foreign_layouts, cJSON *allowed_cameras,
+                                          char *error, size_t error_size) {
     if (!input || !cJSON_IsObject(input)) {
         snprintf(error, error_size, "Live layouts must be a JSON object");
+        return NULL;
+    }
+    if (!user) {
+        snprintf(error, error_size, "Authenticated user is required");
         return NULL;
     }
 
@@ -317,6 +408,8 @@ static cJSON *normalize_live_layouts_json(cJSON *input, char *error, size_t erro
     if (!input_layouts) {
         return normalized;
     }
+
+    int64_t legacy_owner_user_id = get_legacy_live_layout_owner_user_id(user);
 
     cJSON *input_layout = NULL;
     cJSON_ArrayForEach(input_layout, input_layouts) {
@@ -350,6 +443,19 @@ static cJSON *normalize_live_layouts_json(cJSON *input, char *error, size_t erro
             return NULL;
         }
 
+        int64_t owner_user_id = get_live_layout_user_id(input_layout);
+        if (owner_user_id == LIVE_LAYOUT_UNOWNED_USER_ID) {
+            owner_user_id = reject_foreign_layouts ? user->id : legacy_owner_user_id;
+        }
+        if (reject_foreign_layouts && owner_user_id != user->id) {
+            cJSON_Delete(normalized);
+            snprintf(error, error_size, "Forbidden: layout belongs to another user");
+            return NULL;
+        }
+        if (only_current_user && owner_user_id != user->id) {
+            continue;
+        }
+
         int cols = clamp_layout_int(cJSON_GetObjectItem(input_layout, "cols"), 0, 0, LIVE_LAYOUT_GRID_MAX_SIDE);
         int rows = clamp_layout_int(cJSON_GetObjectItem(input_layout, "rows"), 0, 0, LIVE_LAYOUT_GRID_MAX_SIDE);
 
@@ -365,6 +471,7 @@ static cJSON *normalize_live_layouts_json(cJSON *input, char *error, size_t erro
             return NULL;
         }
         cJSON_AddStringToObject(layout, "id", layout_id);
+        cJSON_AddNumberToObject(layout, "userId", (double)owner_user_id);
         cJSON_AddStringToObject(layout, "name", layout_name);
         if (cols > 0) cJSON_AddNumberToObject(layout, "cols", cols);
         if (rows > 0) cJSON_AddNumberToObject(layout, "rows", rows);
@@ -416,7 +523,7 @@ static cJSON *normalize_live_layouts_json(cJSON *input, char *error, size_t erro
                 int w = clamp_layout_int(cJSON_GetObjectItem(tile_json, "w"), 1, 1, LIVE_LAYOUT_GRID_MAX_SIDE);
                 int h = clamp_layout_int(cJSON_GetObjectItem(tile_json, "h"), 1, 1, LIVE_LAYOUT_GRID_MAX_SIDE);
 
-                if (!add_normalized_layout_tile(tiles, cameras, tile_id, camera_name, x, y, w, h, error, error_size)) {
+                if (!add_normalized_layout_tile(tiles, cameras, allowed_cameras, tile_id, camera_name, x, y, w, h, error, error_size)) {
                     cJSON_Delete(layout);
                     cJSON_Delete(normalized);
                     return NULL;
@@ -459,7 +566,7 @@ static cJSON *normalize_live_layouts_json(cJSON *input, char *error, size_t erro
             snprintf(tile_id, sizeof(tile_id), "tile-%d", camera_index + 1);
             int fallback_x = cols > 0 ? camera_index % cols : camera_index;
             int fallback_y = cols > 0 ? camera_index / cols : 0;
-            if (!add_normalized_layout_tile(tiles, cameras, tile_id, camera_name, fallback_x, fallback_y, 1, 1, error, error_size)) {
+            if (!add_normalized_layout_tile(tiles, cameras, allowed_cameras, tile_id, camera_name, fallback_x, fallback_y, 1, 1, error, error_size)) {
                 cJSON_Delete(layout);
                 cJSON_Delete(normalized);
                 return NULL;
@@ -471,6 +578,90 @@ static cJSON *normalize_live_layouts_json(cJSON *input, char *error, size_t erro
     }
 
     return normalized;
+}
+
+static cJSON *find_live_layout_by_id(cJSON *layouts, const char *layout_id) {
+    if (!layouts || !layout_id) return NULL;
+
+    cJSON *layout = NULL;
+    cJSON_ArrayForEach(layout, layouts) {
+        cJSON *id_json = cJSON_GetObjectItem(layout, "id");
+        if (cJSON_IsString(id_json) && id_json->valuestring &&
+            strcmp(id_json->valuestring, layout_id) == 0) {
+            return layout;
+        }
+    }
+    return NULL;
+}
+
+static bool validate_live_layout_id_ownership(cJSON *stored, cJSON *submitted, const user_t *user,
+                                              char *error, size_t error_size) {
+    cJSON *stored_layouts = cJSON_GetObjectItem(stored, "layouts");
+    cJSON *submitted_layouts = cJSON_GetObjectItem(submitted, "layouts");
+    if (!stored_layouts || !submitted_layouts) return true;
+
+    cJSON *layout = NULL;
+    cJSON_ArrayForEach(layout, submitted_layouts) {
+        cJSON *id_json = cJSON_GetObjectItem(layout, "id");
+        if (!cJSON_IsString(id_json) || !id_json->valuestring) continue;
+
+        cJSON *existing = find_live_layout_by_id(stored_layouts, id_json->valuestring);
+        if (!existing) continue;
+
+        int64_t existing_owner = get_live_layout_user_id(existing);
+        if (existing_owner == LIVE_LAYOUT_UNOWNED_USER_ID && user->role == USER_ROLE_ADMIN) continue;
+        if (existing_owner != user->id) {
+            snprintf(error, error_size, "Forbidden: layout belongs to another user");
+            return false;
+        }
+    }
+    return true;
+}
+
+static cJSON *merge_user_live_layouts(cJSON *stored, cJSON *user_layouts, const user_t *user,
+                                      char *error, size_t error_size) {
+    cJSON *merged = cJSON_CreateObject();
+    cJSON *merged_layouts = cJSON_CreateArray();
+    if (!merged || !merged_layouts) {
+        cJSON_Delete(merged);
+        cJSON_Delete(merged_layouts);
+        snprintf(error, error_size, "Out of memory");
+        return NULL;
+    }
+    cJSON_AddItemToObject(merged, "layouts", merged_layouts);
+
+    cJSON *stored_layouts = cJSON_GetObjectItem(stored, "layouts");
+    cJSON *layout = NULL;
+    cJSON_ArrayForEach(layout, stored_layouts) {
+        int64_t owner_user_id = get_live_layout_user_id(layout);
+        if (owner_user_id == user->id) continue;
+        if (owner_user_id == LIVE_LAYOUT_UNOWNED_USER_ID && user->role == USER_ROLE_ADMIN) continue;
+
+        cJSON *copy = cJSON_Duplicate(layout, true);
+        if (!copy) {
+            cJSON_Delete(merged);
+            snprintf(error, error_size, "Out of memory");
+            return NULL;
+        }
+        cJSON_AddItemToArray(merged_layouts, copy);
+    }
+
+    cJSON *submitted_layouts = cJSON_GetObjectItem(user_layouts, "layouts");
+    cJSON_ArrayForEach(layout, submitted_layouts) {
+        cJSON *copy = cJSON_Duplicate(layout, true);
+        if (!copy) {
+            cJSON_Delete(merged);
+            snprintf(error, error_size, "Out of memory");
+            return NULL;
+        }
+        cJSON_DeleteItemFromObject(copy, "userId");
+        cJSON_DeleteItemFromObject(copy, "ownerUserId");
+        cJSON_DeleteItemFromObject(copy, "owner_user_id");
+        cJSON_AddNumberToObject(copy, "userId", (double)user->id);
+        cJSON_AddItemToArray(merged_layouts, copy);
+    }
+
+    return merged;
 }
 
 void handle_get_locations(const http_request_t *req, http_response_t *res) {
@@ -566,12 +757,15 @@ void handle_put_locations(const http_request_t *req, http_response_t *res) {
 void handle_get_live_layouts(const http_request_t *req, http_response_t *res) {
     log_info("Handling GET /api/live-layouts request");
 
+    user_t user;
     if (g_config.web_auth_enabled) {
-        user_t user;
         if (!httpd_check_viewer_access(req, &user)) {
             http_response_set_json_error(res, 401, "Unauthorized");
             return;
         }
+    } else if (!httpd_check_viewer_access(req, &user)) {
+        http_response_set_json_error(res, 401, "Unauthorized");
+        return;
     }
 
     char layouts_json[LIVE_LAYOUTS_MAX_BYTES] = {0};
@@ -588,8 +782,16 @@ void handle_get_live_layouts(const http_request_t *req, http_response_t *res) {
         return;
     }
 
+    cJSON *allowed_cameras = build_allowed_live_layout_cameras(&user);
+    if (!allowed_cameras) {
+        cJSON_Delete(parsed);
+        http_response_set_json_error(res, 500, "Failed to load camera permissions");
+        return;
+    }
+
     char error[256] = {0};
-    cJSON *normalized = normalize_live_layouts_json(parsed, error, sizeof(error));
+    cJSON *normalized = normalize_live_layouts_json(parsed, &user, true, false, allowed_cameras, error, sizeof(error));
+    cJSON_Delete(allowed_cameras);
     cJSON_Delete(parsed);
     if (!normalized) {
         log_warn("Stored live layouts are invalid: %s; returning empty layouts",
@@ -612,7 +814,9 @@ void handle_get_live_layouts(const http_request_t *req, http_response_t *res) {
 void handle_put_live_layouts(const http_request_t *req, http_response_t *res) {
     log_info("Handling PUT /api/live-layouts request");
 
-    if (!httpd_check_admin_privileges(req, res)) {
+    user_t user;
+    if (!httpd_check_viewer_access(req, &user)) {
+        http_response_set_json_error(res, 401, "Unauthorized");
         return;
     }
 
@@ -622,18 +826,73 @@ void handle_put_live_layouts(const http_request_t *req, http_response_t *res) {
         return;
     }
 
+    char layouts_json[LIVE_LAYOUTS_MAX_BYTES] = {0};
+    cJSON *stored = NULL;
+    if (db_get_system_setting(LIVE_LAYOUTS_SETTING_KEY, layouts_json, sizeof(layouts_json)) == 0 &&
+        layouts_json[0] != '\0') {
+        stored = cJSON_Parse(layouts_json);
+        if (!stored) {
+            log_warn("Stored live layouts JSON is invalid; replacing current user's layouts only");
+        }
+    }
+    if (!stored) {
+        stored = cJSON_CreateObject();
+        cJSON_AddItemToObject(stored, "layouts", cJSON_CreateArray());
+    }
+    if (!stored) {
+        cJSON_Delete(body);
+        http_response_set_json_error(res, 500, "Failed to load existing layouts");
+        return;
+    }
+
+    cJSON *allowed_cameras = build_allowed_live_layout_cameras(&user);
+    if (!allowed_cameras) {
+        cJSON_Delete(body);
+        cJSON_Delete(stored);
+        http_response_set_json_error(res, 500, "Failed to load camera permissions");
+        return;
+    }
+
     char error[256] = {0};
-    cJSON *normalized = normalize_live_layouts_json(body, error, sizeof(error));
+    cJSON *normalized_stored = normalize_live_layouts_json(stored, &user, false, false, NULL, error, sizeof(error));
+    cJSON_Delete(stored);
+    if (!normalized_stored) {
+        cJSON_Delete(body);
+        cJSON_Delete(allowed_cameras);
+        http_response_set_json_error(res, 500, error[0] ? error : "Invalid stored live layouts");
+        return;
+    }
+
+    if (!validate_live_layout_id_ownership(normalized_stored, body, &user, error, sizeof(error))) {
+        cJSON_Delete(body);
+        cJSON_Delete(normalized_stored);
+        cJSON_Delete(allowed_cameras);
+        http_response_set_json_error(res, 403, error[0] ? error : "Forbidden");
+        return;
+    }
+
+    cJSON *normalized = normalize_live_layouts_json(body, &user, true, true, allowed_cameras, error, sizeof(error));
     cJSON_Delete(body);
+    cJSON_Delete(allowed_cameras);
 
     if (!normalized) {
+        cJSON_Delete(normalized_stored);
         http_response_set_json_error(res, 400, error[0] ? error : "Invalid live layouts");
         return;
     }
 
-    char *json = cJSON_PrintUnformatted(normalized);
-    cJSON_Delete(normalized);
+    cJSON *merged = merge_user_live_layouts(normalized_stored, normalized, &user, error, sizeof(error));
+    cJSON_Delete(normalized_stored);
+    if (!merged) {
+        cJSON_Delete(normalized);
+        http_response_set_json_error(res, 500, error[0] ? error : "Failed to merge live layouts");
+        return;
+    }
+
+    char *json = cJSON_PrintUnformatted(merged);
+    cJSON_Delete(merged);
     if (!json) {
+        cJSON_Delete(normalized);
         http_response_set_json_error(res, 500, "Failed to serialize live layouts");
         return;
     }
@@ -650,8 +909,17 @@ void handle_put_live_layouts(const http_request_t *req, http_response_t *res) {
         return;
     }
 
-    http_response_set_json(res, 200, json);
+    char *response_json = cJSON_PrintUnformatted(normalized);
+    cJSON_Delete(normalized);
+    if (!response_json) {
+        free(json);
+        http_response_set_json_error(res, 500, "Failed to serialize live layouts");
+        return;
+    }
+
+    http_response_set_json(res, 200, response_json);
     free(json);
+    free(response_json);
 }
 
 /**
