@@ -547,6 +547,24 @@
     min-height: 100%;
 }
 
+.video-container.is-workspace-grid.is-single-camera-view {
+    grid-template-columns: repeat(var(--grid-cols, 48), 1fr);
+    grid-template-rows: repeat(var(--grid-rows, 27), 1fr);
+}
+
+.video-container.is-workspace-grid.is-single-camera-view .live-workspace-tile.is-single-camera-active {
+    z-index: 5;
+    min-height: 100%;
+    cursor: default;
+}
+
+.video-container.is-workspace-grid.is-single-camera-view .live-workspace-tile.is-single-camera-inactive,
+.video-container.is-workspace-grid.is-single-camera-view .live-workspace-slot.is-single-camera-inactive {
+    visibility: hidden;
+    opacity: 0;
+    pointer-events: none;
+}
+
 .video-container.is-workspace-grid.is-single-camera .video-cell {
     border-color: hsl(var(--border) / 0.38);
     border-radius: 0.5rem;
