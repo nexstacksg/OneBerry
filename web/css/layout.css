@@ -109,8 +109,7 @@ body > .container {
 .settings-group,
 .filters-sidebar,
 #system-page [role="tabpanel"] > .grid > *,
-#system-page [role="tabpanel"] > .mb-4,
-#camera-access-page .page > div:not(.page-header) {
+#system-page [role="tabpanel"] > .mb-4 {
     border: 1px solid hsl(var(--border) / 0.85);
     box-shadow: 0 14px 34px -32px hsl(var(--foreground) / 0.5);
 }

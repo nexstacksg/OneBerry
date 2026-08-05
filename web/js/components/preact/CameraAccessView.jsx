@@ -616,6 +616,37 @@ export function CameraAccessView() {
     return linkedStreams.size;
   }, [userGroups, streams]);
 
+  const renderPageHeader = (actionButton = null) => (
+    <div className="page-header mb-5 rounded-xl border border-border bg-card p-4 text-card-foreground shadow-sm">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <div>
+          <h2 className="text-2xl font-semibold tracking-tight">{t('cameraAccess.title')}</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {t('cameraAccess.panelHint')}
+          </p>
+        </div>
+
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <div className="grid grid-cols-3 overflow-hidden rounded-lg border border-border bg-background text-center shadow-sm">
+            <div className="min-w-[6.75rem] px-3 py-2">
+              <div className="text-lg font-semibold leading-none">{cameraGroups.length}</div>
+              <div className="mt-1 text-[11px] uppercase text-muted-foreground">{t('cameraAccess.cameraGroups')}</div>
+            </div>
+            <div className="min-w-[6.75rem] border-x border-border px-3 py-2">
+              <div className="text-lg font-semibold leading-none">{userGroups.length}</div>
+              <div className="mt-1 text-[11px] uppercase text-muted-foreground">{t('cameraAccess.userGroups')}</div>
+            </div>
+            <div className="min-w-[6.75rem] px-3 py-2">
+              <div className="text-lg font-semibold leading-none text-[hsl(var(--success))]">{cameraGroupStats}</div>
+              <div className="mt-1 text-[11px] uppercase text-muted-foreground">{t('cameraAccess.linkedUsers')}</div>
+            </div>
+          </div>
+          {actionButton}
+        </div>
+      </div>
+    </div>
+  );
+
   const updateCameraGroupMutation = useMutation({
     mutationFn: async ({ fromTag, toTag, selectedIds }) => {
       const selected = new Set(selectedIds);
@@ -885,10 +916,8 @@ export function CameraAccessView() {
 
   if (isAuthError && !canManageAccess) {
     return (
-      <div className="space-y-4">
-        <div className="page-header flex justify-between items-center mb-4 p-4 bg-card text-card-foreground rounded-lg shadow">
-          <h2 className="text-xl font-semibold">{t('cameraAccess.title')}</h2>
-        </div>
+      <div>
+        {renderPageHeader()}
         <div className="border border-red-400 bg-red-100 px-4 py-3 rounded relative dark:bg-red-900 dark:border-red-600 dark:text-red-200">
           <h4 className="font-bold mb-2">{t('users.accessDenied')}</h4>
           <p>{t('cameraAccess.adminOnly')}</p>
@@ -899,13 +928,15 @@ export function CameraAccessView() {
 
   if (hasFatalError) {
     return (
-      <div className="space-y-4">
-        <div className="page-header flex justify-between items-center mb-4 p-4 bg-card text-card-foreground rounded-lg shadow">
-          <h2 className="text-xl font-semibold">{t('cameraAccess.title')}</h2>
-          <button className="btn-primary" onClick={() => { refetchStreams(); refetchUsers(); }}>
+      <div>
+        {renderPageHeader(
+          <button
+            className="btn-primary inline-flex min-h-10 items-center justify-center rounded-lg px-4 font-semibold shadow-sm"
+            onClick={() => { refetchStreams(); refetchUsers(); }}
+          >
             {t('common.retry')}
           </button>
-        </div>
+        )}
         <div className="rounded-lg border border-red-400 bg-red-100 px-4 py-3 text-red-700 dark:bg-red-900 dark:border-red-600 dark:text-red-200">
           <h4 className="mb-2 font-bold">{t('cameraAccess.errorLoading')}</h4>
           <p>{streamsError?.message || usersError?.message || t('cameraAccess.errorLoadingDescription')}</p>
@@ -915,109 +946,141 @@ export function CameraAccessView() {
   }
 
   return (
-    <div id="camera-access-page" className="space-y-6">
-      <div className="overflow-hidden rounded-lg border border-border bg-card shadow">
-        <div className="border-b border-border px-6 py-5">
-          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-            <div className="max-w-2xl">
-              <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                {t('cameraAccess.title')}
+    <div id="camera-access-page">
+      {renderPageHeader(
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <button
+            className="btn-secondary inline-flex min-h-10 items-center justify-center rounded-lg px-4 font-semibold shadow-sm"
+            onClick={() => { refetchStreams(); refetchUsers(); }}
+          >
+            {t('common.refresh')}
+          </button>
+          <button
+            className="btn-primary inline-flex min-h-10 items-center justify-center rounded-lg px-4 font-semibold shadow-sm"
+            onClick={() => handleOpenCreate(activeTab)}
+          >
+            {activeTab === 'camera' ? t('cameraAccess.newCameraGroup') : t('cameraAccess.newUserGroup')}
+          </button>
+        </div>
+      )}
+
+      <section className="mb-5 rounded-xl border border-border bg-card p-4 shadow-sm">
+        <div className="mb-4 flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+          <div>
+            <h3 className="text-sm font-semibold uppercase tracking-wide text-foreground">
+              {t('cameraAccess.subtitle')}
+            </h3>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {activeTab === 'camera'
+                ? t('cameraAccess.cameraGroupListHelp')
+                : t('cameraAccess.userGroupListHelp')}
+            </p>
+          </div>
+
+          <div className="relative w-full md:w-[28rem]">
+            <input
+              className="w-full rounded-md border border-input bg-background pl-10 pr-3 py-2.5 text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+              type="search"
+              value={searchTerm}
+              onInput={(e) => setSearchTerm(e.currentTarget.value)}
+              placeholder={t('cameraAccess.searchGroups')}
+            />
+            <svg className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <circle cx="11" cy="11" r="7" />
+              <path d="m20 20-3.5-3.5" strokeLinecap="round" />
+            </svg>
+          </div>
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <button
+            type="button"
+            className={`min-w-[12rem] rounded-xl border p-4 text-left transition ${
+              activeTab === 'camera'
+                ? 'border-primary bg-primary/10 text-foreground shadow-md shadow-primary/10'
+                : 'border-border bg-card text-card-foreground shadow-sm hover:border-primary/40 hover:bg-muted/35'
+            }`}
+            onClick={() => setActiveTab('camera')}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="truncate text-base font-semibold">{t('cameraAccess.cameraGroups')}</div>
+                <div className="mt-1 text-xs leading-5 text-muted-foreground">
+                  {cameraGroupStats} {t('cameraAccess.accessUsers').toLowerCase()}
+                </div>
               </div>
-              <h2 className="mt-1 text-2xl font-semibold tracking-tight">{t('cameraAccess.subtitle')}</h2>
-              <p className="mt-1 text-sm text-muted-foreground">
-                {t('cameraAccess.panelHint')}
-              </p>
+              <span className={`rounded-full px-2.5 py-1 text-xs font-bold ${
+                activeTab === 'camera' ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
+              }`}>
+                {cameraGroups.length}
+              </span>
             </div>
-            <div className="flex flex-wrap gap-2">
-              <button className="btn-secondary" onClick={() => { refetchStreams(); refetchUsers(); }}>
-                {t('common.refresh')}
-              </button>
-              <button className="btn-primary" onClick={() => handleOpenCreate(activeTab)}>
+            <div className="mt-4 grid grid-cols-2 gap-2 text-[11px]">
+              <span className="rounded-md bg-background px-2 py-1 text-muted-foreground">
+                {streams.length} {t('cameraAccess.cameraCount').toLowerCase()}
+              </span>
+              <span className="rounded-md bg-background px-2 py-1 text-muted-foreground">
+                {filteredCameraGroups.length} {filteredCameraGroups.length === 1 ? t('cameraAccess.groupSingular') : t('cameraAccess.groupPlural')}
+              </span>
+            </div>
+          </button>
+
+          <button
+            type="button"
+            className={`min-w-[12rem] rounded-xl border p-4 text-left transition ${
+              activeTab === 'user'
+                ? 'border-primary bg-primary/10 text-foreground shadow-md shadow-primary/10'
+                : 'border-border bg-card text-card-foreground shadow-sm hover:border-primary/40 hover:bg-muted/35'
+            }`}
+            onClick={() => setActiveTab('user')}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="truncate text-base font-semibold">{t('cameraAccess.userGroups')}</div>
+                <div className="mt-1 text-xs leading-5 text-muted-foreground">
+                  {userGroupStats} {t('cameraAccess.accessCameras').toLowerCase()}
+                </div>
+              </div>
+              <span className={`rounded-full px-2.5 py-1 text-xs font-bold ${
+                activeTab === 'user' ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
+              }`}>
+                {userGroups.length}
+              </span>
+            </div>
+            <div className="mt-4 grid grid-cols-2 gap-2 text-[11px]">
+              <span className="rounded-md bg-background px-2 py-1 text-muted-foreground">
+                {users.length} {t('cameraAccess.userCount').toLowerCase()}
+              </span>
+              <span className="rounded-md bg-background px-2 py-1 text-muted-foreground">
+                {filteredUserGroups.length} {filteredUserGroups.length === 1 ? t('cameraAccess.groupSingular') : t('cameraAccess.groupPlural')}
+              </span>
+            </div>
+          </button>
+        </div>
+      </section>
+
+      <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+        <div className="grid gap-0 xl:grid-cols-[minmax(0,1.55fr)_24rem]">
+          <div className="border-b border-border xl:border-b-0 xl:border-r">
+            <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
+              <div>
+                <h3 className="text-base font-semibold text-card-foreground">
+                  {activeTab === 'camera' ? t('cameraAccess.cameraGroups') : t('cameraAccess.userGroups')}
+                </h3>
+                <p className="text-sm text-muted-foreground">
+                  {visibleGroups.length} {visibleGroups.length === 1 ? t('cameraAccess.groupSingular') : t('cameraAccess.groupPlural')}
+                </p>
+              </div>
+              <button
+                className="btn-primary inline-flex min-h-10 items-center justify-center rounded-lg px-4 font-semibold shadow-sm"
+                onClick={() => handleOpenCreate(activeTab)}
+              >
                 {activeTab === 'camera' ? t('cameraAccess.newCameraGroup') : t('cameraAccess.newUserGroup')}
               </button>
             </div>
-          </div>
-        </div>
 
-        <div className="grid gap-3 border-b border-border px-6 py-4 sm:grid-cols-2 xl:grid-cols-4">
-          <div className="rounded-lg bg-muted/20 p-4">
-            <div className="text-xs uppercase tracking-wide text-muted-foreground">{t('cameraAccess.cameraGroups')}</div>
-            <div className="mt-2 text-3xl font-semibold tabular-nums">{cameraGroups.length}</div>
-          </div>
-          <div className="rounded-lg bg-muted/20 p-4">
-            <div className="text-xs uppercase tracking-wide text-muted-foreground">{t('cameraAccess.userGroups')}</div>
-            <div className="mt-2 text-3xl font-semibold tabular-nums">{userGroups.length}</div>
-          </div>
-          <div className="rounded-lg bg-muted/20 p-4">
-            <div className="text-xs uppercase tracking-wide text-muted-foreground">{t('cameraAccess.linkedUsers')}</div>
-            <div className="mt-2 text-3xl font-semibold tabular-nums">{cameraGroupStats}</div>
-          </div>
-          <div className="rounded-lg bg-muted/20 p-4">
-            <div className="text-xs uppercase tracking-wide text-muted-foreground">{t('cameraAccess.linkedCameras')}</div>
-            <div className="mt-2 text-3xl font-semibold tabular-nums">{userGroupStats}</div>
-          </div>
-        </div>
-
-        <div className="flex flex-col gap-4 px-6 py-4 xl:flex-row xl:items-center xl:justify-between">
-          <div className="inline-flex rounded-lg bg-muted/40 p-1">
-            <button
-              type="button"
-              className={`rounded-md px-4 py-2 text-sm font-medium transition-colors ${activeTab === 'camera' ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
-              onClick={() => setActiveTab('camera')}
-            >
-              {t('cameraAccess.cameraGroups')}
-              <span className="ml-2 rounded-full bg-black/10 px-2 py-0.5 text-xs">{cameraGroups.length}</span>
-            </button>
-            <button
-              type="button"
-              className={`rounded-md px-4 py-2 text-sm font-medium transition-colors ${activeTab === 'user' ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
-              onClick={() => setActiveTab('user')}
-            >
-              {t('cameraAccess.userGroups')}
-              <span className="ml-2 rounded-full bg-black/10 px-2 py-0.5 text-xs">{userGroups.length}</span>
-            </button>
-          </div>
-
-          <div className="flex flex-col gap-3 md:flex-row md:items-center">
-            <div className="relative w-full md:w-[28rem]">
-              <input
-                className="w-full rounded-md border border-input bg-background pl-10 pr-3 py-2.5 text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
-                type="search"
-                value={searchTerm}
-                onInput={(e) => setSearchTerm(e.currentTarget.value)}
-                placeholder={t('cameraAccess.searchGroups')}
-              />
-              <svg className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <circle cx="11" cy="11" r="7" />
-                <path d="m20 20-3.5-3.5" strokeLinecap="round" />
-              </svg>
-            </div>
-            <button className="btn-primary whitespace-nowrap" onClick={() => handleOpenCreate(activeTab)}>
-              {activeTab === 'camera' ? t('cameraAccess.newCameraGroup') : t('cameraAccess.newUserGroup')}
-            </button>
-          </div>
-        </div>
-
-        <div className="grid gap-0 xl:grid-cols-[minmax(0,1.55fr)_24rem]">
-          <div className="border-b border-border xl:border-b-0 xl:border-r">
-            <div className="max-h-[72vh] overflow-y-auto px-6 py-5">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <h3 className="text-lg font-semibold">
-                    {activeTab === 'camera' ? t('cameraAccess.cameraGroups') : t('cameraAccess.userGroups')}
-                  </h3>
-                  <p className="text-sm text-muted-foreground">
-                    {activeTab === 'camera'
-                      ? t('cameraAccess.cameraGroupListHelp')
-                      : t('cameraAccess.userGroupListHelp')}
-                  </p>
-                </div>
-                <span className="rounded-full bg-muted px-3 py-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  {visibleGroups.length} {visibleGroups.length === 1 ? t('cameraAccess.groupSingular') : t('cameraAccess.groupPlural')}
-                </span>
-              </div>
-
-              <div className="mt-5">
+            <div className="max-h-[72vh] overflow-y-auto p-4">
+              <div>
                 <div className="space-y-3">
                   {visibleGroups.map((group) => {
                     const accessCount = activeTab === 'camera'
