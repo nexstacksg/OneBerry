@@ -530,6 +530,19 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
     }
     return layoutParam || localStorage.getItem(`lightnvr-${storagePrefix}-last-layout`) || '';
   });
+  const [singleCameraView, setSingleCameraView] = useState(() => {
+    const p = new URLSearchParams(window.location.search);
+    const layoutParam = p.get('layout');
+    const cameraParam = p.get('camera');
+    if (!layoutParam || layoutParam === 'none' || layoutParam === 'workspace' || !cameraParam) {
+      return null;
+    }
+    return {
+      selectedLayoutId: layoutParam,
+      selectedCameraId: cameraParam,
+      previousLayoutState: null,
+    };
+  });
   const [hydratedLayoutId, setHydratedLayoutId] = useState('');
   const lastSavedLayoutPayloadRef = useRef('');
   const saveLayoutTimeoutRef = useRef(null);
@@ -650,6 +663,11 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
 
   // True when we're in single-stream mode
   const isSingleStream = maxStreams === 1;
+  const singleCameraMode = Boolean(
+    singleCameraView?.selectedLayoutId &&
+    singleCameraView?.selectedCameraId &&
+    singleCameraView.selectedLayoutId === activeLayoutId
+  );
 
   // Initialize selectedStream from URL or sessionStorage if available
   const [selectedStream, setSelectedStream] = useState(() => {
@@ -828,8 +846,14 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
     if (activeLayoutId) {
       url.searchParams.set('layout', activeLayoutId);
       url.searchParams.delete('stream');
+      if (singleCameraMode && singleCameraView?.selectedCameraId) {
+        url.searchParams.set('camera', singleCameraView.selectedCameraId);
+      } else {
+        url.searchParams.delete('camera');
+      }
     } else {
       url.searchParams.delete('layout');
+      url.searchParams.delete('camera');
       // Stream selection (single-stream mode only)
       if (isSingleStream && selectedStream) url.searchParams.set('stream', selectedStream);
       else url.searchParams.delete('stream');
@@ -848,7 +872,7 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
     localStorage.removeItem(`lightnvr-${storagePrefix}-layout`);
     if (!activeLayoutId && isSingleStream && selectedStream) sessionStorage.setItem(`${storagePrefix}_selected_stream`, selectedStream);
     else sessionStorage.removeItem(`${storagePrefix}_selected_stream`);
-  }, [activeLayoutId, currentPage, cols, rows, isSingleStream, selectedStream, streams.length]);
+  }, [activeLayoutId, currentPage, cols, rows, isSingleStream, selectedStream, singleCameraMode, singleCameraView?.selectedCameraId, streams.length]);
 
   // Sync UI preference controls (group, labels, controls) to URL and localStorage.
   // Runs independently of streams-loaded state so the URL is always accurate.
@@ -916,7 +940,67 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
       ? liveLayouts.layouts.find((layout) => layout.id === activeLayoutId) || null
       : null
   ), [activeLayoutId, liveLayouts]);
-  const workspaceLocked = Boolean(activeLayoutId) && !layoutEditMode;
+  const workspaceLocked = singleCameraMode || (Boolean(activeLayoutId) && !layoutEditMode);
+
+  const captureCurrentLayoutState = useCallback(() => ({
+    selectedLayoutId: activeLayoutId,
+    workspaceTiles,
+    workspaceAutoGrid,
+    currentPage,
+    layoutEditMode,
+    hydratedLayoutId,
+  }), [activeLayoutId, currentPage, hydratedLayoutId, layoutEditMode, workspaceAutoGrid, workspaceTiles]);
+
+  const exitSingleCameraView = useCallback((layoutId = '') => {
+    const previousLayoutState = singleCameraView?.previousLayoutState || null;
+    const targetLayoutId = String(layoutId || previousLayoutState?.selectedLayoutId || '').trim();
+
+    setSingleCameraView(null);
+    if (targetLayoutId) {
+      setActiveLayoutId(targetLayoutId);
+    }
+
+    if (previousLayoutState && (!targetLayoutId || previousLayoutState.selectedLayoutId === targetLayoutId)) {
+      setWorkspaceTiles(previousLayoutState.workspaceTiles);
+      setWorkspaceAutoGrid(previousLayoutState.workspaceAutoGrid);
+      setLayoutEditMode(previousLayoutState.layoutEditMode);
+      setHydratedLayoutId(previousLayoutState.hydratedLayoutId);
+      setCurrentPage(previousLayoutState.currentPage);
+    } else {
+      setCurrentPage(0);
+    }
+  }, [singleCameraView]);
+
+  const enterSingleCameraView = useCallback((layoutId, cameraId) => {
+    const selectedLayoutId = String(layoutId || '').trim();
+    const selectedCameraId = String(cameraId || '').trim();
+    if (!selectedLayoutId || !selectedCameraId) return;
+
+    setSingleCameraView((previousView) => {
+      if (
+        previousView?.selectedLayoutId === selectedLayoutId &&
+        previousView?.selectedCameraId === selectedCameraId
+      ) {
+        return previousView;
+      }
+
+      return {
+        selectedLayoutId,
+        selectedCameraId,
+        previousLayoutState: previousView?.previousLayoutState || captureCurrentLayoutState(),
+      };
+    });
+    setActiveLayoutId((previousLayoutId) => {
+      if (previousLayoutId === selectedLayoutId) return previousLayoutId;
+      setHydratedLayoutId('');
+      return selectedLayoutId;
+    });
+    setWorkspaceStarted(true);
+    setWorkspaceAutoGrid(false);
+    setLayoutPresetMenuOpen(false);
+    setWorkspaceMenuOpen(false);
+    setCurrentPage(0);
+  }, [captureCurrentLayoutState]);
 
   const saveLiveLayouts = useCallback(async (nextLayouts, previousLayouts = liveLayouts) => {
     const normalized = normalizeLiveLayouts(nextLayouts);
@@ -955,10 +1039,25 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
   useEffect(() => {
     if (!activeLayoutId || isLoadingStreams || liveLayouts.layouts.length === 0) return;
     if (activeLayout) return;
+    setSingleCameraView(null);
     setActiveLayoutId('');
     setHydratedLayoutId('');
     lastSavedLayoutPayloadRef.current = '';
   }, [activeLayout, activeLayoutId, isLoadingStreams, liveLayouts.layouts.length]);
+
+  useEffect(() => {
+    if (!singleCameraView?.selectedLayoutId) return;
+    const layout = liveLayouts.layouts.find((candidate) => candidate.id === singleCameraView.selectedLayoutId);
+    if (!layout) {
+      setSingleCameraView(null);
+      return;
+    }
+
+    const hasCamera = layout.tiles.some((tile) => tile.camera === singleCameraView.selectedCameraId);
+    if (!hasCamera) {
+      setSingleCameraView(null);
+    }
+  }, [liveLayouts.layouts, singleCameraView?.selectedCameraId, singleCameraView?.selectedLayoutId]);
 
   useEffect(() => {
     if (!activeLayoutId || !activeLayout || streams.length === 0 || hydratedLayoutId === activeLayoutId) return;
@@ -1418,6 +1517,33 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
   }, [addWorkspaceTile]);
 
   useEffect(() => {
+    const handleShowLayout = (event) => {
+      const layoutId = String(event.detail?.layoutId || '').trim();
+      exitSingleCameraView(layoutId);
+      if (layoutId) {
+        setHydratedLayoutId((previousHydratedLayoutId) => (
+          previousHydratedLayoutId === layoutId ? previousHydratedLayoutId : ''
+        ));
+      }
+      setLayoutPresetMenuOpen(false);
+      setWorkspaceMenuOpen(false);
+    };
+
+    const handleShowLayoutCamera = (event) => {
+      const layoutId = String(event.detail?.layoutId || '').trim();
+      const cameraId = String(event.detail?.cameraId || event.detail?.cameraName || '').trim();
+      enterSingleCameraView(layoutId, cameraId);
+    };
+
+    window.addEventListener('oneberry:show-live-layout', handleShowLayout);
+    window.addEventListener('oneberry:show-live-layout-camera', handleShowLayoutCamera);
+    return () => {
+      window.removeEventListener('oneberry:show-live-layout', handleShowLayout);
+      window.removeEventListener('oneberry:show-live-layout-camera', handleShowLayoutCamera);
+    };
+  }, [enterSingleCameraView, exitSingleCameraView]);
+
+  useEffect(() => {
     const handleRemoveLayoutCamera = (event) => {
       const detail = event.detail || {};
       if (detail.layoutId !== activeLayoutId || workspaceLocked) return;
@@ -1725,11 +1851,12 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
 
   const isWorkspaceMode = workspaceStarted;
   const orderedTotalPages = Math.ceil(orderedStreams.length / maxStreams);
-  const visibleWorkspaceTileCount = isWorkspaceMode ? streamsToShow.length : 0;
+  const visibleWorkspaceTileCount = singleCameraMode ? 1 : (isWorkspaceMode ? streamsToShow.length : 0);
   const workspaceEmptySlotCount = isWorkspaceMode
-    ? workspaceTiles.filter((tile) => tile.type === 'slot').length
+    ? (singleCameraMode ? 0 : workspaceTiles.filter((tile) => tile.type === 'slot').length)
     : 0;
   const workspacePresetLabel = getWorkspacePresetLabel(workspaceTiles);
+  const singleCameraStream = singleCameraMode ? streamByName.get(singleCameraView.selectedCameraId) : null;
 
   const gridHasEmptySlots = !isWorkspaceMode
     && !isLoadingStreams
@@ -1987,9 +2114,10 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
             <div className="live-workspace-title">
               <span>{activeLayout?.name || 'Unsaved workspace'}</span>
               <small>
+                {singleCameraMode && singleCameraStream ? `${singleCameraStream.name} · ` : ''}
                 {visibleWorkspaceTileCount} camera tile{visibleWorkspaceTileCount === 1 ? '' : 's'}
                 {workspaceEmptySlotCount > 0 ? ` · ${workspaceEmptySlotCount} empty` : ''}
-                {activeLayoutId ? ` · ${layoutEditMode ? 'Editing' : 'Locked'}` : ''}
+                {singleCameraMode ? ' · Single camera' : (activeLayoutId ? ` · ${layoutEditMode ? 'Editing' : 'Locked'}` : '')}
               </small>
             </div>
             <div className="live-workspace-header-actions">
@@ -2082,7 +2210,7 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
         <div
           id="video-grid"
           ref={workspaceGridRef}
-          className={`video-container ${isWorkspaceMode ? 'is-workspace-grid' : gridHasEmptySlots ? 'is-partial-grid' : 'is-filled-grid'} ${visibleWorkspaceTileCount === 1 ? 'is-single-camera' : ''} ${isMobileViewport && isWorkspaceMode ? 'is-mobile-workspace-stack' : ''}`}
+          className={`video-container ${isWorkspaceMode ? 'is-workspace-grid' : gridHasEmptySlots ? 'is-partial-grid' : 'is-filled-grid'} ${visibleWorkspaceTileCount === 1 ? 'is-single-camera' : ''} ${singleCameraMode ? 'is-single-camera-view' : ''} ${isMobileViewport && isWorkspaceMode && !singleCameraMode ? 'is-mobile-workspace-stack' : ''}`}
           style={{ '--grid-cols': workspaceGridCols, '--grid-rows': workspaceGridRows }}
           onDragOver={(event) => {
             if (reorderMode || workspaceLocked) return;
@@ -2165,11 +2293,13 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
                 const isWorkspaceSlot = isWorkspaceMode && workspaceTile?.type === 'slot';
                 const stream = isWorkspaceMode ? streamByName.get(workspaceTile?.cameraId) : item;
                 const tileInstanceId = isWorkspaceMode ? workspaceTile?.instanceId : '';
+                const isSingleCameraActiveTile = singleCameraMode && !isWorkspaceSlot && workspaceTile?.cameraId === singleCameraView?.selectedCameraId;
+                const isSingleCameraInactiveTile = singleCameraMode && !isSingleCameraActiveTile;
                 if (isWorkspaceSlot) {
                   return (
                     <div
                       key={tileInstanceId}
-                      className="live-workspace-slot"
+                      className={`live-workspace-slot ${isSingleCameraInactiveTile ? 'is-single-camera-inactive' : ''}`}
                       style={{
                         gridColumn: `${Math.min(workspaceGridCols, workspaceTile.x + 1)} / span ${Math.max(1, Math.min(workspaceGridCols - workspaceTile.x, workspaceTile.w || DEFAULT_WORKSPACE_TILE_W))}`,
                         gridRow: `${Math.min(workspaceGridRows, workspaceTile.y + 1)} / span ${Math.max(1, Math.min(workspaceGridRows - workspaceTile.y, workspaceTile.h || DEFAULT_WORKSPACE_TILE_H))}`,
@@ -2218,20 +2348,23 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
                 return (
                   <div
                     key={tileInstanceId || stream.name}
-                    className={`live-workspace-tile ${removingTileIds.has(tileInstanceId) ? 'is-removing' : ''}`}
+                    className={`live-workspace-tile ${removingTileIds.has(tileInstanceId) ? 'is-removing' : ''} ${isSingleCameraActiveTile ? 'is-single-camera-active' : ''} ${isSingleCameraInactiveTile ? 'is-single-camera-inactive' : ''}`}
                     style={{
                       position: 'relative',
-                      ...(isWorkspaceMode && workspaceTile ? {
+                      ...(isSingleCameraActiveTile ? {
+                        gridColumn: '1 / -1',
+                        gridRow: '1 / -1',
+                      } : isWorkspaceMode && workspaceTile ? {
                         gridColumn: `${Math.min(workspaceGridCols, workspaceTile.x + 1)} / span ${Math.max(1, Math.min(workspaceGridCols - workspaceTile.x, workspaceTile.w || DEFAULT_WORKSPACE_TILE_W))}`,
                         gridRow: `${Math.min(workspaceGridRows, workspaceTile.y + 1)} / span ${Math.max(1, Math.min(workspaceGridRows - workspaceTile.y, workspaceTile.h || DEFAULT_WORKSPACE_TILE_H))}`,
                       } : {}),
                     }}
-                    draggable={!isWorkspaceMode && reorderMode}
+                    draggable={!singleCameraMode && !isWorkspaceMode && reorderMode}
                     onDragStart={!isWorkspaceMode && reorderMode ? () => handleDragStart(globalIndex) : undefined}
                     onDragOver={!isWorkspaceMode && reorderMode ? (e) => handleDragOver(e, globalIndex) : undefined}
                     onDrop={!isWorkspaceMode && reorderMode ? handleDrop : undefined}
                     onDragEnd={!isWorkspaceMode && reorderMode ? handleDragEnd : undefined}
-                    onPointerDown={isWorkspaceMode && workspaceTile ? (event) => startWorkspacePointer(event, workspaceTile, 'move') : undefined}
+                    onPointerDown={!singleCameraMode && isWorkspaceMode && workspaceTile ? (event) => startWorkspacePointer(event, workspaceTile, 'move') : undefined}
                   >
                     {!isWorkspaceMode && reorderMode && (
                       <div
@@ -2251,7 +2384,7 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
                         {t('live.dragToReorder')}
                       </div>
                     )}
-                    {isWorkspaceMode && tileInstanceId && !workspaceLocked && (
+                    {isWorkspaceMode && tileInstanceId && !workspaceLocked && !singleCameraMode && (
                       <button
                         type="button"
                         className="live-workspace-tile-close"
@@ -2264,7 +2397,7 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
                         </svg>
                       </button>
                     )}
-                    {isWorkspaceMode && workspaceTile && !workspaceLocked && !isMobileViewport && (
+                    {isWorkspaceMode && workspaceTile && !workspaceLocked && !isMobileViewport && !singleCameraMode && (
                       <>
                         {['n', 'e', 's', 'w', 'ne', 'se', 'sw', 'nw'].map((handle) => (
                           <span

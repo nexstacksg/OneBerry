@@ -430,6 +430,7 @@ export function Header({ version = VERSION }) {
     return {
       tag: params.get('tag') || '',
       stream: params.get('stream') || '',
+      camera: params.get('camera') || '',
       layout: layout === 'none' || layout === 'workspace' ? '' : layout,
     };
   }, [activeNav, locationSearch]);
@@ -1090,6 +1091,34 @@ export function Header({ version = VERSION }) {
     }));
   }, [canEditSidebarLayout]);
 
+  const handleOpenLayout = useCallback((layoutId, event) => {
+    const href = makeLiveHref({ layout: layoutId });
+    if (activeNav !== 'nav-live' || typeof window === 'undefined') {
+      forceNavigation(href, event);
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    window.dispatchEvent(new CustomEvent('oneberry:show-live-layout', {
+      detail: { layoutId },
+    }));
+  }, [activeNav]);
+
+  const handleOpenLayoutCamera = useCallback((layoutId, cameraId, event) => {
+    const href = makeLiveHref({ layout: layoutId, camera: cameraId });
+    if (activeNav !== 'nav-live' || typeof window === 'undefined') {
+      forceNavigation(href, event);
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    window.dispatchEvent(new CustomEvent('oneberry:show-live-layout-camera', {
+      detail: { layoutId, cameraId },
+    }));
+  }, [activeNav]);
+
   const handleCameraDragStart = useCallback((event) => {
     const cameraName = event.currentTarget?.dataset?.cameraId || '';
     if (!cameraName) return;
@@ -1549,7 +1578,7 @@ export function Header({ version = VERSION }) {
                       className={`sidebar-layout-title no-underline ${activeNav === 'nav-live' && liveSelection.layout === layout.id ? 'is-active' : ''}`}
                       title={layout.name}
                       aria-current={activeNav === 'nav-live' && liveSelection.layout === layout.id ? 'page' : undefined}
-                      onClick={(event) => forceNavigation(makeLiveHref({ layout: layout.id }), event)}
+                      onClick={(event) => handleOpenLayout(layout.id, event)}
                     >
                       <TreeIcon type="area" />
                       <span className="sidebar-tree-label">{layout.name}</span>
@@ -1564,8 +1593,8 @@ export function Header({ version = VERSION }) {
                       const cameraName = tile.camera;
                       const stream = streamByName.get(cameraName);
                       const statusKind = stream ? getStreamStatusKind(stream) : 'offline';
-                      const cameraHref = makeLiveHref({ cols: 1, rows: 1, stream: cameraName });
-                      const cameraActive = activeNav === 'nav-live' && liveSelection.stream === cameraName;
+                      const cameraHref = makeLiveHref({ layout: layout.id, camera: cameraName });
+                      const cameraActive = activeNav === 'nav-live' && liveSelection.layout === layout.id && liveSelection.camera === cameraName;
                       return (
                         <li key={`${tile.id}-${index}`} className={`sidebar-layout-camera-node ${cameraActive ? 'is-active' : ''}`}>
                           <a
@@ -1573,7 +1602,7 @@ export function Header({ version = VERSION }) {
                             className={`sidebar-camera-link sidebar-layout-camera-link ${cameraActive ? 'is-active' : ''}`}
                             title={`${cameraName}${stream ? ` - ${t(`sidebar.status.${statusKind}`)}` : ''}`}
                             aria-current={cameraActive ? 'page' : undefined}
-                            onClick={(event) => forceNavigation(cameraHref, event)}
+                            onClick={(event) => handleOpenLayoutCamera(layout.id, cameraName, event)}
                           >
                             <span className={`sidebar-camera-status is-${statusKind}`} aria-hidden="true"></span>
                             <TreeIcon type="camera" />
