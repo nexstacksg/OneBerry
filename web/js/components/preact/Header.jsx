@@ -785,7 +785,7 @@ export function Header({ version = VERSION }) {
   // Admin-only tabs (System, Users) are hidden from non-admin roles.
   const navItems = [
     { id: 'nav-recordings', href: 'recordings.html', label: t('nav.recordings') },
-    { id: 'nav-streams', href: 'streams.html', label: 'Manage Stream' },
+    { id: 'nav-streams', href: 'streams.html', label: t('live.manageCameras') },
     { id: 'nav-settings', href: 'settings.html', label: t('nav.settings') },
     ...(isAdmin ? [{ id: 'nav-camera-access', href: 'camera-access.html', label: t('nav.cameraAccess') }] : []),
     ...(isAdmin ? [{ id: 'nav-users', href: 'users.html', label: t('nav.users') }] : []),
