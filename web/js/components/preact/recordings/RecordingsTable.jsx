@@ -166,7 +166,7 @@ export function RecordingsTable({
       <div className="overflow-x-auto border-b border-border">
         <div className="px-3 py-2.5 flex items-center gap-2 min-w-max">
         {/* Left: action items */}
-        <div className="flex gap-2 items-center">
+        <div className="flex flex-wrap gap-2 items-center flex-1 min-w-0">
           {collapsed && (
             <button
               type="button"
