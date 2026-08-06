@@ -2285,15 +2285,17 @@ export function StreamsView() {
                       id="discover-onvif-btn"
                       className="btn-secondary focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
                       onClick={openOnvifModal}
+                      title={t('streams.discoverNetworkCamerasTitle')}
                   >
-                    {t('streams.discoverOnvifCameras')}
+                    {t('streams.discoverNetworkCameras')}
                   </button>
                   <button
                       id="add-stream-btn"
                       className="btn-primary focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
                       onClick={openAddStreamModal}
+                      title={t('streams.addCameraManuallyTitle')}
                   >
-                    {t('streams.addStream')}
+                    {t('streams.addCameraManually')}
                   </button>
                 </>
               )}
