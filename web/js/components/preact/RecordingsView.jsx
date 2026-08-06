@@ -893,20 +893,6 @@ export function RecordingsView() {
 
   return (
     <section id="recordings-page" class="page">
-      <div class="page-header flex justify-between items-center mb-4 p-4 bg-card text-card-foreground rounded-lg shadow">
-        <h2 class="text-xl font-bold">{t('nav.recordings')}</h2>
-        {/* Right: contextual action — only shown when recordings are selected */}
-        {getSelectedCount() > 0 && (
-          <button
-            onClick={viewSelectedInTimeline}
-            class="btn-primary text-sm"
-            title={t('recordings.viewSelectedCountInTimeline', { count: getSelectedCount() })}
-          >
-            ▶ {t('nav.timeline')} ({getSelectedCount()})
-          </button>
-        )}
-      </div>
-
       {/* Sub-navigation tabs — matches System page style */}
       <div class="mb-4 border-b border-border" role="tablist" aria-label={t('recordings.views')}>
         <div class="flex gap-2">

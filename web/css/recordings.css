@@ -14,6 +14,84 @@
     min-width: 0;
 }
 
+.recordings-layout {
+    align-items: flex-start;
+}
+
+.recordings-container {
+    border-radius: 0.75rem;
+    background: hsl(var(--card) / 0.96);
+    overflow: hidden;
+}
+
+.recordings-container .batch-actions,
+.recordings-container > .overflow-x-auto:first-child {
+    background: hsl(var(--card) / 0.98);
+}
+
+.recordings-container .batch-actions,
+.recordings-container > .overflow-x-auto:first-child > div {
+    min-height: 3.25rem;
+}
+
+.recordings-container .btn-danger,
+.recordings-container .btn-primary,
+.recordings-container .btn-secondary,
+.timeline-filter-bar button,
+.timeline-filter-bar a,
+.timeline-filter-bar select,
+.timeline-filter-bar input,
+.timeline-player-toolbar button,
+.timeline-player-toolbar a,
+.timeline-player-toolbar label {
+    border-radius: 0.5rem;
+}
+
+.recordings-container .btn-danger,
+.recordings-container .btn-primary,
+.recordings-container .btn-secondary {
+    min-height: 2.25rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+#recordings-table {
+    font-size: 0.875rem;
+}
+
+#recordings-table thead {
+    background: hsl(var(--muted) / 0.72);
+}
+
+#recordings-table th {
+    height: 3rem;
+    white-space: nowrap;
+}
+
+#recordings-table tbody tr {
+    transition: background-color 0.15s ease;
+}
+
+#recordings-table tbody td {
+    vertical-align: middle;
+}
+
+.recording-card {
+    border: 1px solid hsl(var(--border) / 0.85);
+    border-radius: 0.75rem;
+    overflow: hidden;
+    box-shadow: 0 14px 34px -32px hsl(var(--foreground) / 0.5);
+}
+
+.recording-card:hover {
+    transform: translateY(-1px);
+}
+
+.recording-card .aspect-video {
+    border-bottom: 1px solid hsl(var(--border) / 0.85);
+}
+
 .sortable {
     @apply cursor-pointer relative select-none;
 }
@@ -109,6 +187,10 @@
         min-height: 38px;
         white-space: nowrap;
     }
+
+    .recordings-container .batch-actions {
+        @apply flex-wrap items-start gap-2 px-3 py-3;
+    }
 }
 
 @media (max-width: 640px) {
@@ -141,7 +223,7 @@
         grid-template-columns: minmax(0, 1fr);
         gap: 0;
         border: 1px solid hsl(var(--border));
-        border-radius: 0.5rem;
+        border-radius: 0.75rem;
         background: hsl(var(--card));
         box-shadow: 0 8px 18px -18px rgba(15, 23, 42, 0.7);
         overflow: hidden;

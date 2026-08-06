@@ -1341,13 +1341,44 @@ export function TimelinePage() {
 
   return (
     <div className="timeline-page timeline-review-page w-full pb-8">
-      <div className="timeline-review-header mb-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="timeline-review-header-row flex flex-wrap items-center justify-between gap-3">
-          <div className="min-w-0">
-            <h1 className="text-xl font-semibold text-slate-950 sm:text-2xl">
+      <div className="mb-3 border-b border-border" role="tablist" aria-label={t('recordings.views')}>
+        <div className="timeline-view-tabs flex gap-2">
+          <a
+            href={returnUrl || 'recordings.html'}
+            role="tab"
+            aria-selected="false"
+            className="rounded-t-lg px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
+            onClick={() => { try { localStorage.setItem('recordings_view_mode', 'table'); } catch(e) {} }}
+          >
+            {t('recordings.table')}
+          </a>
+          <a
+            href="recordings.html"
+            role="tab"
+            aria-selected="false"
+            className="rounded-t-lg px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
+            onClick={() => { try { localStorage.setItem('recordings_view_mode', 'grid'); } catch(e) {} }}
+          >
+            {t('recordings.grid')}
+          </a>
+          <a
+            href="timeline.html"
+            role="tab"
+            aria-selected="true"
+            className="rounded-t-lg border border-border border-b-0 bg-card px-4 py-2 -mb-px text-sm font-medium text-card-foreground transition-colors"
+          >
+            {t('nav.timeline')}
+          </a>
+        </div>
+      </div>
+
+      <div className="timeline-review-header mb-3 rounded-lg border border-slate-200 bg-white px-3 py-2.5 shadow-sm">
+        <div className="timeline-review-header-row flex flex-wrap items-center justify-end gap-2">
+          <div className="min-w-0 text-right">
+            <h1 className="text-base font-semibold leading-tight text-slate-950 sm:text-lg">
               {idsMode ? t('timeline.selectedRecordingsTimeline') : t('timeline.timelinePlayback')}
             </h1>
-            <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+            <div className="mt-0.5 flex flex-wrap items-center justify-end gap-1.5 text-[11px] text-slate-500">
               <span>{formatDisplayDate(selectedDate)}</span>
               {selectedStream && <span className="text-slate-300">/</span>}
               {selectedStream && <span className="font-medium text-slate-700">{selectedStream}</span>}
@@ -1356,32 +1387,6 @@ export function TimelinePage() {
                 <span>{t('timeline.recordingsCount', { count: segments.length })}</span>
               )}
             </div>
-          </div>
-          <div className="timeline-view-tabs flex rounded-lg border border-slate-200 bg-slate-100 p-1">
-          <a
-            href={returnUrl || 'recordings.html'}
-            className="rounded-md px-3 py-1.5 text-sm font-medium text-slate-600 transition-colors hover:bg-white hover:text-slate-950"
-            onClick={() => { try { localStorage.setItem('recordings_view_mode', 'table'); } catch(e) {} }}
-          >
-            {t('recordings.table')}
-          </a>
-          <a
-            href="recordings.html"
-            className="rounded-md px-3 py-1.5 text-sm font-medium text-slate-600 transition-colors hover:bg-white hover:text-slate-950"
-            onClick={() => { try { localStorage.setItem('recordings_view_mode', 'grid'); } catch(e) {} }}
-          >
-            {t('recordings.grid')}
-          </a>
-          <a
-            href="timeline.html"
-            className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
-              idsMode
-                ? 'text-slate-600 hover:bg-white hover:text-slate-950'
-                : 'bg-red-600 text-white shadow-sm hover:bg-red-700'
-            }`}
-          >
-            {t('nav.timeline')}
-          </a>
           </div>
         </div>
 
