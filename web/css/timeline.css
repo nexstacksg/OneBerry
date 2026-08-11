@@ -133,16 +133,27 @@
 .timeline-scrubber-panel {
     margin-bottom: 0.75rem;
     border-radius: 0 0 0.75rem 0.75rem;
-    box-shadow: 0 14px 34px -32px hsl(var(--foreground) / 0.5) !important;
+    border-color: rgba(255, 255, 255, 0.1) !important;
+    background: #05070b !important;
+    box-shadow: 0 18px 48px -30px rgba(2, 6, 23, 0.85) !important;
+    color: rgba(255, 255, 255, 0.72);
+}
+
+.timeline-scrubber-panel > div:first-child {
+    border-color: rgba(255, 255, 255, 0.1) !important;
+    background: rgba(255, 255, 255, 0.035) !important;
+    color: rgba(255, 255, 255, 0.58) !important;
 }
 
 .timeline-scrubber-panel .timeline-ruler {
-    background: hsl(var(--muted) / 0.72);
+    background: rgba(255, 255, 255, 0.035);
 }
 
 .timeline-scrubber-panel .timeline-segments {
     min-height: 2.75rem;
-    background: hsl(var(--muted) / 0.35);
+    border-color: rgba(255, 255, 255, 0.1) !important;
+    background:
+        linear-gradient(180deg, #151922 0%, #0c1118 50%, #06080d 100%) !important;
 }
 
 .timeline-scrubber-panel .timeline-segment {
@@ -153,11 +164,11 @@
 }
 
 .timeline-scrubber-panel .timeline-segment:hover {
-    box-shadow: 0 0 0 1px hsl(var(--primary) / 0.28), 0 6px 16px hsl(var(--foreground) / 0.12);
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.18), 0 6px 16px rgba(0, 0, 0, 0.32);
 }
 
 .timeline-scrubber-panel .timeline-label {
-    color: hsl(var(--muted-foreground));
+    color: rgba(255, 255, 255, 0.66);
 }
 
 /* Timeline container */
