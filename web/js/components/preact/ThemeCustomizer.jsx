@@ -8,12 +8,17 @@ import { useState, useEffect } from 'preact/hooks';
 import { COLOR_THEMES, applyThemeColors } from '../../utils/theme-init.js';
 import { useI18n } from '../../i18n.js';
 
+const VISIBLE_THEME_IDS = new Set(['default']);
+
+export function hasThemeCustomizationOptions() {
+  return VISIBLE_THEME_IDS.size > 1;
+}
+
 /**
  * ThemeCustomizer component
  * @returns {JSX.Element} ThemeCustomizer component
  */
 export function ThemeCustomizer() {
-  const VISIBLE_THEME_IDS = new Set(['default']);
   const visibleThemes = Object.entries(COLOR_THEMES).filter(([themeId]) => VISIBLE_THEME_IDS.has(themeId));
 
   const [mounted, setMounted] = useState(false);
@@ -79,6 +84,10 @@ export function ThemeCustomizer() {
         <div class="h-32 bg-muted rounded"></div>
       </div>
     );
+  }
+
+  if (visibleThemes.length <= 1) {
+    return null;
   }
 
   return (

@@ -7,7 +7,7 @@ import { useState, useEffect } from 'preact/hooks';
 import { showStatusMessage } from './ToastContainer.jsx';
 import { ContentLoader } from './LoadingIndicator.jsx';
 import { useQuery, useMutation, fetchJSON } from '../../query-client.js';
-import { ThemeCustomizer } from './ThemeCustomizer.jsx';
+import { ThemeCustomizer, hasThemeCustomizationOptions } from './ThemeCustomizer.jsx';
 import { validateSession } from '../../utils/auth-utils.js';
 import { formatLocalDateTime } from '../../utils/date-utils.js';
 import { useI18n } from '../../i18n.js';
@@ -20,6 +20,7 @@ const MAX_STREAMS_DEFAULT = 128;
  */
 export function SettingsView() {
   const { t } = useI18n();
+  const showThemeCustomization = hasThemeCustomizationOptions();
   const [userRole, setUserRole] = useState(null);
   const [restartNotice, setRestartNotice] = useState(null);
   const [settings, setSettings] = useState({
@@ -452,25 +453,26 @@ export function SettingsView() {
         </div>
 
         <div class="settings-container space-y-6">
-          {/* Appearance Settings - available to all users */}
-          <div class="settings-group bg-card text-card-foreground rounded-lg shadow p-4">
-            <button
-              onClick={toggleAppearance}
-              class="w-full flex items-center justify-between pb-2 border-b border-border mb-4 group"
-              aria-expanded={showAppearance}
-              aria-controls="appearance-settings-content"
-            >
-              <h3 class="text-lg font-semibold">{t('settings.appearance')}</h3>
-              <span class={`text-muted-foreground transition-transform duration-200 ${showAppearance ? 'rotate-0' : '-rotate-90'}`}>
-                ▾
-              </span>
-            </button>
-            {showAppearance && (
-              <div id="appearance-settings-content">
-                <ThemeCustomizer />
-              </div>
-            )}
-          </div>
+          {showThemeCustomization && (
+            <div class="settings-group bg-card text-card-foreground rounded-lg shadow p-4">
+              <button
+                onClick={toggleAppearance}
+                class="w-full flex items-center justify-between pb-2 border-b border-border mb-4 group"
+                aria-expanded={showAppearance}
+                aria-controls="appearance-settings-content"
+              >
+                <h3 class="text-lg font-semibold">{t('settings.appearance')}</h3>
+                <span class={`text-muted-foreground transition-transform duration-200 ${showAppearance ? 'rotate-0' : '-rotate-90'}`}>
+                  ▾
+                </span>
+              </button>
+              {showAppearance && (
+                <div id="appearance-settings-content">
+                  <ThemeCustomizer />
+                </div>
+              )}
+            </div>
+          )}
 
           <div class="settings-group bg-card text-card-foreground rounded-lg shadow p-4">
             <p class="text-muted-foreground">
@@ -519,25 +521,26 @@ export function SettingsView() {
             </div>
           )}
 
-          {/* Appearance Settings - available to all users */}
-          <div class="settings-group bg-card text-card-foreground rounded-lg shadow p-4">
-            <button
-              onClick={toggleAppearance}
-              class="w-full flex items-center justify-between pb-2 border-b border-border mb-4 group"
-              aria-expanded={showAppearance}
-              aria-controls="appearance-settings-content"
-            >
-              <h3 class="text-lg font-semibold">{t('settings.appearance')}</h3>
-              <span class={`text-muted-foreground transition-transform duration-200 ${showAppearance ? 'rotate-0' : '-rotate-90'}`}>
-                ▾
-              </span>
-            </button>
-            {showAppearance && (
-              <div id="appearance-settings-content">
-                <ThemeCustomizer />
-              </div>
-            )}
-          </div>
+          {showThemeCustomization && (
+            <div class="settings-group bg-card text-card-foreground rounded-lg shadow p-4">
+              <button
+                onClick={toggleAppearance}
+                class="w-full flex items-center justify-between pb-2 border-b border-border mb-4 group"
+                aria-expanded={showAppearance}
+                aria-controls="appearance-settings-content"
+              >
+                <h3 class="text-lg font-semibold">{t('settings.appearance')}</h3>
+                <span class={`text-muted-foreground transition-transform duration-200 ${showAppearance ? 'rotate-0' : '-rotate-90'}`}>
+                  ▾
+                </span>
+              </button>
+              {showAppearance && (
+                <div id="appearance-settings-content">
+                  <ThemeCustomizer />
+                </div>
+              )}
+            </div>
+          )}
 
           <div class="settings-group bg-card text-card-foreground rounded-lg shadow p-4">
             <h3 class="text-lg font-semibold mb-4 pb-2 border-b border-border">{t('settings.general')}</h3>
