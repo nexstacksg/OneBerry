@@ -619,24 +619,24 @@ export function CameraAccessView() {
   const renderPageHeader = (actionButton = null) => (
     <div className="page-header mb-5 rounded-xl border border-border bg-card p-4 text-card-foreground shadow-sm">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-        <div>
+        <div className="min-w-0 flex-1">
           <h2 className="text-2xl font-semibold tracking-tight">{t('cameraAccess.title')}</h2>
-          <p className="mt-1 text-sm text-muted-foreground">
+          <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
             {t('cameraAccess.panelHint')}
           </p>
         </div>
 
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-          <div className="grid grid-cols-3 overflow-hidden rounded-lg border border-border bg-background text-center shadow-sm">
-            <div className="min-w-[6.75rem] px-3 py-2">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center lg:justify-end">
+          <div className="grid w-full grid-cols-3 overflow-hidden rounded-lg border border-border bg-background text-center shadow-sm sm:w-auto">
+            <div className="min-w-0 px-3 py-2 sm:min-w-[5.75rem]">
               <div className="text-lg font-semibold leading-none">{cameraGroups.length}</div>
               <div className="mt-1 text-[11px] uppercase text-muted-foreground">{t('cameraAccess.cameraGroups')}</div>
             </div>
-            <div className="min-w-[6.75rem] border-x border-border px-3 py-2">
+            <div className="min-w-0 border-x border-border px-3 py-2 sm:min-w-[5.75rem]">
               <div className="text-lg font-semibold leading-none">{userGroups.length}</div>
               <div className="mt-1 text-[11px] uppercase text-muted-foreground">{t('cameraAccess.userGroups')}</div>
             </div>
-            <div className="min-w-[6.75rem] px-3 py-2">
+            <div className="min-w-0 px-3 py-2 sm:min-w-[5.75rem]">
               <div className="text-lg font-semibold leading-none text-[hsl(var(--success))]">{cameraGroupStats}</div>
               <div className="mt-1 text-[11px] uppercase text-muted-foreground">{t('cameraAccess.linkedUsers')}</div>
             </div>
@@ -950,13 +950,13 @@ export function CameraAccessView() {
       {renderPageHeader(
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
           <button
-            className="btn-secondary inline-flex min-h-10 items-center justify-center rounded-lg px-4 font-semibold shadow-sm"
+            className="btn-secondary inline-flex min-h-10 items-center justify-center rounded-lg px-4 text-sm font-semibold leading-none shadow-sm sm:self-center sm:whitespace-nowrap"
             onClick={() => { refetchStreams(); refetchUsers(); }}
           >
             {t('common.refresh')}
           </button>
           <button
-            className="btn-primary inline-flex min-h-10 items-center justify-center rounded-lg px-4 font-semibold shadow-sm"
+            className="btn-primary inline-flex min-h-10 items-center justify-center rounded-lg px-4 text-sm font-semibold leading-none shadow-sm sm:self-center sm:whitespace-nowrap"
             onClick={() => handleOpenCreate(activeTab)}
           >
             {activeTab === 'camera' ? t('cameraAccess.newCameraGroup') : t('cameraAccess.newUserGroup')}
