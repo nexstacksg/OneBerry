@@ -48,23 +48,25 @@ export function SpeedControls() {
   };
 
   return (
-    <div className="flex items-center gap-1">
-      <span className="mr-0.5 text-[10px] font-medium uppercase tracking-[0.08em] text-slate-500">{t('timeline.speed')}</span>
-      {speeds.map(speed => (
-        <button
-          key={`speed-${speed}`}
-          className={`h-6 rounded px-2 text-[11px] font-medium transition-colors focus:outline-none ${
-            speed === currentSpeed
-              ? 'bg-red-600 text-white shadow-sm'
-              : 'border border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100'
-          }`}
-          data-speed={speed}
-          data-keyboard-nav-preserve
-          onClick={() => setPlaybackSpeed(speed)}
-        >
-          {speed}×
-        </button>
-      ))}
+    <div className="flex items-center gap-2">
+      <span className="text-[10px] font-medium uppercase tracking-[0.08em] text-slate-500">{t('timeline.speed')}</span>
+      <div className="flex rounded-md border border-slate-200 bg-slate-100 p-0.5">
+        {speeds.map(speed => (
+          <button
+            key={`speed-${speed}`}
+            className={`h-7 rounded-[0.35rem] px-2.5 text-[11px] font-medium transition-colors focus:outline-none ${
+              speed === currentSpeed
+                ? 'bg-slate-900 text-white shadow-sm'
+                : 'text-slate-600 hover:bg-white hover:text-slate-900'
+            }`}
+            data-speed={speed}
+            data-keyboard-nav-preserve
+            onClick={() => setPlaybackSpeed(speed)}
+          >
+            {speed}×
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
