@@ -11,7 +11,7 @@ import { getSettings } from '../../utils/settings-utils.js';
 import { showStatusMessage } from './ToastContainer.jsx';
 import { EditUserModal } from './users/EditUserModal.jsx';
 import { getAuthHeaders, isDemoMode, validateSession } from '../../utils/auth-utils.js';
-import { forceNavigation } from '../../utils/navigation-utils.js';
+import { navigateToAppPage } from '../../utils/navigation-utils.js';
 import { getStreamStatusKind } from '../../utils/building-hierarchy.js';
 import { preloadLiveSnapshots, startLiveWarmup } from '../../utils/live-warmup.js';
 import { useI18n } from '../../i18n.js';
@@ -307,10 +307,10 @@ const buildProfileFormData = (user = {}) => ({
  * @param {string} props.version - System version
  * @returns {JSX.Element} Header component
  */
-export function Header({ version = VERSION }) {
+export function Header({ version = VERSION, activeNav: activeNavProp }) {
   // Get active navigation from data attribute on header container
   const headerContainer = document.getElementById('header-container');
-  const activeNav = headerContainer?.dataset?.activeNav || '';
+  const activeNav = activeNavProp || headerContainer?.dataset?.activeNav || '';
   const [username, _setUsername] = useState(localStorage.getItem('username') || '');
   const [currentUser, setCurrentUser] = useState(null);
   const [profileFormData, setProfileFormData] = useState(() => buildProfileFormData());
@@ -904,7 +904,7 @@ export function Header({ version = VERSION }) {
 
                 // Force navigation and prevent default behavior
                 if (item.href) {
-                  forceNavigation(item.href, e);
+                  navigateToAppPage(item.href, e);
                 }
 
                 // Call onClick function if provided
@@ -1094,7 +1094,7 @@ export function Header({ version = VERSION }) {
   const handleOpenLayout = useCallback((layoutId, event) => {
     const href = makeLiveHref({ layout: layoutId });
     if (activeNav !== 'nav-live' || typeof window === 'undefined') {
-      forceNavigation(href, event);
+      navigateToAppPage(href, event);
       return;
     }
 
@@ -1108,7 +1108,7 @@ export function Header({ version = VERSION }) {
   const handleOpenLayoutCamera = useCallback((layoutId, cameraId, event) => {
     const href = makeLiveHref({ layout: layoutId, camera: cameraId });
     if (activeNav !== 'nav-live' || typeof window === 'undefined') {
-      forceNavigation(href, event);
+      navigateToAppPage(href, event);
       return;
     }
 
@@ -1169,7 +1169,7 @@ export function Header({ version = VERSION }) {
     if (!cameraName) return;
 
     if (activeNav !== 'nav-live' || typeof window === 'undefined') {
-      forceNavigation(cameraHref, event);
+      navigateToAppPage(cameraHref, event);
       return;
     }
 
@@ -1209,7 +1209,7 @@ export function Header({ version = VERSION }) {
     setSelectedCameraNames(new Set());
     cameraSelectionBeforeClickRef.current = new Set();
     setCameraContextMenu(null);
-    forceNavigation(makeLiveHref({ layout: 'none', stream: cameraName }), event);
+    navigateToAppPage(makeLiveHref({ layout: 'none', stream: cameraName }), event);
   }, [activeNav, canEditSidebarLayout, liveSelection.layout, selectedCameraNameList, selectedCameraNames, sidebarCameraList]);
 
   const handleSourceCameraKeyDown = useCallback((event) => {
@@ -1287,7 +1287,7 @@ export function Header({ version = VERSION }) {
       // Storage can fail in locked-down browser contexts; the query string still carries the IP.
     }
 
-    forceNavigation(`streams.html?discover=1&camera=${encodeURIComponent(device.ip_address)}`, event);
+    navigateToAppPage(`streams.html?discover=1&camera=${encodeURIComponent(device.ip_address)}`, event);
   }, []);
 
   const renderCameraList = () => {
@@ -1476,7 +1476,7 @@ export function Header({ version = VERSION }) {
       <a
         href={makeLiveHref({ layout: 'workspace' })}
         className={`sidebar-blank-layout-button ${activeNav === 'nav-live' && !liveSelection.layout && !liveSelection.stream ? 'is-active' : ''}`}
-        onClick={(event) => forceNavigation(makeLiveHref({ layout: 'workspace' }), event)}
+        onClick={(event) => navigateToAppPage(makeLiveHref({ layout: 'workspace' }), event)}
       >
         <TreeIcon type="area" />
         <span>Blank layout</span>
