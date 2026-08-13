@@ -147,6 +147,7 @@ const SIDEBAR_MAX_WIDTH_REM = 22;
 const SIDEBAR_COLLAPSE_THRESHOLD_REM = 9;
 const CAMERA_LIST_COLLAPSED_STORAGE_KEY = 'oneberry.sidebarCameraListCollapsed';
 const DISCOVERY_CAMERA_HANDOFF_KEY = 'oneberry.discoveryCameraHandoff';
+const PENDING_BLANK_WORKSPACE_CAMERAS_KEY = 'oneberry.pendingBlankWorkspaceCameras';
 
 const getStoredSidebarState = () => {
   try {
@@ -1007,6 +1008,12 @@ export function Header({ version = VERSION, activeNav: activeNavProp }) {
     await saveLiveLayouts(next, previous);
   }, [liveLayouts, newLayoutName, saveLiveLayouts]);
 
+  const startCreateLayout = useCallback(() => {
+    setCreatingLayout(true);
+    setOpenMenu(null);
+    setCameraContextMenu(null);
+  }, []);
+
   const startRenameLayout = useCallback((layout) => {
     setRenamingLayoutId(layout.id);
     setRenameLayoutName(layout.name);
@@ -1165,11 +1172,19 @@ export function Header({ version = VERSION, activeNav: activeNavProp }) {
 
   const handleSourceCameraDoubleClick = useCallback((event) => {
     const cameraName = event.currentTarget?.dataset?.cameraId || '';
-    const cameraHref = event.currentTarget?.getAttribute('href') || makeLiveHref({ cols: 1, rows: 1, stream: cameraName });
     if (!cameraName) return;
 
     if (activeNav !== 'nav-live' || typeof window === 'undefined') {
-      navigateToAppPage(cameraHref, event);
+      const cameraNames = [cameraName];
+      try {
+        sessionStorage.setItem(PENDING_BLANK_WORKSPACE_CAMERAS_KEY, JSON.stringify(cameraNames));
+      } catch {
+        // Storage can fail in locked-down browser contexts; the blank workspace still opens.
+      }
+      setSelectedCameraNames(new Set());
+      cameraSelectionBeforeClickRef.current = new Set();
+      setCameraContextMenu(null);
+      navigateToAppPage(makeLiveHref({ layout: 'workspace' }), event);
       return;
     }
 
@@ -1273,6 +1288,32 @@ export function Header({ version = VERSION, activeNav: activeNavProp }) {
     cameraSelectionBeforeClickRef.current = new Set();
     setCameraContextMenu(null);
   }, [addCamerasToLayout, cameraContextMenu, selectedCameraNameList, selectedCameraNames]);
+
+  const handleCreateContextLayout = useCallback(() => {
+    if (!cameraContextMenu) return;
+    const cameraNames = selectedCameraNames.has(cameraContextMenu.cameraName) && selectedCameraNameList.length > 0
+      ? selectedCameraNameList
+      : [cameraContextMenu.cameraName];
+
+    setSelectedCameraNames(new Set());
+    cameraSelectionBeforeClickRef.current = new Set();
+    setCameraContextMenu(null);
+
+    if (activeNav === 'nav-live' && typeof window !== 'undefined') {
+      navigateToAppPage(makeLiveHref({ layout: 'workspace' }));
+      window.dispatchEvent(new CustomEvent('oneberry:open-blank-live-layout', {
+        detail: { cameraNames, cameraName: cameraNames[0] },
+      }));
+      return;
+    }
+
+    try {
+      sessionStorage.setItem(PENDING_BLANK_WORKSPACE_CAMERAS_KEY, JSON.stringify(cameraNames));
+    } catch {
+      // Storage can fail in locked-down browser contexts; the blank workspace still opens.
+    }
+    navigateToAppPage(makeLiveHref({ layout: 'workspace' }));
+  }, [activeNav, cameraContextMenu, selectedCameraNameList, selectedCameraNames]);
 
   const openDiscoveredCameraInStreams = useCallback((event, device) => {
     if (!device?.ip_address) return;
@@ -1395,6 +1436,9 @@ export function Header({ version = VERSION, activeNav: activeNavProp }) {
         </div>
         <div className="sidebar-camera-context-group" aria-label="Add to layout">
           <div className="sidebar-camera-context-label">Add to layout</div>
+          <button type="button" role="menuitem" onClick={handleCreateContextLayout}>
+            New layout
+          </button>
           {canAddToCurrentWorkspace && (
             <button type="button" role="menuitem" onClick={handleAddContextCamerasToWorkspace}>
               Blank layout
@@ -1410,11 +1454,6 @@ export function Header({ version = VERSION, activeNav: activeNavProp }) {
               {layout.name}
             </button>
           ))}
-          {!canAddToCurrentWorkspace && !hasSavedLayouts && (
-            <button type="button" role="menuitem" disabled>
-              No layouts available
-            </button>
-          )}
         </div>
       </div>
     );
@@ -1453,10 +1492,7 @@ export function Header({ version = VERSION, activeNav: activeNavProp }) {
               <button
                 type="button"
                 role="menuitem"
-                onClick={() => {
-                  setCreatingLayout(true);
-                  setOpenMenu(null);
-                }}
+                onClick={startCreateLayout}
               >
                 Create Layout
               </button>
