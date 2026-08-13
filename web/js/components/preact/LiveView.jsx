@@ -24,6 +24,7 @@ const WORKSPACE_GRID_COLS = 48;
 const WORKSPACE_GRID_ROWS = 27;
 const DEFAULT_WORKSPACE_TILE_W = 24;
 const DEFAULT_WORKSPACE_TILE_H = 13;
+const PENDING_BLANK_WORKSPACE_CAMERAS_KEY = 'oneberry.pendingBlankWorkspaceCameras';
 const WORKSPACE_LAYOUT_PRESETS = [
   { count: 4, cols: 2, rows: 2, label: '2x2' },
   { count: 9, cols: 3, rows: 3, label: '3x3' },
@@ -1259,6 +1260,40 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
     setSelectedStream(cameraId);
   }, [activeLayoutId, streamByName, workspaceAutoGrid, workspaceGridCols, workspaceGridRows, workspaceLocked]);
 
+  const openBlankWorkspaceWithCameras = useCallback((cameraNames) => {
+    const requestedCameraNames = Array.isArray(cameraNames) ? cameraNames : [];
+    const availableCameraNames = requestedCameraNames
+      .map((cameraName) => String(cameraName || '').trim())
+      .filter(Boolean)
+      .filter((cameraName, index, list) => list.indexOf(cameraName) === index)
+      .filter((cameraName) => streamByName.has(cameraName));
+
+    if (availableCameraNames.length === 0) {
+      if (streamByName.size === 0) {
+        try {
+          sessionStorage.setItem(PENDING_BLANK_WORKSPACE_CAMERAS_KEY, JSON.stringify(requestedCameraNames));
+        } catch {}
+      } else {
+        showStatusMessage('Selected cameras are not available in Live View', 'error', 5000);
+      }
+      return;
+    }
+
+    setActiveLayoutId('');
+    setSingleCameraView(null);
+    setHydratedLayoutId('');
+    setLayoutEditMode(false);
+    setWorkspaceStarted(true);
+    setWorkspaceAutoGrid(true);
+    setWorkspaceTiles(buildResponsiveWorkspaceLayout(
+      availableCameraNames.map((cameraName) => createWorkspaceTile(cameraName))
+    ));
+    setCurrentPage(0);
+    setSelectedStream(availableCameraNames[0]);
+    setLayoutPresetMenuOpen(false);
+    setWorkspaceMenuOpen(false);
+  }, [streamByName]);
+
   const applyWorkspacePreset = useCallback((preset) => {
     if (workspaceLocked) {
       showStatusMessage('Click Edit Layout before changing this saved layout', 'error', 5000);
@@ -1515,6 +1550,35 @@ export function LiveView({ isWebRTCDisabled, mode = 'hls' }) {
     window.addEventListener('oneberry:add-live-camera', handleAddCamera);
     return () => window.removeEventListener('oneberry:add-live-camera', handleAddCamera);
   }, [addWorkspaceTile]);
+
+  useEffect(() => {
+    const handleOpenBlankLayout = (event) => {
+      const cameraNames = Array.isArray(event.detail?.cameraNames)
+        ? event.detail.cameraNames
+        : [event.detail?.cameraName];
+      openBlankWorkspaceWithCameras(cameraNames);
+    };
+
+    window.addEventListener('oneberry:open-blank-live-layout', handleOpenBlankLayout);
+    return () => window.removeEventListener('oneberry:open-blank-live-layout', handleOpenBlankLayout);
+  }, [openBlankWorkspaceWithCameras]);
+
+  useEffect(() => {
+    if (streamByName.size === 0) return;
+
+    let pendingCameraNames = [];
+    try {
+      const raw = sessionStorage.getItem(PENDING_BLANK_WORKSPACE_CAMERAS_KEY);
+      pendingCameraNames = raw ? JSON.parse(raw) : [];
+      sessionStorage.removeItem(PENDING_BLANK_WORKSPACE_CAMERAS_KEY);
+    } catch {
+      pendingCameraNames = [];
+    }
+
+    if (Array.isArray(pendingCameraNames) && pendingCameraNames.length > 0) {
+      openBlankWorkspaceWithCameras(pendingCameraNames);
+    }
+  }, [openBlankWorkspaceWithCameras, streamByName.size]);
 
   useEffect(() => {
     const handleShowLayout = (event) => {
