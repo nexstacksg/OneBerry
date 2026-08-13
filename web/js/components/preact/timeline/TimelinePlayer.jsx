@@ -973,64 +973,66 @@ export function TimelinePlayer({ videoElementRef = null, autoFullscreen = false 
   return (
     <>
       {/* Top playback toolbar: actions on the left, speed on the right. */}
-      <div className="timeline-player-toolbar flex items-center flex-nowrap gap-2 overflow-x-auto rounded-t-xl border border-b-0 border-slate-200 bg-white px-3 py-2 shadow-sm">
-        <label className="flex h-8 shrink-0 items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-2.5 text-xs text-slate-700 cursor-pointer" data-keyboard-nav-preserve>
-          <input
-            type="checkbox"
-            id="timeline-detection-overlay"
-            className="w-3.5 h-3.5 accent-red-600"
-            checked={detectionOverlayEnabled}
-            onChange={(e) => setDetectionOverlayEnabled(e.target.checked)}
-          />
-          <span>
-            {t('recordings.detections')}{detections.length > 0 ? ` (${detections.length})` : ''}
-          </span>
-        </label>
+      <div className="timeline-player-toolbar flex flex-wrap items-center justify-between gap-3 rounded-t-xl border border-b-0 border-slate-200 bg-white px-3 py-2.5 shadow-sm">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <label className="flex h-9 shrink-0 cursor-pointer items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-100" data-keyboard-nav-preserve>
+            <input
+              type="checkbox"
+              id="timeline-detection-overlay"
+              className="h-3.5 w-3.5 accent-red-600"
+              checked={detectionOverlayEnabled}
+              onChange={(e) => setDetectionOverlayEnabled(e.target.checked)}
+            />
+            <span>
+              {t('recordings.detections')}{detections.length > 0 ? ` (${detections.length})` : ''}
+            </span>
+          </label>
 
-        <button
-          type="button"
-          data-keyboard-nav-preserve
-          className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 text-xs font-medium text-slate-700 transition-colors hover:border-slate-300 hover:bg-slate-50"
-          onClick={handleToggleFullscreen}
-          title={isFullscreen ? t('timeline.exitFullscreen') : t('timeline.enterFullscreen')}
-        >
-          <ControlIcon type="fullscreen" />
-          {isFullscreen ? t('timeline.exitFullscreen') : t('timeline.fullscreen')}
-        </button>
+          <button
+            type="button"
+            data-keyboard-nav-preserve
+            className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 transition-colors hover:border-slate-300 hover:bg-slate-50"
+            onClick={handleToggleFullscreen}
+            title={isFullscreen ? t('timeline.exitFullscreen') : t('timeline.enterFullscreen')}
+          >
+            <ControlIcon type="fullscreen" />
+            {isFullscreen ? t('timeline.exitFullscreen') : t('timeline.fullscreen')}
+          </button>
 
-        {currentSegmentId && (
-          <div className="flex shrink-0 items-center gap-1">
-            <button
-              data-keyboard-nav-preserve
-              className="inline-flex h-8 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 text-xs font-medium text-slate-700 transition-colors hover:border-slate-300 hover:bg-slate-50"
-              onClick={handleSnapshot}
-              title={t('timeline.takeSnapshot')}
-            >
-              <ControlIcon type="camera" />
-              {t('timeline.snapshot')}
-            </button>
-            <a
-              data-keyboard-nav-preserve
-              className="inline-flex h-8 items-center gap-1.5 rounded-md bg-red-600 px-2.5 text-xs font-medium text-white transition-colors hover:bg-red-700"
-              href={`/api/recordings/download/${currentSegmentId}`}
-              download
-            >
-              <ControlIcon type="download" />
-              {t('recordings.download')}
-            </a>
-            <button
-              data-keyboard-nav-preserve
-              className="inline-flex h-8 items-center gap-1.5 rounded-md border border-red-200 bg-red-50 px-2.5 text-xs font-medium text-red-700 transition-colors hover:bg-red-100"
-              onClick={() => setShowDeleteConfirm(true)}
-              title={t('timeline.deleteRecording')}
-            >
-              <ControlIcon type="trash" />
-              {t('common.delete')}
-            </button>
-          </div>
-        )}
+          {currentSegmentId && (
+            <div className="flex shrink-0 flex-wrap items-center gap-2">
+              <button
+                data-keyboard-nav-preserve
+                className="inline-flex h-9 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 transition-colors hover:border-slate-300 hover:bg-slate-50"
+                onClick={handleSnapshot}
+                title={t('timeline.takeSnapshot')}
+              >
+                <ControlIcon type="camera" />
+                {t('timeline.snapshot')}
+              </button>
+              <a
+                data-keyboard-nav-preserve
+                className="inline-flex h-9 items-center gap-1.5 rounded-md bg-slate-900 px-3 text-xs font-medium text-white transition-colors hover:bg-slate-800"
+                href={`/api/recordings/download/${currentSegmentId}`}
+                download
+              >
+                <ControlIcon type="download" />
+                {t('recordings.download')}
+              </a>
+              <button
+                data-keyboard-nav-preserve
+                className="inline-flex h-9 items-center gap-1.5 rounded-md border border-red-200 bg-red-50 px-3 text-xs font-medium text-red-700 transition-colors hover:bg-red-100"
+                onClick={() => setShowDeleteConfirm(true)}
+                title={t('timeline.deleteRecording')}
+              >
+                <ControlIcon type="trash" />
+                {t('common.delete')}
+              </button>
+            </div>
+          )}
+        </div>
 
-        <div className="ml-auto flex min-h-8 shrink-0 items-center">
+        <div className="flex min-h-9 shrink-0 items-center">
           <SpeedControls />
         </div>
       </div>

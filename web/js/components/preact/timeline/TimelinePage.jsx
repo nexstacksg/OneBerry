@@ -1372,13 +1372,13 @@ export function TimelinePage() {
         </div>
       </div>
 
-      <div className="timeline-review-header mb-3 rounded-lg border border-slate-200 bg-white px-3 py-2.5 shadow-sm">
-        <div className="timeline-review-header-row flex flex-wrap items-center justify-end gap-2">
-          <div className="min-w-0 text-right">
+      <div className="timeline-review-header mb-3 rounded-lg border border-slate-200 bg-white px-4 py-3 shadow-sm">
+        <div className="timeline-review-header-row flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0 text-left">
             <h1 className="text-base font-semibold leading-tight text-slate-950 sm:text-lg">
               {idsMode ? t('timeline.selectedRecordingsTimeline') : t('timeline.timelinePlayback')}
             </h1>
-            <div className="mt-0.5 flex flex-wrap items-center justify-end gap-1.5 text-[11px] text-slate-500">
+            <div className="mt-1 flex flex-wrap items-center justify-start gap-1.5 text-[11px] text-slate-500">
               <span>{formatDisplayDate(selectedDate)}</span>
               {selectedStream && <span className="text-slate-300">/</span>}
               {selectedStream && <span className="font-medium text-slate-700">{selectedStream}</span>}
@@ -1459,8 +1459,8 @@ export function TimelinePage() {
         </div>
       ) : (
         /* Normal mode: compact single-row stream + date selectors */
-        <div className="timeline-filter-bar mt-4 grid gap-3 md:grid-cols-[1fr_auto] md:items-end">
-          <div className="min-w-[180px]">
+        <div className="timeline-filter-bar mt-4 grid gap-3 px-3 py-3 md:grid-cols-[minmax(16rem,28rem)_auto_1fr] md:items-end">
+          <div className="min-w-[180px] max-w-xl">
             <label htmlFor="stream-selector" className="mb-1 block text-xs font-medium uppercase tracking-[0.08em] text-slate-500">{t('nav.streams')}</label>
             <select
               id="stream-selector"
@@ -1480,7 +1480,7 @@ export function TimelinePage() {
             <CalendarPicker value={selectedDate} onChange={handleDateChange} />
           </div>
           {isLoadingTimeline && (
-            <span className="text-xs text-muted-foreground italic">{t('common.loading')}</span>
+            <span className="self-center text-xs text-muted-foreground italic md:justify-self-end">{t('common.loading')}</span>
           )}
         </div>
       )}

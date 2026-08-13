@@ -406,6 +406,7 @@
   "recordings.clearSelectedTitle": "Clear selected recordings",
   "recordings.deleteSelected": "Delete Selected",
   "recordings.deleteAllFiltered": "Delete All Filtered",
+  "recordings.download": "Download",
   "recordings.downloadSelected": "Download Selected",
   "recordings.downloadSelectedTitle": "Download selected recordings",
   "recordings.manageTagsButton": "Manage Tags",
