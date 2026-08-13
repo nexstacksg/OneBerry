@@ -15,6 +15,7 @@ import { showStatusMessage } from '../ToastContainer.jsx';
 import { LoadingIndicator } from '../LoadingIndicator.jsx';
 import { useQuery } from '../../../query-client.js';
 import { useI18n } from '../../../i18n.js';
+import { navigateToAppPage } from '../../../utils/navigation-utils.js';
 import {
   currentDateInputValue,
   formatDateForInput,
@@ -1348,7 +1349,10 @@ export function TimelinePage() {
             role="tab"
             aria-selected="false"
             className="rounded-t-lg px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
-            onClick={() => { try { localStorage.setItem('recordings_view_mode', 'table'); } catch(e) {} }}
+            onClick={(event) => {
+              try { localStorage.setItem('recordings_view_mode', 'table'); } catch(e) {}
+              navigateToAppPage(returnUrl || 'recordings.html', event);
+            }}
           >
             {t('recordings.table')}
           </a>
@@ -1357,7 +1361,10 @@ export function TimelinePage() {
             role="tab"
             aria-selected="false"
             className="rounded-t-lg px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
-            onClick={() => { try { localStorage.setItem('recordings_view_mode', 'grid'); } catch(e) {} }}
+            onClick={(event) => {
+              try { localStorage.setItem('recordings_view_mode', 'grid'); } catch(e) {}
+              navigateToAppPage('recordings.html', event);
+            }}
           >
             {t('recordings.grid')}
           </a>
@@ -1366,6 +1373,10 @@ export function TimelinePage() {
             role="tab"
             aria-selected="true"
             className="rounded-t-lg border border-border border-b-0 bg-card px-4 py-2 -mb-px text-sm font-medium text-card-foreground transition-colors"
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+            }}
           >
             {t('nav.timeline')}
           </a>
