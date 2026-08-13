@@ -9,6 +9,7 @@ import { formatUtils } from './formatUtils.js';
 import { queueThumbnailLoad, Priority } from '../../../request-queue.js';
 import { TagIcon, TagsOverlay, BulkTagsOverlay } from './TagsOverlay.jsx';
 import { useI18n } from '../../../i18n.js';
+import { navigateToAppPage } from '../../../utils/navigation-utils.js';
 
 /** Card elements that can be hidden via the settings cog — labels resolved via i18n in CardConfigDropdown */
 const HIDEABLE_ELEMENTS = [
@@ -368,6 +369,7 @@ function RecordingCard({
                 class="p-1 rounded-full focus:outline-none inline-flex"
                 style={{ color: 'hsl(var(--info))' }}
                 href={formatUtils.getTimelineUrl(recording.stream, recording.start_time_unix ?? recording.start_time)}
+                onClick={(event) => navigateToAppPage(formatUtils.getTimelineUrl(recording.stream, recording.start_time_unix ?? recording.start_time), event)}
                 title="View in Timeline"
               >
                 <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
@@ -587,4 +589,3 @@ export function RecordingsGrid({
     </div>
   );
 }
-

@@ -25,6 +25,7 @@ import { recordingsAPI } from './recordings/recordingsAPI.jsx';
 import { urlUtils } from './recordings/urlUtils.js';
 import { getDefaultDateRange } from '../../utils/date-utils.js';
 import { getBuildingName } from '../../utils/building-hierarchy.js';
+import { navigateToAppPage } from '../../utils/navigation-utils.js';
 
 import { validateSession } from '../../utils/auth-utils.js';
 
@@ -724,7 +725,7 @@ export function RecordingsView() {
     sessionStorage.setItem(RECORDINGS_RETURN_URL_KEY, window.location.href);
     sessionStorage.setItem(RECORDINGS_SELECTED_IDS_KEY, JSON.stringify(selectedIds));
     sessionStorage.setItem(RECORDINGS_RESTORE_SELECTION_KEY, 'true');
-    window.location.href = `timeline.html?ids=${selectedIds.join(',')}`;
+    navigateToAppPage(`timeline.html?ids=${selectedIds.join(',')}`);
   };
 
   // Open download modal
@@ -928,6 +929,7 @@ export function RecordingsView() {
           <a
             href="timeline.html"
             class="rounded-t-lg px-4 py-2 text-sm font-medium transition-colors text-muted-foreground hover:text-foreground"
+            onClick={(event) => navigateToAppPage('timeline.html', event)}
           >
             {t('nav.timeline')}
           </a>
